@@ -211,3 +211,76 @@ class TestComparisons:
         assert "no — within noise" in text  # one question's MRR moved
         assert "100.0 [100.0, 100.0]" in text
         assert report["aggregates"]["production"]["ci95"]["recall@10"] == pytest.approx((0.5, 0.5))
+
+
+class TestDistractorMode:
+    """Noise documents are candidates only: never relevant, never a source of facts."""
+
+    QUESTION = {"expected_answer_contains": ["$85", "term loan"],
+                "expected_citations": [{"source_pattern": "credit_agreement"}]}
+
+    @staticmethod
+    def _chunk(chunk_id: str, source: str, text: str, **extra) -> dict:
+        return {"chunk_id": chunk_id, "source_file": source, "text": text, **extra}
+
+    def test_a_fact_found_only_in_a_distractor_does_not_count(self):
+        from eval.corpus import DISTRACTOR_PREFIX
+
+        ranking = [
+            self._chunk("d1", f"{DISTRACTOR_PREFIX}0001.txt", "a fee of $85 on the term loan"),
+            self._chunk("c1", "credit_agreement_summary.txt", "the term loan matures in 2027"),
+        ]
+        run = {"ranking": ranking, "context": ranking, "latency_ms": 1.0,
+               "gate": {"decision": "admitted"}, "sub_questions": []}
+
+        detail = harness.score_run(run, self.QUESTION, {"c1": 1}, [10])
+
+        assert detail["metrics"]["fact_coverage@10"] == 0.5
+        assert detail["metrics"]["fact_coverage@context"] == 0.5
+        assert detail["facts_missing_from_context"] == ["$85"]
+        assert detail["distractors_in_top"] == 1
+        assert detail["metrics"]["mrr@10"] == 0.5  # the distractor still takes rank 1
+
+    def test_masking_keeps_the_context_budget_honest(self):
+        from eval.corpus import DISTRACTOR_PREFIX
+
+        noise = self._chunk("d1", f"{DISTRACTOR_PREFIX}0001.txt", "x" * 40, parent_text="y" * 900)
+        real = self._chunk("c1", "merger.txt", "kept", parent_text="kept in full")
+
+        masked = harness._mask_distractors([noise, real])
+
+        assert masked[0]["text"] == "#" * 40 and masked[0]["parent_text"] == "#" * 900
+        assert masked[1] == real
+        assert noise["text"] == "x" * 40, "the retrieval output itself must not be modified"
+
+    def test_same_contracts_every_time(self, monkeypatch, tmp_path):
+        """Pinned revision, sorted names: --distractors N means the same N files anywhere."""
+        import huggingface_hub
+
+        from eval import corpus
+
+        seen = {}
+
+        class Api:
+            def list_repo_files(self, repo, repo_type, revision):
+                seen["revision"] = revision
+                return [f"{corpus.DISTRACTOR_SUBDIR}/{n}" for n in ("b.txt", "C.TXT", "a.txt")] + [
+                    "CUAD_v1/master_clauses.csv", "CUAD_v1/full_contract_pdf/a.pdf"]
+
+        def download(repo, name, repo_type, revision, local_dir):
+            return str(tmp_path / name.rsplit("/", 1)[-1])
+
+        monkeypatch.setattr(huggingface_hub, "HfApi", Api)
+        monkeypatch.setattr(huggingface_hub, "hf_hub_download", download)
+
+        paths = corpus.fetch_distractors(2, cache_dir=tmp_path)
+
+        assert [p.name for p in paths] == ["C.TXT", "a.txt"]
+        assert seen["revision"] == corpus.DISTRACTOR_REVISION
+        with pytest.raises(RuntimeError):
+            corpus.fetch_distractors(4, cache_dir=tmp_path)
+
+    def test_the_baseline_gate_is_not_available_with_distractors(self):
+        with pytest.raises(SystemExit):
+            harness.parse_args(["--distractors", "10", "--baseline", "eval/baseline.json"])
+        assert harness.parse_args([]).distractors == 0

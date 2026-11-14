@@ -47,8 +47,14 @@ from eval.corpus import (
     DEAL_ID,
     GOLDEN_SET_PATH,
     PROJECT_ROOT,
+    DISTRACTOR_LICENCE,
+    DISTRACTOR_REPO,
+    DISTRACTOR_REVISION,
     all_chunks,
     build_index,
+    fetch_distractors,
+    index_distractors,
+    is_distractor,
     is_retrievable,
     load_golden_set,
     use_client,
@@ -289,6 +295,24 @@ def synthesis_context(chunks: list[dict]) -> str:
     return _format_context_for_synthesis(chunks)
 
 
+def _mask_distractors(chunks: list[dict]) -> list[dict]:
+    """
+    Blanks the text of distractor chunks without changing its length.
+
+    The synthesizer's formatter fills a character budget in rank order, so a
+    distractor in the context must keep costing what it costs; it just must not
+    be able to supply an expected fact.
+    """
+    masked = []
+    for chunk in chunks:
+        if is_distractor(chunk):
+            chunk = {**chunk, "text": "#" * len(chunk.get("text") or "")}
+            if chunk.get("parent_text"):
+                chunk["parent_text"] = "#" * len(chunk["parent_text"])
+        masked.append(chunk)
+    return masked
+
+
 def score_run(run: dict, question: dict, qrels: dict[str, int], ks: list[int]) -> dict:
     """
     Metrics for one ranking (and final context, when the run has one).
@@ -306,7 +330,9 @@ def score_run(run: dict, question: dict, qrels: dict[str, int], ks: list[int]) -
     patterns = [c["source_pattern"] for c in question.get("expected_citations") or []]
     ranking = run["ranking"]
     ids = [c["chunk_id"] for c in ranking]
-    texts = [c.get("text", "") for c in ranking]
+    # A distractor chunk can contain an expected figure by coincidence ("$85",
+    # "12 months"); it is not evidence for the question, so its text never counts.
+    texts = ["" if is_distractor(c) else c.get("text", "") for c in ranking]
     sources = [c.get("source_file") for c in ranking]
 
     scores: dict = {}
@@ -320,7 +346,8 @@ def score_run(run: dict, question: dict, qrels: dict[str, int], ks: list[int]) -
 
     detail: dict = {"metrics": scores, "latency_ms": round(run["latency_ms"], 1)}
     if "context" in run:
-        context = synthesis_context(run["context"])
+        context = synthesis_context(_mask_distractors(run["context"]))
+        detail["distractors_in_top"] = sum(1 for c in ranking[:RANK_DEPTH] if is_distractor(c))
         coverage, found = m.fact_coverage([context], facts)
         scores["fact_coverage@context"] = coverage
         detail["context_chunks"] = len(run["context"])
@@ -663,6 +690,22 @@ def render_markdown(report: dict) -> str:
             "ranking quality (recall/MRR/nDCG at a fixed depth) and the refusal gate can.",
             "",
         ]
+    distractors = report.get("distractors")
+    if distractors:
+        in_top = ", ".join(
+            f"{ABLATION_LABELS[a]} {v:.1f}" for a, v in distractors["mean_in_top"].items()
+            if v is not None)
+        lines += [
+            f"**Distractor mode.** {distractors['documents']} contracts from "
+            f"`{distractors['source']}` ({distractors['licence']}, revision "
+            f"{distractors['revision'][:8]}) were indexed into the same deal: "
+            f"{distractors['searchable_chunks']:,} searchable chunks, {distractors['tokens']:,} "
+            "tokens, next to the sample data room. Their text never counts towards fact "
+            "coverage and they are never relevant; the reference row above still describes "
+            "the sample data room alone, which no longer equals the searchable corpus. "
+            f"Mean distractor chunks in the final top {RANK_DEPTH}: {in_top}.",
+            "",
+        ]
     lines += render_uncertainty(report)
 
     for ablation in (a for a in NODE_ABLATIONS if a in aggs):
@@ -932,8 +975,16 @@ async def run(args: argparse.Namespace) -> dict:
     started = time.perf_counter()
     print("[eval] indexing corpus into in-memory Qdrant ...", file=sys.stderr)
     client, documents = await build_index()
+    distractor_documents: list[dict] = []
+    if args.distractors:
+        print(f"[eval] indexing {args.distractors} distractor contracts ...", file=sys.stderr)
+        distractor_documents = await index_distractors(client, fetch_distractors(args.distractors))
     index_s = time.perf_counter() - started
     chunks = await all_chunks(client)
+    distractor_chunks = [c for c in chunks if is_distractor(c)]
+    # Relevance labels, the fact-coverage ceiling and the reference row are about
+    # the data room itself; distractors are only ever candidates.
+    chunks = [c for c in chunks if not is_distractor(c)]
     retrievable = [c for c in chunks if is_retrievable(c)]
 
     report_questions = []
@@ -1042,6 +1093,23 @@ async def run(args: argparse.Namespace) -> dict:
         report["decomposition_delta"] = decomposition_delta(report_questions)
     report["stage_comparisons"] = stage_comparisons(report_questions, ablations, args.k)
     report["corpus"] = corpus_reference(retrievable)
+    if args.distractors:
+        searchable = [c for c in distractor_chunks if c.get("contains_pii") == 0]
+        report["distractors"] = {
+            "documents": len(distractor_documents),
+            "chunks": len(distractor_chunks),
+            "searchable_chunks": len(searchable),
+            "tokens": corpus_reference(searchable)["tokens"],
+            "source": DISTRACTOR_REPO,
+            "revision": DISTRACTOR_REVISION,
+            "licence": DISTRACTOR_LICENCE,
+            "mean_in_top": {
+                ablation: m.mean(
+                    q["runs"][ablation].get("distractors_in_top") for q in report_questions
+                    if ablation in q["runs"])
+                for ablation in NODE_ABLATIONS if ablation in ablations
+            },
+        }
     report["total_seconds"] = round(time.perf_counter() - started, 1)
     return report
 
@@ -1065,6 +1133,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--compare", metavar="RESULTS_JSON",
                         help="a previous retrieval_<date>.json: report paired per-question "
                              "deltas (with bootstrap intervals) between that run and this one")
+    parser.add_argument("--distractors", type=int, default=0, metavar="N",
+                        help="also index N public contracts (CUAD, CC BY 4.0; downloaded on "
+                             "first use, cached outside the repo) into the deal as noise")
     parser.add_argument("--update-baseline", action="store_true",
                         help=f"write this run's gated metrics to {DEFAULT_BASELINE.name}")
     parser.add_argument("--output-dir", default=str(RESULTS_DIR))
@@ -1075,6 +1146,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args.k = sorted(set(args.k))
     if args.update_baseline and args.questions:
         parser.error("--update-baseline needs the full golden set (drop --questions)")
+    if args.distractors and (args.update_baseline or args.baseline):
+        parser.error("the baseline is defined on the sample data room alone (drop --distractors)")
+    if args.distractors < 0:
+        parser.error("--distractors must be >= 0")
     return args
 
 
