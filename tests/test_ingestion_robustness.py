@@ -186,3 +186,47 @@ class TestTextEncodings:
     def test_decoder_rejects_binary(self):
         with pytest.raises(ValueError):
             decode_text_file(bytes(range(256)) * 4)
+
+
+class TestOfficeStructures:
+    @pytest.fixture(scope="class")
+    def draft(self, tmp_path_factory):
+        path = sx.write_stress_docx(tmp_path_factory.mktemp("docx"))
+        return extract_and_chunk(str(path), path.name, DEAL, "legal")
+
+    def test_clause_inside_a_content_control_is_indexed(self, draft):
+        text = " ".join(c["text"] for c in _prose(draft))
+        assert "The escrow amount shall be USD 17,400,000" in text
+
+    def test_bold_article_line_is_a_heading(self, draft):
+        termination = next(c for c in _prose(draft) if "Long Stop Date" in c["text"])
+        assert termination["section_heading"] == "ARTICLE 9 TERMINATION"
+
+    def test_tracked_change_inside_a_cell_is_accepted(self, draft):
+        grid = next(
+            c for c in draft.chunks
+            if c.get("table_representation") == "markdown" and "Earn-out payment" in c["text"]
+        )
+        assert "| Earn-out payment | 15.0 | 20.0 |" in grid["text"]
+        assert "12.5" not in grid["text"]
+
+    def test_nested_table_is_its_own_table(self, draft):
+        nested = [
+            c for c in draft.chunks
+            if c.get("table_id") and "Reverse termination fee" in c["text"]
+        ]
+        assert nested
+        # Each fee stays next to its own label rather than run together in one cell.
+        assert any(
+            "Company termination fee | USD 20,900,000" in c["text"] for c in nested
+        )
+        assert not any(
+            "Company termination fee USD 20,900,000 Reverse" in c["text"] for c in draft.chunks
+        )
+
+    def test_text_inside_a_group_shape_is_indexed(self, tmp_path):
+        path = sx.write_stress_pptx(tmp_path)
+        doc = extract_and_chunk(str(path), path.name, DEAL, "board")
+        text = " ".join(c["text"] for c in doc.chunks)
+        assert "Net debt at closing is estimated at USD 212.4 million." in text
+        assert "Customer churn fell to 6.1% in FY2023." in text

@@ -952,6 +952,77 @@ def _doc_filter(deal_id: str, doc_id: str, keep_ids: list[str] | None = None):
     )
 
 
+async def _version_candidates(
+    client,
+    collection_name: str,
+    deal_id: str,
+    doc_id: str,
+    filename: str,
+    explicit: str | None = None,
+) -> list[dict]:
+    """
+    Current documents of the deal that the upload looks like another version
+    of, judged by file name (DocumentVersionResolver.relation).
+
+    A proposal, never an action: version state changes only through an
+    explicit supersedes_doc_id, because retiring a document on a file-name
+    guess removes it from every answer without anyone having decided that.
+    Without this, uploading merger_agreement_v2.pdf next to v1 left both
+    current and nothing said so (audit I10). Best effort: a failure to look
+    returns [] — the document is already indexed.
+
+    Args:
+        client: AsyncQdrantClient.
+        collection_name: Child collection.
+        deal_id: Deal.
+        doc_id: The document just indexed (excluded).
+        filename: Its file name.
+        explicit: supersedes_doc_id the caller already gave (excluded).
+
+    Returns:
+        [{"doc_id", "source_file", "relation": "newer"|"older"|"same_document"}],
+        "newer" meaning the upload looks like the later version.
+    """
+    from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+    from src.data_processing.document_version_resolver import DocumentVersionResolver
+
+    try:
+        points, _ = await client.scroll(
+            collection_name=collection_name,
+            scroll_filter=Filter(must=[
+                FieldCondition(key="deal_id", match=MatchValue(value=deal_id)),
+                FieldCondition(key="chunk_index", match=MatchValue(value=0)),
+                FieldCondition(key="is_current_version", match=MatchValue(value=1)),
+            ]),
+            limit=10_000,
+            with_payload=["doc_id", "source_file"],
+            with_vectors=False,
+        )
+    except Exception as e:
+        logger.warning("Version candidate lookup failed", extra={"doc_id": doc_id, "error": str(e)})
+        return []
+
+    resolver = DocumentVersionResolver()
+    candidates = []
+    for point in points:
+        payload = point.payload or {}
+        other = payload.get("doc_id")
+        if not other or other in (doc_id, explicit):
+            continue
+        relation = resolver.relation(filename, str(payload.get("source_file") or ""))
+        if relation:
+            candidates.append({
+                "doc_id": other, "source_file": payload.get("source_file"), "relation": relation,
+            })
+    if candidates:
+        logger.info(
+            "Upload looks like another version of an indexed document",
+            extra={"doc_id": doc_id, "file_name": filename, "candidates": candidates},
+        )
+    return candidates
+
+
 async def _retired_by(client, collection_name: str, deal_id: str, doc_id: str) -> str:
     """The doc_id that superseded this document, or "" when it is current."""
     points, _ = await client.scroll(
@@ -1028,8 +1099,10 @@ async def index_document(
     Returns:
         Dict with doc_id, deal_id, filename, document_category, chunks_created,
         parent_chunks_created, table_count, risk_signals, has_redline, warnings,
-        content_sha256, previously_indexed and superseded_by ("" unless this
-        document had been retired by a newer version).
+        content_sha256, previously_indexed, superseded_by ("" unless this
+        document had been retired by a newer version) and version_candidates
+        (current documents of the deal this upload looks like another version
+        of — a proposal; see _version_candidates).
 
     Raises:
         IngestionError subclasses for client-attributable failures; other
@@ -1189,6 +1262,10 @@ async def index_document(
         "content_sha256": doc.content_sha256,
         "previously_indexed": bool(existing.count),
         "superseded_by": retired_by,
+        "version_candidates": await _version_candidates(
+            client, collection_name, deal_id, doc.doc_id, filename,
+            explicit=supersedes_doc_id,
+        ),
     }
     logger.info(
         "Document indexed",

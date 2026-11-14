@@ -135,3 +135,54 @@ class TestFailedReindexKeepsTheGoodCopy:
         with pytest.raises(ConnectionError):
             await _index(client, fx.write_txt(tmp_path))
         assert await _payloads(client) == []
+
+
+class TestVersionCandidates:
+    """Audit I10: version detection runs at ingest, as a proposal only."""
+
+    @pytest.mark.parametrize(
+        ("new", "existing", "relation"),
+        [
+            ("merger_agreement_v2.pdf", "merger_agreement_v1.pdf", "newer"),
+            ("merger_agreement_v1.pdf", "merger_agreement_v2.pdf", "older"),
+            ("merger_agreement_final.pdf", "merger_agreement_draft.pdf", "newer"),
+            ("Merger Agreement - v3 (clean).docx", "merger_agreement_v2_redline.docx", "newer"),
+            ("spa_rev2.docx", "spa_rev2.pdf", "same_document"),
+            ("merger_agreement_v2.pdf", "credit_agreement_v1.pdf", None),
+            ("quality_of_earnings_report_fy2023.txt", "aurora_financials_fy2023.txt", None),
+        ],
+    )
+    def test_relation_from_file_names(self, new, existing, relation):
+        from src.data_processing.document_version_resolver import DocumentVersionResolver
+
+        assert DocumentVersionResolver().relation(new, existing) == relation
+
+    @pytest.mark.asyncio
+    async def test_newer_version_is_proposed_and_nothing_is_retired(self, tmp_path):
+        client = await _client()
+        v1 = await _index(client, fx.write_txt(tmp_path, "merger_agreement_v1.txt"))
+        v2 = await _index(client, fx.write_txt(tmp_path, "merger_agreement_v2.txt", AMENDED))
+
+        assert v2["version_candidates"] == [
+            {"doc_id": v1["doc_id"], "source_file": "merger_agreement_v1.txt", "relation": "newer"}
+        ]
+        assert v1["version_candidates"] == []
+        # A proposal only: both versions are still current, and no warning
+        # turns the upload into a "partial" success.
+        assert {p["is_current_version"] for p in await _payloads(client)} == {1}
+        assert v2["warnings"] == []
+
+    @pytest.mark.asyncio
+    async def test_explicit_supersession_is_not_proposed_again(self, tmp_path):
+        client = await _client()
+        v1 = await _index(client, fx.write_txt(tmp_path, "merger_agreement_v1.txt"))
+        v2 = await _index(client, fx.write_txt(tmp_path, "merger_agreement_v2.txt", AMENDED),
+                          supersedes_doc_id=v1["doc_id"])
+        assert v2["version_candidates"] == []
+
+    @pytest.mark.asyncio
+    async def test_other_deals_are_not_candidates(self, tmp_path):
+        client = await _client()
+        await _index(client, fx.write_txt(tmp_path, "merger_agreement_v1.txt"), deal_id="other-deal")
+        v2 = await _index(client, fx.write_txt(tmp_path, "merger_agreement_v2.txt", AMENDED))
+        assert v2["version_candidates"] == []

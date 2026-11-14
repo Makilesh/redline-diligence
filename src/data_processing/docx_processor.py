@@ -15,6 +15,7 @@ tracked insertion (runs wrapped in <w:ins>) silently vanished from the
 "accepted" text — exactly the negotiated language a reviewer needs.
 """
 
+import re
 from pathlib import Path
 from dataclasses import dataclass
 from lxml import etree
@@ -87,10 +88,49 @@ def _accepted_text(element) -> str:
     return "".join(parts)
 
 
+_ARTICLE_HEADING = re.compile(
+    r"^(?:ARTICLE|Article|SECTION|Section|SCHEDULE|Schedule|EXHIBIT|Exhibit|PART|Part)\s+"
+    r"[0-9IVXLC]+[A-Z]?\b"
+)
+
+
 def _is_heading(para: Paragraph) -> bool:
-    """True for Heading N / Title styled paragraphs."""
+    """
+    True for Heading N / Title styled paragraphs, and for the headings
+    contracts actually use: a short paragraph set entirely in bold that reads
+    as a heading ("ARTICLE 9 TERMINATION"). Most negotiated drafts never touch
+    Word's heading styles, so without this every clause of such a draft was
+    cited under the last styled heading above it.
+    """
     name = para.style.name if para.style is not None and para.style.name else ""
-    return name.startswith("Heading") or name == "Title"
+    if name.startswith("Heading") or name == "Title":
+        return True
+    text = _accepted_text(para._element).strip()
+    if not text or len(text) > 100 or text.endswith((".", ";", ",")):
+        return False
+    runs = [r for r in para.runs if r.text.strip()]
+    if not runs or not all(r.bold for r in runs):
+        return False
+    letters = [ch for ch in text if ch.isalpha()]
+    return bool(_ARTICLE_HEADING.match(text)) or (
+        len(letters) >= 4 and not any(ch.islower() for ch in letters)
+    )
+
+
+def _block_children(container):
+    """
+    Paragraph and table elements of a container in document order, looking
+    through content controls (<w:sdt>): contract templates wrap whole clauses
+    in them, and python-docx's paragraph list does not see inside, so their
+    text was dropped from the index.
+    """
+    for child in container.iterchildren():
+        if child.tag in (f"{_W}p", f"{_W}tbl"):
+            yield child
+        elif child.tag == f"{_W}sdt":
+            content = child.find(f"{_W}sdtContent")
+            if content is not None:
+                yield from _block_children(content)
 
 
 def _iter_block_items(doc: docx.Document):
@@ -106,30 +146,46 @@ def _iter_block_items(doc: docx.Document):
     Yields:
         Paragraph or Table objects.
     """
-    body = doc.element.body
-    for child in body.iterchildren():
+    for child in _block_children(doc.element.body):
         if child.tag == f"{_W}p":
             yield Paragraph(child, doc)
-        elif child.tag == f"{_W}tbl":
+        else:
             yield Table(child, doc)
 
 
-def _table_rows(table: Table) -> list[list[str]]:
+def _cell_text(tc) -> str:
+    """Accepted text of a cell's own paragraphs (not of tables nested in it)."""
+    paragraphs = [el for el in _block_children(tc) if el.tag == f"{_W}p"]
+    return " ".join(" ".join(_accepted_text(p) for p in paragraphs).split())
+
+
+def _table_rows(table: Table, nested: list | None = None) -> list[list[str]]:
     """
     Accepted text of every cell, row by row.
 
+    A table nested in a cell is not flattened into that cell's text — "Company
+    termination fee USD 20,900,000 Reverse termination fee USD 41,800,000" as
+    one string loses which fee is which. It is appended to `nested` to be
+    indexed as a table of its own.
+
     Args:
         table: python-docx Table.
+        nested: Receives (Table, label of the cell it sits in) per nested table.
 
     Returns:
         Rows of cell strings (merged cells repeat, as python-docx reports them).
     """
     rows = []
+    seen_cells: set[int] = set()
     for row in table.rows:
-        cells = [
-            " ".join(" ".join(_accepted_text(p) for p in cell._tc.iter(f"{_W}p")).split())
-            for cell in row.cells
-        ]
+        cells = []
+        for cell in row.cells:
+            cells.append(_cell_text(cell._tc))
+            if nested is not None and id(cell._tc) not in seen_cells:
+                seen_cells.add(id(cell._tc))
+                for child in _block_children(cell._tc):
+                    if child.tag == f"{_W}tbl":
+                        nested.append((Table(child, cell), cells[0] if len(cells) > 1 else ""))
         if any(cells):
             rows.append(cells)
     return rows
@@ -152,16 +208,22 @@ def _extract_clean_text(doc: docx.Document) -> list[Chunk]:
 
     for block in _iter_block_items(doc):
         if isinstance(block, Table):
-            rows = _table_rows(block)
-            if not rows:
-                continue
-            chunks.append(Chunk(
-                text="\n".join(" | ".join(r) for r in rows),
-                section_heading=current_heading,
-                is_redline=0,
-                content_type="table_text",
-                metadata={"is_table": 1, "table_rows": rows},
-            ))
+            pending = [(block, "")]
+            while pending:
+                table, label = pending.pop(0)
+                nested: list = []
+                rows = _table_rows(table, nested)
+                pending.extend(nested)
+                if not any(any(c for c in r) for r in rows):
+                    continue
+                chunks.append(Chunk(
+                    text="\n".join(" | ".join(r) for r in rows),
+                    section_heading=f"{current_heading} — {label}" if label and current_heading
+                    else (label or current_heading),
+                    is_redline=0,
+                    content_type="table_text",
+                    metadata={"is_table": 1, "table_rows": rows},
+                ))
             continue
 
         text = _accepted_text(block._element).strip()
