@@ -17,6 +17,7 @@ claim_checker.py), and the per-claim results are kept in `claim_checks`.
 
 import time
 
+from src.agents.answer_synthesizer import SYNTHESIS_FAILED_ANSWER
 from src.llm.litellm_wrapper import call_verification_agent_with_model
 from src.llm.prompt_templates.hallucination_validator import (
     HALLUCINATION_VALIDATOR_SYSTEM_PROMPT,
@@ -90,6 +91,28 @@ async def _llm_judge(query: str, claims: list[dict], documents: list[dict]):
     return verdicts, model
 
 
+def _synthesis_failed(state: AgentState, answer: str) -> bool:
+    """
+    True when the "answer" in state is the synthesizer's failure apology.
+
+    The synthesizer marks the failure on its trace entry; the text itself is
+    also compared, so a state rebuilt without traces is still recognised.
+
+    Args:
+        state: Current AgentState.
+        answer: state["generated_answer"].
+
+    Returns:
+        Whether the latest synthesis produced no answer.
+    """
+    if answer.strip() == SYNTHESIS_FAILED_ANSWER:
+        return True
+    for entry in reversed(state.get("agent_trace") or []):
+        if isinstance(entry, dict) and entry.get("agent") == "answer_synthesizer":
+            return bool(entry.get("synthesis_failed"))
+    return False
+
+
 async def hallucination_validator_node(state: AgentState) -> dict:
     """
     LangGraph node — verifies the answer claim by claim.
@@ -112,6 +135,33 @@ async def hallucination_validator_node(state: AgentState) -> dict:
 
     answer = state.get("generated_answer", "")
     chunks = state.get("expanded_context") or state.get("reranked_results") or []
+
+    # A synthesis that failed outright returns an apology, not an answer. It used
+    # to be verified like one: its two sentences went to the LLM judge — a model
+    # call made precisely when the provider is failing — and came back
+    # "warning" at confidence 0.5, or "passed" at 1.0 if the judge was generous.
+    # Nothing was answered, so nothing is verified and nothing is vouched for.
+    if _synthesis_failed(state, answer):
+        logger.info("Agent 8: Skipping validation — synthesis produced no answer")
+        return {
+            "confidence_score": 0.0,
+            "hallucination_flags": [
+                "No answer was generated: the language model did not return a usable response."
+            ],
+            "claim_checks": [],
+            "validation_status": "warning",
+            "validation_attempt": attempt,
+            "agent_trace": [
+                {
+                    "agent": "hallucination_validator",
+                    "skipped": True,
+                    "reason": "synthesis_failed",
+                    "validation_status": "warning",
+                    "confidence_score": 0.0,
+                    "llm_calls": 0,
+                }
+            ],
+        }
 
     # Skip validation for forced refusals
     if state.get("force_refusal") or not answer:

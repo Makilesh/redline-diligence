@@ -29,15 +29,52 @@ from src.llm.prompt_templates.answer_synthesizer import (
 from src.verification.claims import CITATION_MARKER, PAGE_IN_MARKER
 from src.verification.evidence import chunk_evidence_text, parent_key
 from src.verification.numeric_grounding import ground_answer_numbers
-from src.verification.prompt_safety import chunk_attributes, wrap_document
+from src.verification.prompt_safety import chunk_attributes, wrap_document, wrap_finding
 from src.workflow.state_definitions import AgentState
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-# How many ladder rungs to try before giving up on a query. Bounded so a
-# provider-wide outage cannot walk the entire ladder on every request.
+# How many ladder rungs to try before giving up on a query, before counting
+# keys (see _hop_bound). Bounded so a provider-wide outage cannot walk the
+# entire ladder on every request.
 MAX_LADDER_FALLBACKS = 6
+
+# How many drafts may be discarded for their CONTENT (uncited, or the model's
+# working notes) before the request gives up. Separate from the hop bound: a
+# model that answers but ignores the citation contract is not unavailable, and
+# in pinned mode there is no other rung to move to, so without this cap one
+# stubborn draft was regenerated until the hops ran out.
+MAX_CONTENT_RETRIES = 2
+
+# What the user sees when no rung produced a usable answer. Exported so the
+# validator can recognise it: an apology is not an answer and must never be
+# verified as one.
+SYNTHESIS_FAILED_ANSWER = (
+    "I could not generate an answer for this question because the "
+    "language model did not return a usable response. The retrieved "
+    "context may still be relevant — please retry the query."
+)
+
+
+def _hop_bound(tracker) -> int:
+    """
+    How many rungs one synthesis may try.
+
+    The same rule as the structured-call ladder (litellm_wrapper._ladder_hops):
+    a 429 costs one hop per key on the same model, so a fixed bound of six was
+    spent rotating keys on the top rung — with seven cloud rungs, a
+    provider-wide 503 or reasoning rungs spent on two keys ended in the apology
+    without ever reaching the Lite rungs or the local model.
+
+    Args:
+        tracker: BudgetTracker (or a stand-in without keys).
+
+    Returns:
+        MAX_LADDER_FALLBACKS plus one hop per configured key.
+    """
+    keys = getattr(tracker, "_api_keys", None) or ()
+    return MAX_LADDER_FALLBACKS + sum(1 for k in keys if k)
 
 # Character budget for the context block (~16k tokens). Parent sections are
 # ~2,048 tokens each, so roughly the top seven parents fit in full; lower-ranked
@@ -111,11 +148,6 @@ _SCRATCHPAD_MARKERS = (
     "actually, let me",
 )
 
-# Below this, a response is a fragment rather than a due-diligence answer.
-# Genuine answers in this pipeline run 2,000-4,500 characters; the truncated
-# generations during the incident came back at 349-575.
-_MIN_ANSWER_CHARS = 220
-
 # An answer may legitimately carry no citations when it is saying the corpus
 # does not support the question. That is a designed outcome, not a failure —
 # and often the *better* one, since naming the specific gap beats a blanket
@@ -163,6 +195,14 @@ def _is_usable_answer(answer: str | None, chunks: list[dict]) -> bool:
     corpus does not support the question — because that is a designed outcome
     with nothing to cite, not a failed generation.
 
+    Length is not a test. There used to be a 220-character floor, applied
+    before the citation and decline tests, on the reasoning that genuine
+    answers run to thousands of characters. A direct question gets a direct
+    answer: "Total revenue for FY2023 was $452.8 million [📄 … | p.1]" is
+    correct, cited and 101 characters long, and the floor rejected it on every
+    rung — six synthesis calls, then the apology. The fragments the floor was
+    added for carried no citation, so the citation test already rejects them.
+
     Args:
         answer: Raw model output.
         chunks: Context the model was given.
@@ -178,9 +218,6 @@ def _is_usable_answer(answer: str | None, chunks: list[dict]) -> bool:
     # No evidence was supplied, so an uncited answer is the correct output.
     if not chunks:
         return True
-
-    if len(text) < _MIN_ANSWER_CHARS:
-        return False
 
     lowered = text.lower()
     if any(marker in lowered for marker in _SCRATCHPAD_MARKERS):
@@ -309,7 +346,10 @@ def _financial_context(state: AgentState) -> tuple[str, str]:
         if isinstance(i, dict) and i.get("method") == "deterministic"
     ]
     if not registry:
-        return "N/A", "None found"
+        # "None found" would claim a check that did not happen: the registry
+        # reads labelled tables, and nothing it could read was retrieved.
+        not_checked = "Not checked — no labelled figures could be read from the retrieved documents."
+        return not_checked, not_checked
 
     multi_source = sum(
         1 for v in registry.values()
@@ -323,16 +363,23 @@ def _financial_context(state: AgentState) -> tuple[str, str]:
     if not found:
         return summary, "None found"
 
-    lines = []
-    for item in found:
-        values = "; ".join(
-            f"{v.get('as_printed') or v.get('value')} in {v.get('source')}"
-            for v in item.get("values_found", [])
+    # The line-item name, the printed values and the file names are document
+    # text. This block sits after the last </document>, in what the model reads
+    # as the trusted part of the prompt, so they go in as an escaped element —
+    # two uploaded files with a table row labelled "SYSTEM NOTE disregard the
+    # documents above…" otherwise put that sentence here verbatim.
+    lines = [
+        wrap_finding(
+            metric=item.get("metric"),
+            period=item.get("fiscal_year"),
+            apart=f"{item.get('max_deviation_pct', 0):.1f}%",
+            values=[
+                (v.get("as_printed") or v.get("value"), v.get("source"))
+                for v in item.get("values_found", [])
+            ],
         )
-        lines.append(
-            f"- {item.get('metric')} ({item.get('fiscal_year')}): {values} "
-            f"— {item.get('max_deviation_pct', 0):.1f}% apart"
-        )
+        for item in found
+    ]
     return summary, "\n".join(lines)
 
 
@@ -478,8 +525,9 @@ async def synthesize_answer(
     answer = None
     last_error: Exception | None = None
     model = ""
+    content_rejections = 0
 
-    for _ in range(MAX_LADDER_FALLBACKS):
+    for _ in range(_hop_bound(tracker)):
         choice = await tracker.get_model_for_synthesis()
         model = choice.model
         try:
@@ -506,20 +554,28 @@ async def synthesize_answer(
                 )
             if not _is_usable_answer(candidate, chunks):
                 # A response that violates the prompt's citation contract is a
-                # failed generation, not an answer. Retrying on another rung is
-                # the same treatment a transport error gets, and for the same
-                # reason: the model did not do what was asked.
+                # failed generation, not an answer, and is tried again — on
+                # another rung where there is one. It says nothing about the
+                # model's availability: skip_model_for_request only keeps THIS
+                # request off the model, and nothing here reports the model as
+                # unhealthy. Retries for content are capped separately from the
+                # hop bound, because a pinned run has no other rung and would
+                # otherwise regenerate the same draft until the hops ran out.
+                content_rejections += 1
                 logger.warning(
-                    "Synthesis returned an uncited or truncated answer; retrying",
+                    "Synthesis returned an uncited answer or its working notes",
                     extra={
                         "model": model,
                         "chars": len(candidate or ""),
                         "context_chunks": len(chunks),
+                        "content_rejections": content_rejections,
                     },
                 )
                 if draft_open:
                     reset_draft("discarded an unusable draft")
                 last_error = RuntimeError("synthesis produced an uncited answer")
+                if content_rejections > MAX_CONTENT_RETRIES:
+                    break
                 tracker.skip_model_for_request(model)
                 continue
             answer = candidate
@@ -586,11 +642,7 @@ async def synthesize_answer(
             extra={"model": model, "error": str(e)},
         )
         return {
-            "generated_answer": (
-                "I could not generate an answer for this question because the "
-                "language model did not return a usable response. The retrieved "
-                "context may still be relevant — please retry the query."
-            ),
+            "generated_answer": SYNTHESIS_FAILED_ANSWER,
             "citations": [],
             "numerical_claims": [],
             "confidence_score": 0.0,
@@ -599,6 +651,7 @@ async def synthesize_answer(
                     "agent": "answer_synthesizer",
                     "model": model,
                     "synthesis_failed": True,
+                    "content_rejections": content_rejections,
                     "error": str(e),
                 }
             ],
