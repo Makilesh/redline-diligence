@@ -196,6 +196,13 @@ class TestOwnErrorTypes:
         assert failure.kind is FailureKind.MODEL_FAILED and failure.another_model_helps
         assert is_service_unavailable(exc)
 
+    def test_a_full_token_window_is_a_per_minute_refusal(self):
+        from src.llm.failures import TokenWindowFull
+
+        failure = classify_failure(TokenWindowFull("gemini/m", 9000, retry_after=17.0))
+        assert failure.is_per_minute_quota and failure.refundable
+        assert failure.retry_after == 17.0
+
     def test_refund_policy_is_narrow(self):
         """Only explicit refusals come back; an admitted request may have counted."""
         refunded = {k for k in FailureKind

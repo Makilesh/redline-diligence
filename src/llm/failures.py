@@ -125,6 +125,24 @@ class StructuredOutputError(ValueError):
         self.raw = raw
 
 
+class TokenWindowFull(Exception):
+    """
+    A request was not sent because its input would overrun the slot's
+    tokens-per-minute allowance.
+
+    Raised locally, before any provider call, and classified as a per-minute
+    quota refusal: the provider would have answered 429, and the repair is the
+    same — rest this slot, send the request to another one.
+    """
+
+    def __init__(self, model: str, tokens: int, retry_after: float):
+        super().__init__(
+            f"input of ~{tokens} tokens does not fit this minute's token window "
+            f"for {model}; next opening in {retry_after:.0f}s"
+        )
+        self.retry_after = retry_after
+
+
 class ProseAgentFailed(RuntimeError):
     """
     A prose call exhausted its same-model retries without a usable completion.
@@ -258,6 +276,8 @@ def classify_failure(exc: BaseException) -> Failure:
         return Failure(FailureKind.BAD_OUTPUT)
     if isinstance(exc, ProseAgentFailed):
         return Failure(FailureKind.MODEL_FAILED)
+    if isinstance(exc, TokenWindowFull):
+        return Failure(FailureKind.QUOTA, quota_window="minute", retry_after=exc.retry_after)
     if not isinstance(exc, Exception):
         return Failure(FailureKind.UNKNOWN)
 

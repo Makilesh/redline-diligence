@@ -275,6 +275,86 @@ class TestCountMatchesWhatWasServed:
         assert tracker._get_rate_limiter(tracker._slot(0, TOP)).current_usage == 2
 
 
+class TestTokensPerMinuteAtTheCallBoundary:
+    """A request that would overrun TPM is not sent; it rotates like a 429."""
+
+    @staticmethod
+    def _fill(tracker, key_index, model):
+        from src.llm.model_registry import usable_tpm
+
+        tracker.reserve_input_tokens(key_index, model, usable_tpm(model))
+
+    @pytest.mark.asyncio
+    async def test_structured_call_rotates_to_the_next_key_without_sending(
+        self, tracker, monkeypatch
+    ):
+        self._fill(tracker, 0, TOP)
+        provider = _install(monkeypatch, lambda m, k, n, kw: None)
+
+        assert await _agent_call(tracker) == {"ok": True}
+        assert provider.calls == [(TOP, 1)], "nothing was sent on the full slot"
+        assert _units(tracker) == {(TOP, 1): 1}, "the unit reserved for it came back"
+        assert tracker._slot_in_cooldown(tracker._slot(0, TOP))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("streaming", [False, True])
+    async def test_prose_call_hands_the_refusal_to_the_ladder(
+        self, tracker, monkeypatch, streaming
+    ):
+        from src.llm.failures import TokenWindowFull
+
+        self._fill(tracker, 0, SYN_TOP)
+        provider = _install(monkeypatch, lambda m, k, n, kw: None, good="answer")
+        choice = await tracker.get_model_for_synthesis()
+
+        with pytest.raises(TokenWindowFull) as full:
+            if streaming:
+                await wrapper.stream_prose_agent(
+                    "s", "u", model=choice.model, on_token=lambda _t: None,
+                    api_key=choice.api_key)
+            else:
+                await wrapper.call_prose_agent(
+                    "s", "u", model=choice.model, api_key=choice.api_key)
+
+        assert provider.calls == []
+        assert wrapper.is_quota_error(full.value), "the synthesizer's ladder rotates on this"
+        # What the synthesizer does next: mark the slot, select again.
+        await tracker.mark_slot_exhausted(choice.key_index, choice.model)
+        assert _units(tracker) == {}, "rested for the minute, not spent for the day"
+        nxt = await tracker.get_model_for_synthesis()
+        assert (nxt.model, nxt.key_index) == (SYN_TOP, 1)
+
+    @pytest.mark.asyncio
+    async def test_window_holds_the_providers_count_not_the_estimate(self, tracker, monkeypatch):
+        reply = _Resp('{"ok": true}')
+        reply.usage = type("U", (), {"prompt_tokens": 1234})()
+        _install(monkeypatch, lambda m, k, n, kw: reply)
+
+        choice = await tracker.get_model_for_agent()
+        await wrapper.call_structured_agent(
+            "s" * 3000, "u" * 3000, model=choice.model, api_key=choice.api_key)
+
+        window = tracker._token_windows[tracker._slot(0, TOP)]
+        assert [entry[1] for entry in window] == [1234]
+
+    @pytest.mark.asyncio
+    async def test_estimate_stands_when_the_provider_reports_no_usage(self, tracker, monkeypatch):
+        _install(monkeypatch, lambda m, k, n, kw: None)
+        choice = await tracker.get_model_for_agent()
+        await wrapper.call_structured_agent(
+            "s" * 3000, "u" * 3000, model=choice.model, api_key=choice.api_key)
+
+        (entry,) = tracker._token_windows[tracker._slot(0, TOP)]
+        assert entry[1] == 2001, "6000 characters at 3 per token, rounded up"
+
+    @pytest.mark.asyncio
+    async def test_a_refused_request_does_not_occupy_the_window(self, tracker, monkeypatch):
+        _install(monkeypatch, _first_slot_fails("503"))
+        await _agent_call(tracker)
+        assert not tracker._token_windows[tracker._slot(0, TOP)]
+        assert len(tracker._token_windows[tracker._slot(0, SECOND)]) == 1
+
+
 # ─── Unusable structured output ───────────────────────────────────────────────
 
 

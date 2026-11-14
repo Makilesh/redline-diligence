@@ -26,6 +26,7 @@ from src.llm.failures import (
     FailureKind,
     ProseAgentFailed,
     StructuredOutputError,
+    TokenWindowFull,
     classify_failure,
 )
 from src.llm.model_registry import AGENT_LADDER, LOCAL_MODEL, is_local
@@ -412,13 +413,76 @@ def _report_unhealthy(model: str) -> None:
         report(model)
 
 
-async def _acompletion(kwargs: dict, model: str, api_key: str | None):
-    """litellm.acompletion with the quota settled if the request fails."""
+# Characters per input token, for the estimate booked before a request is sent.
+# Deliberately low (English prose runs nearer 4): figures, tables and markup
+# tokenise denser than prose, and an estimate that is too high only matters
+# near the ceiling, where caution is the point. It is replaced by the provider's
+# own prompt-token count as soon as the response arrives.
+CHARS_PER_INPUT_TOKEN = 3.0
+
+
+def _estimate_input_tokens(messages: list[dict]) -> int:
+    """Upper-biased estimate of a request's input tokens, from its length."""
+    chars = sum(len(m.get("content") or "") for m in messages)
+    return int(chars / CHARS_PER_INPUT_TOKEN) + 1
+
+
+def _prompt_tokens(usage) -> int | None:
+    """The provider's prompt-token count from a usage object or dict, if any."""
+    value = getattr(usage, "prompt_tokens", None)
+    if value is None and isinstance(usage, dict):
+        value = usage.get("prompt_tokens")
+    return value if isinstance(value, int) else None
+
+
+async def _reserve_input_tokens(kwargs: dict, model: str, api_key: str | None):
+    """
+    Books the request's input against the slot's tokens-per-minute window.
+
+    Returns:
+        The reservation, or None when nothing meters this call.
+
+    Raises:
+        TokenWindowFull: The request does not fit this minute. It has not been
+            sent; the unit taken for it at selection is handed back and the
+            refusal noted, exactly as for a per-minute 429 from the provider.
+    """
+    owned = _owned_slot(api_key)
+    if owned is None:
+        return None
+    tracker, key_index = owned
     try:
-        return await litellm.acompletion(**kwargs)
-    except Exception as e:
-        await _settle_failure(model, api_key, classify_failure(e))
+        return tracker.reserve_input_tokens(
+            key_index, model, _estimate_input_tokens(kwargs["messages"])
+        )
+    except TokenWindowFull as full:
+        logger.warning(
+            "Request held back: it would overrun the slot's tokens-per-minute window",
+            extra={"model": model, "key_index": key_index,
+                   "retry_after": round(full.retry_after, 1)},
+        )
+        await _settle_failure(model, api_key, classify_failure(full))
         raise
+
+
+async def _acompletion(kwargs: dict, model: str, api_key: str | None):
+    """
+    litellm.acompletion with the accounts settled either way: input tokens
+    booked before the request and corrected after it, and the quota unit
+    refunded if the provider refused.
+    """
+    reservation = await _reserve_input_tokens(kwargs, model, api_key)
+    try:
+        response = await litellm.acompletion(**kwargs)
+    except Exception as e:
+        failure = classify_failure(e)
+        if reservation is not None and failure.refundable:
+            reservation.release()
+        await _settle_failure(model, api_key, failure)
+        raise
+    if reservation is not None:
+        reservation.adjust(_prompt_tokens(getattr(response, "usage", None)))
+    return response
 
 
 # ─── Structured (JSON) calls ─────────────────────────────────────────────────
@@ -1222,6 +1286,7 @@ async def stream_prose_agent(
     emitted = 0
     started = time.monotonic()
     usage = None
+    reservation = await _reserve_input_tokens(kwargs, model, api_key)
     try:
         stream = await litellm.acompletion(**kwargs)
         async for chunk in stream:
@@ -1243,6 +1308,8 @@ async def stream_prose_agent(
                 f"stream from {model} failed after {emitted} chars: {e}", emitted, e
             ) from e
         failure = classify_failure(e)
+        if reservation is not None and failure.refundable:
+            reservation.release()
         await _settle_failure(model, api_key, failure)
         if failure.kind in _PROSE_NO_RETRY_KINDS:
             if failure.kind in _HEALTH_KINDS:
@@ -1272,6 +1339,8 @@ async def stream_prose_agent(
         return text
 
     _log_usage(_UsageHolder(usage), model, agent, started)
+    if reservation is not None:
+        reservation.adjust(_prompt_tokens(usage))
 
     text = "".join(parts)
     if not text.strip():

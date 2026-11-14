@@ -180,10 +180,35 @@ class TestPerMinuteRefusal:
 
         t = _tracker()
         t.note_quota_refusal(0, TOP, per_minute=True)
-        per_minute, retry_after, noted_at = t._quota_hints[t._slot(0, TOP)]
-        t._quota_hints[t._slot(0, TOP)] = (
-            per_minute, retry_after, noted_at - bt.QUOTA_HINT_TTL_SECONDS - 1
+        slot, per_minute, retry_after, noted_at = bt._quota_hint.get()
+        bt._quota_hint.set(
+            (slot, per_minute, retry_after, noted_at - bt.QUOTA_HINT_TTL_SECONDS - 1)
         )
+        await t.mark_slot_exhausted(0, TOP)
+        assert _used(t, 0, TOP) == usable_rpd(TOP)
+
+    @pytest.mark.asyncio
+    async def test_concurrent_refusals_do_not_steal_each_others_note(self):
+        """
+        Two requests hit the same per-minute 429. With the note stored on the
+        shared tracker the first to finish consumed it and the second, finding
+        none, booked the slot as spent for the day.
+        """
+        t = _tracker()
+
+        async def refused_request():
+            t.note_quota_refusal(0, TOP, per_minute=True, retry_after=20.0)
+            await asyncio.sleep(0)                         # the other request runs here
+            await t.mark_slot_exhausted(0, TOP)
+
+        await asyncio.gather(refused_request(), refused_request())
+        assert _used(t, 0, TOP) == 0
+        assert t._slot_in_cooldown(t._slot(0, TOP))
+
+    @pytest.mark.asyncio
+    async def test_a_note_for_another_slot_is_not_applied(self):
+        t = _tracker()
+        t.note_quota_refusal(1, TOP, per_minute=True)
         await t.mark_slot_exhausted(0, TOP)
         assert _used(t, 0, TOP) == usable_rpd(TOP)
 
@@ -221,6 +246,92 @@ class TestRequestScopedExclusion:
         t = _tracker()
         cloud = frozenset(m for m in AGENT_LADDER if m != LOCAL_MODEL)
         assert (await t.get_model_for_agent(exclude=cloud)).model == LOCAL_MODEL
+
+
+class TestTokensPerMinute:
+    """TPM is an input-token limit per (key, model) slot over a rolling minute."""
+
+    def test_reservations_accumulate_up_to_the_allowance(self):
+        from src.llm.failures import TokenWindowFull
+        from src.llm.model_registry import usable_tpm
+
+        t = _tracker()
+        limit = usable_tpm(TOP)
+        t.reserve_input_tokens(0, TOP, limit - 1000)
+        t.reserve_input_tokens(0, TOP, 1000)               # exactly full
+        with pytest.raises(TokenWindowFull) as full:
+            t.reserve_input_tokens(0, TOP, 1)
+        assert 0 < full.value.retry_after <= 60
+
+    def test_each_slot_has_its_own_window(self):
+        from src.llm.model_registry import usable_tpm
+
+        t = _tracker()
+        t.reserve_input_tokens(0, TOP, usable_tpm(TOP))
+        assert t.reserve_input_tokens(1, TOP, 5000) is not None       # other key
+        assert t.reserve_input_tokens(0, SECOND, 5000) is not None    # other model
+
+    def test_tokens_roll_off_after_a_minute(self):
+        from src.llm.failures import TokenWindowFull
+        from src.llm.model_registry import usable_tpm
+
+        t = _tracker()
+        t.reserve_input_tokens(0, TOP, usable_tpm(TOP))
+        with pytest.raises(TokenWindowFull):
+            t.reserve_input_tokens(0, TOP, 10)
+
+        t._token_windows[t._slot(0, TOP)][0][0] -= 61      # a minute later
+        assert t.reserve_input_tokens(0, TOP, 10) is not None
+
+    def test_wait_is_until_enough_has_rolled_off(self):
+        from src.llm.failures import TokenWindowFull
+        from src.llm.model_registry import usable_tpm
+
+        t = _tracker()
+        limit = usable_tpm(TOP)
+        t.reserve_input_tokens(0, TOP, limit // 2)
+        t.reserve_input_tokens(0, TOP, limit // 2)
+        window = t._token_windows[t._slot(0, TOP)]
+        window[0][0] -= 50                                 # first entry frees in ~10s
+        window[1][0] -= 20                                 # second in ~40s
+
+        with pytest.raises(TokenWindowFull) as small:
+            t.reserve_input_tokens(0, TOP, limit // 4)     # the first entry is enough
+        with pytest.raises(TokenWindowFull) as large:
+            t.reserve_input_tokens(0, TOP, limit - 10)     # needs both gone
+        assert 8 < small.value.retry_after < 12
+        assert 38 < large.value.retry_after < 42
+
+    def test_estimate_is_corrected_to_the_providers_count(self):
+        from src.llm.model_registry import usable_tpm
+
+        t = _tracker()
+        limit = usable_tpm(TOP)
+        reservation = t.reserve_input_tokens(0, TOP, limit)           # over-estimate
+        reservation.adjust(limit // 10)                               # provider's count
+        assert t.reserve_input_tokens(0, TOP, limit // 2) is not None
+        reservation.adjust(None)                                      # no usage: keep it
+        reservation.adjust(0)
+
+    def test_a_refused_request_gives_its_tokens_back(self):
+        from src.llm.model_registry import usable_tpm
+
+        t = _tracker()
+        reservation = t.reserve_input_tokens(0, TOP, usable_tpm(TOP))
+        reservation.release()
+        reservation.release()                                         # idempotent
+        assert t.reserve_input_tokens(0, TOP, usable_tpm(TOP)) is not None
+
+    def test_a_request_larger_than_the_allowance_is_left_to_the_provider(self):
+        from src.llm.model_registry import usable_tpm
+
+        t = _tracker()
+        assert t.reserve_input_tokens(0, TOP, usable_tpm(TOP) * 2) is not None
+
+    def test_local_and_unknown_models_are_not_metered(self):
+        t = _tracker()
+        assert t.reserve_input_tokens(-1, LOCAL_MODEL, 10**9) is None
+        assert t.reserve_input_tokens(0, "gemini/not-in-the-registry", 10**9) is None
 
 
 class TestQuotaDay:

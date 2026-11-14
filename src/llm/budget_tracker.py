@@ -24,11 +24,13 @@ import asyncio
 import contextvars
 import os
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import date
 
 import asyncpg
 
+from src.llm.failures import TokenWindowFull
 from src.llm.model_registry import (
     AGENT_LADDER,
     LOCAL_MODEL,
@@ -37,6 +39,7 @@ from src.llm.model_registry import (
     quota_day,
     rpm_for,
     usable_rpd,
+    usable_tpm,
 )
 from src.llm.rate_limiter import RateLimiter
 from src.utils.logger import setup_logger
@@ -109,6 +112,9 @@ def _models_skipped_for_request() -> frozenset[str]:
 # mark_slot_exhausted a few statements later; anything older belongs to some
 # other request.
 QUOTA_HINT_TTL_SECONDS = 30.0
+_quota_hint: contextvars.ContextVar[tuple[str, bool, float | None, float] | None] = (
+    contextvars.ContextVar("llm_quota_refusal_note", default=None)
+)
 
 
 def _quota_today() -> date:
@@ -164,6 +170,28 @@ class ModelChoice:
     model: str
     api_key: str | None  # None for the local model, which needs no credential
     key_index: int       # -1 for local; otherwise position in the key list
+
+
+class TokenReservation:
+    """One request's entry in a slot's tokens-per-minute window."""
+
+    __slots__ = ("_window", "_entry")
+
+    def __init__(self, window: deque, entry: list):
+        self._window = window
+        self._entry = entry
+
+    def adjust(self, tokens: int | None) -> None:
+        """Replaces the estimate with the provider's prompt-token count."""
+        if isinstance(tokens, int) and tokens > 0:
+            self._entry[1] = tokens
+
+    def release(self) -> None:
+        """Drops the entry — the provider refused the request without reading it."""
+        try:
+            self._window.remove(self._entry)
+        except ValueError:
+            pass  # already rolled out of the window
 
 
 @dataclass
@@ -494,6 +522,12 @@ class BudgetTracker:
         exception in hand. The note carries the detail across without changing
         that call's signature.
 
+        The note is held in the calling task's context, not on the tracker. Both
+        halves run in the same task (the ladder awaits the wrapper), and a note
+        stored per slot on the shared tracker could be consumed by a concurrent
+        request that hit the same 429 — leaving this one with no note, which
+        reads as "per-day" and spends the slot.
+
         Args:
             key_index: Position of the API key.
             model: Upstream model that refused.
@@ -503,21 +537,19 @@ class BudgetTracker:
         """
         if key_index < 0 or is_local(model):
             return
-        if not hasattr(self, "_quota_hints"):
-            self._quota_hints = {}
-        self._quota_hints[self._slot(key_index, model)] = (
-            per_minute, retry_after, time.monotonic()
+        _quota_hint.set(
+            (self._slot(key_index, model), per_minute, retry_after, time.monotonic())
         )
 
     def _take_quota_hint(self, slot: str) -> tuple[bool, float | None] | None:
-        """Pops a fresh note left by note_quota_refusal, if there is one."""
-        hints = getattr(self, "_quota_hints", None)
-        if not hints:
-            return None
-        hint = hints.pop(slot, None)
+        """Consumes this task's fresh note for `slot`, if there is one."""
+        hint = _quota_hint.get()
         if hint is None:
             return None
-        per_minute, retry_after, noted_at = hint
+        noted_slot, per_minute, retry_after, noted_at = hint
+        if noted_slot != slot:
+            return None
+        _quota_hint.set(None)
         if time.monotonic() - noted_at > QUOTA_HINT_TTL_SECONDS:
             return None
         return per_minute, retry_after
@@ -623,6 +655,61 @@ class BudgetTracker:
             return True
         await limiter.release()
         return False
+
+    def reserve_input_tokens(
+        self, key_index: int, model: str, tokens: int
+    ) -> "TokenReservation | None":
+        """
+        Books a request's input tokens against the slot's tokens-per-minute
+        window, or refuses if they do not fit.
+
+        The window is a rolling minute of [time, tokens] entries per (key,
+        model) slot. The caller reserves an estimate before sending and corrects
+        it to the provider's count afterwards, so completed requests are exact
+        and only in-flight ones are estimated.
+
+        A single request larger than the whole allowance is let through: no
+        window could ever admit it, and the provider is the one to refuse it.
+
+        Args:
+            key_index: Position of the API key, or -1 for local.
+            model: Upstream model.
+            tokens: Estimated input tokens.
+
+        Returns:
+            A reservation to adjust or release, or None when the slot is not
+            metered (local model, unknown model).
+
+        Raises:
+            TokenWindowFull: The tokens do not fit this minute; carries the
+                seconds until they would.
+        """
+        limit = usable_tpm(model)
+        if key_index < 0 or limit is None:
+            return None
+        if not hasattr(self, "_token_windows"):
+            self._token_windows = {}
+        window = self._token_windows.setdefault(self._slot(key_index, model), deque())
+
+        now = time.monotonic()
+        while window and window[0][0] <= now - 60.0:
+            window.popleft()
+
+        used = sum(entry[1] for entry in window)
+        if tokens <= limit and used + tokens > limit:
+            # Earliest moment enough of the window has rolled off.
+            to_free = used + tokens - limit
+            wait = 60.0
+            for stamp, booked in window:
+                to_free -= booked
+                if to_free <= 0:
+                    wait = stamp + 60.0 - now
+                    break
+            raise TokenWindowFull(model, tokens, max(wait, MIN_RATE_LIMIT_COOLDOWN_SECONDS))
+
+        entry = [now, int(tokens)]
+        window.append(entry)
+        return TokenReservation(window, entry)
 
     def skip_model_for_request(self, model: str) -> None:
         """
