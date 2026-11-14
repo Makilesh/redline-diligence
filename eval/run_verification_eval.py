@@ -8,10 +8,12 @@ Verification benchmark — does the validator pass what it should, and only that
     python -m eval.run_verification_eval --answers tests/e2e_validation_results.json  # recorded answers
 
 Every item of eval/verification_set.json is one claim about the sample data
-room with a hand-assigned label — supported (verbatim / paraphrase / derived),
-unsupported (absent), or contradicted (changed figure, figure taken from another
-metric or period, swapped party, flipped negation, wrong period, wrong unit,
-wrong arithmetic). The claim is verified exactly as an answer would be: wrapped
+room with a hand-assigned label — supported (verbatim / paraphrase / derived /
+a true statement that the data room lacks something), unsupported (absent), or
+contradicted (changed figure, figure taken from another metric or period,
+swapped party, flipped negation, wrong period, wrong unit, wrong arithmetic, a
+false statement that the data room lacks something it states). The claim is
+verified exactly as an answer would be: wrapped
 with a citation marker and passed to `verify_answer` with a production-shaped
 context (eval/verification_corpus.py). No LLM judge is attached, so what is
 measured is what the deterministic and local-model stages decide on their own,

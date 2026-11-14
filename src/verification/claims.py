@@ -8,10 +8,13 @@ something about the documents and drops what does not:
 - headings, horizontal rules, table header/separator rows;
 - lines that are only citation markers;
 - list lead-ins ("Key adjustments:") that carry no figure;
-- statements of absence ("the data room does not disclose X") — they assert
-  that something is NOT in the evidence, which an entailment check against the
-  evidence cannot confirm, and they are the designed way to decline;
 - fragments too short to assert anything.
+
+A statement of absence ("the data room does not disclose X", "the indemnity
+cap is not specified") is kept, and marked: it is the designed way to decline,
+but it is also a claim that can be false, and a false one tells the reviewer a
+term or a risk does not exist. An entailment model cannot confirm an absence,
+so these are put to the judge only (see claim_checker).
 
 Each claim remembers the citation markers that support it: its own, or — when
 a sentence has none — the nearest marker in the same paragraph, which is how
@@ -33,24 +36,26 @@ from src.verification.numeric_grounding import extract_numbers, strip_citations
 CITATION_MARKER = re.compile(r"\[([^\[\]]*\|[^\[\]]*)\]")
 PAGE_IN_MARKER = re.compile(r"(?:p\.|pg\.|page\s*)(\d+)", re.IGNORECASE)
 
-# Wording that declines rather than asserts: a statement about what the
-# EVIDENCE does not say, which an entailment check against that evidence cannot
-# confirm and which is the designed way to decline. Kept separate from the
-# synthesizer's usable-answer guard (_DECLINES_TO_ANSWER there) so that what
-# the verifier skips never loosens what synthesis accepts.
+# Wording that states what the EVIDENCE does not say. Kept separate from the
+# synthesizer's usable-answer guard (_DECLINES_TO_ANSWER there) so that changing
+# how the verifier treats a decline never loosens what synthesis accepts.
 #
 # Every alternative is anchored on the evidence or on information being
 # available — "the documents do not state", "is not disclosed", "cannot be
-# calculated", "is missing from the data room". The earlier pattern matched
-# bare keywords, so assertions about the deal were exempt from verification
-# altogether: "There is no evidence of any pending litigation against the
-# Company", "The buyer will be required to pay a reverse termination fee",
-# "Management considers the insurance coverage insufficient" and "The key
-# customer consent is missing from the executed agreement" each produced no
-# claim, and a fabricated one passed unchecked.
+# calculated", "is missing from the data room". Two earlier versions got this
+# wrong in the fail-open direction. The first matched bare keywords and dropped
+# the sentence: "There is no evidence of any pending litigation against the
+# Company" and "The buyer will be required to pay a reverse termination fee"
+# produced no claim at all. The second anchored the pattern but still dropped
+# what matched, so "The indemnity cap is not specified in the merger agreement"
+# — false, the cap is $69.6 million — was never checked and did not lower
+# confidence. A match now only decides HOW the sentence is checked.
 _EVIDENCE_NOUN = (
     r"(?:data\s+room|documents?|context|materials?|sources?|excerpts?|passages?"
-    r"|disclosures?|information\s+provided|provided\s+information)"
+    r"|disclosures?|information\s+provided|provided\s+information"
+    # A named document is evidence too: "the merger agreement does not state…".
+    r"|agreements?|reports?|memo(?:randum)?s?|schedules?|statements?|filings?"
+    r"|decks?|presentations?)"
 )
 _INFO_VERB = (
     r"(?:contain|include|state|specify|disclose|provide|mention|address|give|identify"
@@ -126,6 +131,8 @@ class Claim:
         markers: Citation marker bodies supporting this claim.
         is_table_row: True when the claim was a markdown table row.
         has_numbers: True when the claim states at least one figure.
+        is_absence: True when the claim says the evidence does NOT state
+            something ("the FY2024 budget is not disclosed").
     """
 
     index: int
@@ -134,6 +141,7 @@ class Claim:
     markers: list[str] = field(default_factory=list)
     is_table_row: bool = False
     has_numbers: bool = False
+    is_absence: bool = False
 
 
 def _clean(text: str) -> str:
@@ -201,20 +209,6 @@ def _table_cells(line: str) -> list[str]:
     return [_clean(c) for c in body.split("|")]
 
 
-def _is_checkable(text: str, raw: str) -> bool:
-    """
-    True when a cleaned line asserts something worth verifying.
-
-    Args:
-        text: Cleaned claim text.
-        raw: Original text, markers included.
-
-    Returns:
-        False for fragments, lead-ins and statements of absence.
-    """
-    return _sentence_role(text) == "claim"
-
-
 def _sentence_role(text: str) -> str:
     """
     What a cleaned line is to the verifier.
@@ -223,9 +217,9 @@ def _sentence_role(text: str) -> str:
         text: Cleaned claim text.
 
     Returns:
-        "claim" — asserts something checkable; "decline" — states what the
-        evidence does not say (not checked, but counted); "skip" — a fragment
-        or lead-in that asserts nothing.
+        "claim" — asserts something about the deal; "absence" — states what the
+        evidence does not say; "skip" — a fragment or lead-in that asserts
+        nothing.
     """
     if not text or not _WORD.search(text):
         return "skip"
@@ -236,32 +230,23 @@ def _sentence_role(text: str) -> str:
     if text.endswith(":"):
         return "skip"
     if DECLINES_TO_ANSWER.search(text):
-        return "decline"
+        return "absence"
     return "claim"
 
 
-def split_claims(answer: str, declined: list[str] | None = None) -> list[Claim]:
+def split_claims(answer: str) -> list[Claim]:
     """
     Splits an answer into atomic claims.
 
     Args:
         answer: Generated answer text (markdown, with inline citation markers).
-        declined: If given, the statements of absence that were set aside are
-            appended to it — they are not verified, and a reader of the result
-            should be able to see how many sentences that was.
 
     Returns:
-        Checkable claims in answer order. Empty for an empty answer or one that
-        only declines.
+        Claims in answer order, statements of absence included (is_absence).
+        Empty for an empty answer or one made only of headings and fragments.
     """
     if not answer:
         return []
-
-    def checkable(text: str) -> bool:
-        role = _sentence_role(text)
-        if role == "decline" and declined is not None:
-            declined.append(text)
-        return role == "claim"
 
     claims: list[Claim] = []
     lines = answer.splitlines()
@@ -295,7 +280,8 @@ def split_claims(answer: str, declined: list[str] | None = None) -> list[Claim]:
                 head = table_header[ci] if table_header and ci < len(table_header) else ""
                 parts.append(f"{head} {cell}".strip())
             text = f"{label}: " + "; ".join(parts) if parts else label
-            if checkable(text):
+            role = _sentence_role(text)
+            if role != "skip":
                 claims.append(Claim(
                     index=len(claims),
                     text=text,
@@ -303,6 +289,7 @@ def split_claims(answer: str, declined: list[str] | None = None) -> list[Claim]:
                     markers=CITATION_MARKER.findall(stripped),
                     is_table_row=True,
                     has_numbers=bool(extract_numbers(text)),
+                    is_absence=role == "absence",
                 ))
             continue
 
@@ -317,7 +304,8 @@ def split_claims(answer: str, declined: list[str] | None = None) -> list[Claim]:
         line_markers = CITATION_MARKER.findall(stripped)
         for sentence in _split_sentences(stripped):
             text = _clean(sentence)
-            if not checkable(text):
+            role = _sentence_role(text)
+            if role == "skip":
                 continue
             markers = CITATION_MARKER.findall(sentence)
             if not markers and line_markers:
@@ -332,6 +320,7 @@ def split_claims(answer: str, declined: list[str] | None = None) -> list[Claim]:
                 raw=sentence,
                 markers=markers,
                 has_numbers=bool(extract_numbers(text)),
+                is_absence=role == "absence",
             ))
 
     return claims

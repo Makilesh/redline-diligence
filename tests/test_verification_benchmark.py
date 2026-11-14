@@ -23,10 +23,12 @@ from eval.verification_corpus import (
 from src.verification.evidence import chunk_evidence_text
 
 LABEL_KINDS = {
-    "supported": {"verbatim", "paraphrase", "derived"},
+    # supported/absence: a genuine decline — the data room is silent on it.
+    "supported": {"verbatim", "paraphrase", "derived", "absence"},
     "unsupported": {"absent", "absent_figure"},
+    # contradicted/absence: "X is not disclosed" where the data room states X.
     "contradicted": {
-        "figure", "misattributed", "party", "negation", "period", "unit", "derived",
+        "figure", "misattributed", "party", "negation", "period", "unit", "derived", "absence",
     },
 }
 
@@ -54,12 +56,27 @@ class TestSetIntegrity:
                 assert item["claim"].strip()
 
     def test_supported_and_contradicted_claims_carry_evidence(self, families):
-        # An unsupported claim is one the data room is silent on, so it has no
-        # excerpt; every other label is a statement about a specific passage.
+        # A claim the data room is silent on has no excerpt — an unsupported
+        # one, or a true statement that something is absent; every other claim
+        # is a statement about a specific passage.
         for family in families:
-            labels = {item["label"] for item in family["items"]}
-            if labels - {"unsupported"}:
+            silent = all(
+                item["label"] == "unsupported" or (item["label"], item["kind"]) == ("supported", "absence")
+                for item in family["items"]
+            )
+            if not silent:
                 assert family["evidence"], family["id"]
+
+    def test_statements_of_absence_are_recognised_as_such(self, families):
+        # Both directions of the absence check are only measured if the
+        # splitter classes these claims as statements of absence.
+        from src.verification.claims import split_claims
+
+        for family in families:
+            for item in family["items"]:
+                if item["kind"] == "absence":
+                    (claim,) = split_claims(item["claim"])
+                    assert claim.is_absence, item["id"]
 
     def test_both_splits_hold_every_label_and_kind(self, families):
         seen = {"dev": Counter(), "test": Counter()}

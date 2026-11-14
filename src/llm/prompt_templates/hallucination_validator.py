@@ -21,7 +21,8 @@ Rules:
 1. Judge each claim independently. Paraphrase is fine; changed figures, periods, parties or qualifiers are not.
 2. A figure must match the document after unit conversion ($452.8M = $452,800,000 = $452.8 million). Rounding to fewer digits is acceptable; different digits are not.
 3. Cite the index of the document you relied on.
-4. {UNTRUSTED_DOCUMENTS_RULE}
+4. Some claims say the documents do NOT state something ("the FY2024 budget is not disclosed", "the agreement does not specify a cap"). For such a claim: "contradicted" if a document does state the thing — cite it; "supported" if none of the documents states it. Never "unsupported".
+5. {UNTRUSTED_DOCUMENTS_RULE}
 
 Return a JSON object:
 {{

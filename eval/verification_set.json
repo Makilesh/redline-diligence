@@ -4633,6 +4633,426 @@
      "claim": "Stock-based compensation of $7.9 million was added back in FY2023."
     }
    ]
+  },
+  {
+   "id": "f124",
+   "split": "test",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 8.2 — Indemnification Cap",
+   "evidence": [
+    {
+     "source": "merger_agreement_v2_final.txt",
+     "excerpt": "shall not exceed $69.6 million (representing 10% of the aggregate Merger Consideration) (the \"General Cap\")."
+    }
+   ],
+   "items": [
+    {
+     "id": "f124.1",
+     "label": "contradicted",
+     "kind": "absence",
+     "claim": "The indemnity cap is not specified in the merger agreement."
+    }
+   ]
+  },
+  {
+   "id": "f125",
+   "split": "dev",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 7.2 — Termination Fee",
+   "evidence": [
+    {
+     "source": "merger_agreement_v2_final.txt",
+     "excerpt": "the Company shall pay Buyer a termination fee of $20.88 million"
+    }
+   ],
+   "items": [
+    {
+     "id": "f125.1",
+     "label": "contradicted",
+     "kind": "absence",
+     "claim": "The merger agreement does not state a termination fee."
+    }
+   ]
+  },
+  {
+   "id": "f126",
+   "split": "test",
+   "source": "ip_portfolio_and_litigation_schedule.txt",
+   "section": "SECTION 2: THE DATAFLOW SYSTEMS LITIGATION",
+   "evidence": [
+    {
+     "source": "ip_portfolio_and_litigation_schedule.txt",
+     "excerpt": "Probable exposure range: $3.5 million to $8.0 million."
+    }
+   ],
+   "items": [
+    {
+     "id": "f126.1",
+     "label": "contradicted",
+     "kind": "absence",
+     "claim": "The probable exposure in the DataFlow litigation is not disclosed."
+    }
+   ]
+  },
+  {
+   "id": "f127",
+   "split": "dev",
+   "source": "employment_and_retention_agreements.txt",
+   "section": "SECTION 2: CHANGE OF CONTROL SEVERANCE",
+   "evidence": [
+    {
+     "source": "employment_and_retention_agreements.txt",
+     "excerpt": "The Company has NOT obtained a shareholder cleansing vote."
+    }
+   ],
+   "items": [
+    {
+     "id": "f127.1",
+     "label": "contradicted",
+     "kind": "absence",
+     "claim": "The documents do not state whether a shareholder cleansing vote has been obtained."
+    }
+   ]
+  },
+  {
+   "id": "f128",
+   "split": "test",
+   "source": "credit_agreement_summary.txt",
+   "section": "SECTION 2: REVOLVING CREDIT FACILITY",
+   "evidence": [
+    {
+     "source": "credit_agreement_summary.txt",
+     "excerpt": "Maturity: June 30, 2026"
+    }
+   ],
+   "items": [
+    {
+     "id": "f128.1",
+     "label": "contradicted",
+     "kind": "absence",
+     "claim": "The maturity date of the revolving credit facility is not specified."
+    }
+   ]
+  },
+  {
+   "id": "f129",
+   "split": "dev",
+   "source": "regulatory_and_data_privacy_memo.txt",
+   "section": "HART-SCOTT-RODINO (UNITED STATES)",
+   "evidence": [
+    {
+     "source": "regulatory_and_data_privacy_memo.txt",
+     "excerpt": "The transaction is reportable under the Hart-Scott-Rodino Antitrust Improvements Act."
+    }
+   ],
+   "items": [
+    {
+     "id": "f129.1",
+     "label": "contradicted",
+     "kind": "absence",
+     "claim": "The data room does not disclose whether the transaction is reportable under the HSR Act."
+    }
+   ]
+  },
+  {
+   "id": "f130",
+   "split": "test",
+   "source": "customer_contracts_schedule.txt",
+   "section": "SECTION 1: TOP TEN CUSTOMERS BY FY2023 REVENUE",
+   "evidence": [
+    {
+     "source": "customer_contracts_schedule.txt",
+     "excerpt": "the top ten customers represent 47.8% of FY2023 revenue."
+    }
+   ],
+   "items": [
+    {
+     "id": "f130.1",
+     "label": "contradicted",
+     "kind": "absence",
+     "claim": "No information on customer concentration is available in the documents."
+    }
+   ]
+  },
+  {
+   "id": "f131",
+   "split": "dev",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "SECTION 5: WORKING CAPITAL",
+   "evidence": [
+    {
+     "source": "quality_of_earnings_report_fy2023.txt",
+     "excerpt": "We recommend a working capital peg of ($55.8) million at closing"
+    }
+   ],
+   "items": [
+    {
+     "id": "f131.1",
+     "label": "contradicted",
+     "kind": "absence",
+     "claim": "The recommended working capital peg is not stated."
+    }
+   ]
+  },
+  {
+   "id": "f132",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "KEY FINANCIAL METRICS AND NOTES",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "Net Debt $20.6 $49.9"
+    }
+   ],
+   "items": [
+    {
+     "id": "f132.1",
+     "label": "contradicted",
+     "kind": "absence",
+     "claim": "Aurora's net debt at FY2023 year-end is not disclosed."
+    }
+   ]
+  },
+  {
+   "id": "f133",
+   "split": "dev",
+   "source": "board_deck_strategic_review_mar2024.txt",
+   "section": "SLIDE 5: MANAGEMENT RECOMMENDATION",
+   "evidence": [
+    {
+     "source": "board_deck_strategic_review_mar2024.txt",
+     "excerpt": "1. PROCEED with Vertex Capital Partners as the preferred bidder"
+    }
+   ],
+   "items": [
+    {
+     "id": "f133.1",
+     "label": "contradicted",
+     "kind": "absence",
+     "claim": "The documents do not identify the preferred bidder recommended by management."
+    }
+   ]
+  },
+  {
+   "id": "f134",
+   "split": "test",
+   "source": "employment_and_retention_agreements.txt",
+   "section": "SECTION 3: RETENTION POOL",
+   "evidence": [
+    {
+     "source": "employment_and_retention_agreements.txt",
+     "excerpt": "The Board approved a retention pool of $6,500,000 on March 1, 2024"
+    }
+   ],
+   "items": [
+    {
+     "id": "f134.1",
+     "label": "contradicted",
+     "kind": "absence",
+     "claim": "The size of the retention pool is not disclosed."
+    }
+   ]
+  },
+  {
+   "id": "f135",
+   "split": "dev",
+   "source": "ip_portfolio_and_litigation_schedule.txt",
+   "section": "SECTION 1: PATENT PORTFOLIO",
+   "evidence": [
+    {
+     "source": "ip_portfolio_and_litigation_schedule.txt",
+     "excerpt": "Issued U.S. Patents 47"
+    }
+   ],
+   "items": [
+    {
+     "id": "f135.1",
+     "label": "contradicted",
+     "kind": "absence",
+     "claim": "The number of issued U.S. patents is not stated in the data room."
+    }
+   ]
+  },
+  {
+   "id": "f136",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "KEY FINANCIAL METRICS AND NOTES",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f136.1",
+     "label": "supported",
+     "kind": "absence",
+     "claim": "The data room does not disclose Aurora's FY2024 revenue guidance."
+    }
+   ]
+  },
+  {
+   "id": "f137",
+   "split": "dev",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "KEY FINANCIAL METRICS AND NOTES",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f137.1",
+     "label": "supported",
+     "kind": "absence",
+     "claim": "The FY2024 capital expenditure budget is not disclosed."
+    }
+   ]
+  },
+  {
+   "id": "f138",
+   "split": "test",
+   "source": "board_deck_strategic_review_mar2024.txt",
+   "section": "SLIDE 1: STRATEGIC ALTERNATIVES REVIEW",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f138.1",
+     "label": "supported",
+     "kind": "absence",
+     "claim": "The documents do not state the fee payable to Goldman Sachs."
+    }
+   ]
+  },
+  {
+   "id": "f139",
+   "split": "dev",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "AGREEMENT AND PLAN OF MERGER",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f139.1",
+     "label": "supported",
+     "kind": "absence",
+     "claim": "No information on Vertex Capital Partners' fund size is available."
+    }
+   ]
+  },
+  {
+   "id": "f140",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED BALANCE SHEET",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f140.1",
+     "label": "supported",
+     "kind": "absence",
+     "claim": "The identity of Aurora's largest shareholder is not stated in the provided documents."
+    }
+   ]
+  },
+  {
+   "id": "f141",
+   "split": "dev",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 1.1 — The Merger",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f141.1",
+     "label": "supported",
+     "kind": "absence",
+     "claim": "The governing law of the merger agreement is not specified in the retrieved documents."
+    }
+   ]
+  },
+  {
+   "id": "f142",
+   "split": "test",
+   "source": "customer_contracts_schedule.txt",
+   "section": "SECTION 4: RENEWAL AND CHURN EXPOSURE",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f142.1",
+     "label": "supported",
+     "kind": "absence",
+     "claim": "The data room does not contain a customer-level churn analysis."
+    }
+   ]
+  },
+  {
+   "id": "f143",
+   "split": "dev",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 8.2 — Indemnification Cap",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f143.1",
+     "label": "supported",
+     "kind": "absence",
+     "claim": "The amount of any escrow holdback is not disclosed."
+    }
+   ]
+  },
+  {
+   "id": "f144",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED FINANCIAL STATEMENTS",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f144.1",
+     "label": "supported",
+     "kind": "absence",
+     "claim": "Aurora's FY2021 financial statements are not included in the data room."
+    }
+   ]
+  },
+  {
+   "id": "f145",
+   "split": "dev",
+   "source": "regulatory_and_data_privacy_memo.txt",
+   "section": "SECTION 3: SECURITY CERTIFICATIONS AND INCIDENTS",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f145.1",
+     "label": "supported",
+     "kind": "absence",
+     "claim": "The documents provided do not identify who performed the SOC 2 remediation work."
+    }
+   ]
+  },
+  {
+   "id": "f146",
+   "split": "test",
+   "source": "regulatory_and_data_privacy_memo.txt",
+   "section": "SECTION 2: DATA PRIVACY POSTURE",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f146.1",
+     "label": "supported",
+     "kind": "absence",
+     "claim": "The location of Aurora's Data Protection Officer is not stated."
+    }
+   ]
+  },
+  {
+   "id": "f147",
+   "split": "dev",
+   "source": "employment_and_retention_agreements.txt",
+   "section": "SECTION 5: EQUITY PLAN TREATMENT",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f147.1",
+     "label": "supported",
+     "kind": "absence",
+     "claim": "The exercise prices of outstanding stock options are not disclosed."
+    }
+   ]
   }
  ]
 }

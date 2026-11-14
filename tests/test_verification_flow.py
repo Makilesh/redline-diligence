@@ -216,14 +216,39 @@ class TestClaimChecker:
         assert report.validation_status == "passed"
 
     @pytest.mark.asyncio
-    async def test_decline_only_answer_has_nothing_to_verify(self):
+    async def test_decline_only_answer_is_confirmed_not_skipped(self):
+        """
+        A decline is a claim that the documents lack something.
+
+        This test used to assert that a decline-only answer had nothing to
+        verify: no claims, "passed", confidence 0.0. That made every statement
+        of absence exempt — including a false one ("the indemnity cap is not
+        specified"), which tells a reviewer a term does not exist. A decline is
+        now put to the judge: confirmed, the answer passes; unconfirmed, it is
+        a warning, never a failure and never a silent pass.
+        """
         from src.verification.claim_checker import verify_answer
 
         answer = "The data room does not contain the purchase price allocation for this transaction."
-        report = await verify_answer(answer, CHUNKS, QUESTION, scorer=_scorer(), judge=None, use_nli=True)
-        assert report.claim_checks == []
-        assert report.validation_status == "passed"
-        assert report.confidence == 0.0
+        nli_calls = []
+
+        async def scorer(pairs):
+            nli_calls.append(pairs)
+            return [NLIScore(0.9, 0.0, 0.1) for _ in pairs]
+
+        async def judge(query, claims, documents):
+            return {c["id"]: {"status": "supported", "document": 1} for c in claims}, "gemini/judge"
+
+        unconfirmed = await verify_answer(answer, CHUNKS, QUESTION, scorer=scorer, judge=None, use_nli=True)
+        assert [c["status"] for c in unconfirmed.claim_checks] == ["unverified"]
+        assert unconfirmed.validation_status == "warning"
+        assert unconfirmed.confidence == 0.5
+        # No passage entails an absence, so the entailment model is not asked.
+        assert nli_calls == []
+
+        confirmed = await verify_answer(answer, CHUNKS, QUESTION, scorer=scorer, judge=judge, use_nli=True)
+        assert [c["status"] for c in confirmed.claim_checks] == ["supported"]
+        assert confirmed.validation_status == "passed"
 
 
 # ─── Validator node ───────────────────────────────────────────────────────────

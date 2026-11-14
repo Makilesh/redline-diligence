@@ -123,9 +123,43 @@ class VerificationReport:
     llm_calls: int = 0
     notes: list[str] = field(default_factory=list)
     elapsed_ms: float = 0.0
-    # Statements of absence ("the documents do not state X") that were set
-    # aside: they are not in claim_checks or in the confidence denominator.
-    claims_skipped: int = 0
+
+
+class _FigureView:
+    """
+    What a claim's figures say about it, before any model is asked.
+
+    Quantities ("24 months", "45 days") are checked one way only. One that the
+    context does not contain stops the claim being passed locally; one that it
+    does contain proves little — "18 months" and "36 months" sit in the same
+    survival clause — so quantities alone never confirm a claim. And a missing
+    one is not an automatic failure the way a missing amount is: documents
+    spell durations out ("eighteen months") and answers compute them from dates.
+
+    Attributes:
+        unsupported: Raw text of amounts and ratios not found in the context.
+        misattributed: Figures the context holds for another row or period.
+        missing_quantities: Raw text of quantities the context does not state.
+        unbound: Raw text of figures present, in a place the claim does not name.
+        confirmed: True when the figures alone settle the claim as supported.
+        settled: True when the figures alone settle it either way — so the
+            entailment model and the judge have nothing to add.
+    """
+
+    def __init__(self, nums: list):
+        figures = [n for n in nums if n.kind != "quantity"]
+        self.unsupported = [n.raw for n in figures if n.status == "unsupported"]
+        self.misattributed = [n for n in figures if n.binding == "conflict"]
+        self.missing_quantities = [
+            n.raw for n in nums if n.kind == "quantity" and n.status != "grounded"
+        ]
+        self.unbound = [n.raw for n in figures if n.binding == "unbound"]
+        self.confirmed = (
+            bool(figures)
+            and all(n.is_confirmed for n in figures)
+            and not self.missing_quantities
+        )
+        self.settled = bool(self.unsupported) or self.confirmed
 
 
 def _tokens(text: str) -> set[str]:
@@ -282,30 +316,32 @@ async def verify_answer(
     start = time.monotonic()
     report = VerificationReport()
 
-    declined: list[str] = []
-    claims: list[Claim] = split_claims(answer, declined)
-    # Statements of absence are not verified; say how many, so the confidence
-    # below is not read as covering sentences it never looked at.
-    report.claims_skipped = len(declined)
-    if declined:
-        report.notes.append(f"{len(declined)} statement(s) of absence not verified")
-
+    claims: list[Claim] = split_claims(answer)
     if not claims:
         report.notes.append("no verifiable claims")
         report.elapsed_ms = round((time.monotonic() - start) * 1000, 1)
         return report
 
-    # MAX_CLAIMS bounds the entailment and judge work, not the figure check:
-    # grounding is deterministic and cheap, so EVERY claim's figures are
-    # grounded. The cap used to be applied first, and a fabricated figure in
-    # the 41st claim of a long answer came back "passed" at confidence 1.0.
-    uncapped = len(claims)
-
     # ── 1. Numeric grounding ────────────────────────────────────────────────
+    # Every claim's figures are grounded: it is deterministic and cheap. The
+    # claim cap used to be applied first, and a fabricated figure in the 41st
+    # claim of a long answer came back "passed" at confidence 1.0.
     index = ContextIndex(chunks)
     numeric = ground_texts([c.text for c in claims], index)
     report.numeric_checks = [n.to_dict() for group in numeric for n in group]
     report.numeric_counts = summarize_numeric(report.numeric_checks)
+    figure_view = [_FigureView(group) for group in numeric]
+
+    # MAX_CLAIMS bounds the entailment and judge work, and it is spent only on
+    # claims whose outcome that work can change. A claim settled by its figures
+    # — confirmed, or not found — does not use it, so padding an answer with
+    # grounded bullet points cannot push a false statement past the budget.
+    in_budget: set[int] = set()
+    for claim in claims:
+        if figure_view[claim.index].settled:
+            continue
+        if len(in_budget) < MAX_CLAIMS:
+            in_budget.add(claim.index)
 
     # ── 2. NLI ──────────────────────────────────────────────────────────────
     if use_nli is None:
@@ -327,7 +363,10 @@ async def verify_answer(
         claim_tokens[claim.index] = toks
         cited = resolve_cited_chunks(claim.markers, chunks)
         cited_by_claim[claim.index] = cited
-        if claim.index >= MAX_CLAIMS:
+        # No entailment pairs for a claim the figures already settled, one past
+        # the budget, or a statement of absence — "X is not disclosed" is not
+        # entailed by any passage, only by the lack of one.
+        if claim.index not in in_budget or claim.is_absence:
             continue
         # Uncited evidence is searched across ALL retrieved chunks: lexical
         # ranking is cheap, and a correct claim with a wrong or missing
@@ -386,28 +425,13 @@ async def verify_answer(
             }
             for n in nums
         ]
-        # Quantities ("24 months", "45 days") are checked one way only. One
-        # that the context does not contain stops the claim being passed
-        # locally; one that it does contain proves little — "18 months" and "36
-        # months" sit in the same survival clause — so quantities alone never
-        # make a claim "supported (numeric)". And a missing one is not an
-        # automatic failure the way a missing amount is: documents spell
-        # durations out ("eighteen months") and answers compute them from dates.
-        figures = [n for n in nums if n.kind != "quantity"]
-        missing_quantities = [
-            n.raw for n in nums if n.kind == "quantity" and n.status != "grounded"
-        ]
-        unsupported_nums = [n.raw for n in figures if n.status == "unsupported"]
-        # A figure the context contains, attached by the claim to another row or
-        # period — the judge is asked, and NLI entailment is not taken for it.
-        misattributed = [n for n in figures if n.binding == "conflict"]
-        unbound = [n.raw for n in figures if n.binding == "unbound"]
-        all_grounded = (
-            bool(figures)
-            and all(n.is_confirmed for n in figures)
-            and not missing_quantities
-        )
-        beyond_cap = claim.index >= MAX_CLAIMS
+        view = figure_view[claim.index]
+        unsupported_nums = view.unsupported
+        misattributed = view.misattributed
+        missing_quantities = view.missing_quantities
+        unbound = view.unbound
+        all_grounded = view.confirmed
+        beyond_cap = not view.settled and claim.index not in in_budget
         ev = best.get(claim.index) if nli_available else None
         cited = cited_by_claim[claim.index]
         contra = ev["contra"] if ev else 0.0
@@ -433,20 +457,24 @@ async def verify_answer(
                 reason="figure(s) not found in the retrieved documents: " + ", ".join(unsupported_nums),
             )
         elif beyond_cap:
-            # Past the cap only the figure check has run. Figures that are all
-            # confirmed settle the claim; anything else is reported as not
-            # checked rather than left out of the result.
-            if all_grounded:
-                first = next((n for n in nums if n.evidence_source), None)
-                check.update(
-                    status="supported",
-                    method="numeric",
-                    reason="every figure appears in, or is computed from, the retrieved documents",
-                    evidence=first.evidence_snippet if first else "",
-                    evidence_source=first.evidence_source if first else "",
-                )
-            else:
-                check["reason"] = f"not checked: beyond the first {MAX_CLAIMS} claims of the answer"
+            # The entailment and judge budget is spent. The claim is reported as
+            # not checked — never as supported — and the answer cannot pass.
+            check["reason"] = (
+                f"not checked: beyond the first {MAX_CLAIMS} statements that needed "
+                "checking against the documents' text"
+            )
+        elif claim.is_absence:
+            # "The indemnity cap is not specified." No passage entails an
+            # absence, so the entailment model is not asked; the judge reads
+            # the documents and says whether one of them states the thing after
+            # all. Until it has, the statement is unverified — it is the
+            # designed way to decline, so it never fails an answer by itself,
+            # but a false one tells a reviewer a term or a risk does not exist.
+            undecided.append(claim.index)
+            check.update(
+                reason="states that the documents do not contain something; not confirmed",
+                absence=True,
+            )
         elif misattributed:
             # The value exists, but where the documents put it is not where the
             # claim puts it ("Revenue was $387.1 million in FY2023" — that is
@@ -590,6 +618,10 @@ async def verify_answer(
                     status = str(verdict.get("status", "")).lower()
                     if status not in ("supported", "contradicted", "unsupported"):
                         continue
+                    # "Unsupported" is no verdict on a statement of absence:
+                    # either a document states the thing or none does.
+                    if status == "unsupported" and checks[idx].get("absence"):
+                        continue
                     doc_no = verdict.get("document")
                     doc = None
                     try:
@@ -656,10 +688,18 @@ async def verify_answer(
         )
     unchecked = sum(1 for c in checks if c["reason"].startswith("not checked: beyond"))
     if unchecked:
-        report.notes.append(f"{unchecked} of {uncapped} claims beyond the first {MAX_CLAIMS} not checked")
+        report.notes.append(f"{unchecked} of {len(checks)} claims beyond the checking budget")
         flags.append(
             f"{unchecked} statement(s) beyond the first {MAX_CLAIMS} were checked for "
             "figures only, not against the documents' text"
+        )
+    unconfirmed_absences = sum(
+        1 for c in checks if c.get("absence") and c["status"] == "unverified"
+    )
+    if unconfirmed_absences:
+        flags.append(
+            f"{unconfirmed_absences} statement(s) that the documents do not contain "
+            "something could not be confirmed"
         )
     unavailable = [note for note in report.notes if note.startswith("validation unavailable")]
     if unavailable and status_counts["unverified"]:
