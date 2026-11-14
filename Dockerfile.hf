@@ -7,22 +7,15 @@
 # (aarch64, 2 OCPU / 12GB).
 #
 # Two stages. The builder installs every Python dependency into /opt/venv; the
-# runtime stage copies that venv and nothing else, so the compiler toolchain
-# the builder needs never reaches the image that runs.
+# runtime stage copies that venv and nothing else.
 #
-# Why the builder needs a compiler at all, on ARM only: requirements.txt pins
-# fastembed<0.4, and every fastembed 0.3.x requires PyStemmer<3. PyStemmer
-# publishes no aarch64 wheel before 3.1.0, so on ARM pip builds it from source
-# (measured: `uv pip compile --python-platform aarch64-manylinux_2_28
-# --only-binary :all:` fails on exactly this one package and resolves all 158
-# others to wheels). That sdist's setup.py downloads libstemmer_c from
-# snowballstem.org with urlretrieve and no timeout, then compiles it with
-# Cython fetched through setup_requires. A stalled connection there is a build
-# that hangs inside `pip install -r requirements.txt` printing nothing. It is
-# therefore built here as its own step: build tools pinned, the C source
-# fetched with a timeout and its checksum verified, and the whole step bounded.
-# On amd64 a wheel exists and the step is skipped. Moving to fastembed>=0.4.2
-# (py-rust-stemmers, which ships aarch64 wheels) removes the step entirely.
+# The ARM build used to hang: fastembed 0.3.x required PyStemmer<3, which has
+# no aarch64 wheel, so pip built it from source, and its setup.py downloads
+# libstemmer_c with no timeout. requirements.txt now takes fastembed>=0.5
+# (py-rust-stemmers, wheels on every platform), so every dependency installs
+# from a wheel on both architectures and the builder needs no compiler.
+# `--only-binary :all:` below makes that a build-time guarantee: a future pin
+# that needs a source build fails here, loudly, instead of hanging.
 
 ARG PYTHON_IMAGE=python:3.11-slim-bookworm
 
@@ -33,11 +26,6 @@ ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=120 \
     PYTHONDONTWRITEBYTECODE=1
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        curl \
-    && rm -rf /var/lib/apt/lists/*
 
 RUN python -m venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
@@ -60,41 +48,8 @@ ARG TORCH_VERSION=2.11.0
 RUN pip install --retries 5 "torch==${TORCH_VERSION}" \
         --index-url https://download.pytorch.org/whl/cpu
 
-# PyStemmer from source, bounded — ARM only; see the header.
-#
-# Both archives are fetched with curl, with timeouts, and checked against
-# pinned SHA256s, because neither pip nor the package can be trusted not to
-# hang: even `pip download` of an sdist runs its setup.py to read metadata, and
-# that setup.py starts the unbounded libstemmer download at import time.
-# Extracting libstemmer_c next to setup.py first makes it skip that download.
-# The libstemmer checksum is the one setup.py itself hard-codes; the sdist's is
-# PyPI's published digest.
-ARG PYSTEMMER_VERSION=2.2.0.3
-ARG PYSTEMMER_SHA256=9ac74c8d0f3358dbb050f64cddbb8d55021d831d92305d7c20780ea8d6c0020e
-ARG LIBSTEMMER_SHA256=b941d9fe9cf36b4e2f8d3873cd4d8b8775bd94867a1df8d8c001bb8b688377c3
-RUN set -eu; \
-    if pip download --only-binary=:all: --no-deps -d /tmp/probe \
-            "PyStemmer==${PYSTEMMER_VERSION}" >/dev/null 2>&1; then \
-        echo "PyStemmer wheel available for $(uname -m); no source build"; \
-    else \
-        echo "No PyStemmer wheel for $(uname -m); building from source"; \
-        pip install --retries 5 "setuptools<81" wheel "Cython>=3.0,<3.4"; \
-        mkdir -p /tmp/pystemmer && cd /tmp/pystemmer; \
-        fetch() { curl -fsSL --retry 5 --connect-timeout 20 --max-time 300 -o "$1" "$2"; }; \
-        fetch pystemmer.tar.gz \
-            "https://files.pythonhosted.org/packages/source/p/pystemmer/pystemmer-${PYSTEMMER_VERSION}.tar.gz"; \
-        echo "${PYSTEMMER_SHA256}  pystemmer.tar.gz" | sha256sum -c -; \
-        tar xzf pystemmer.tar.gz; \
-        cd "pystemmer-${PYSTEMMER_VERSION}"; \
-        fetch libstemmer_c-2.2.0.tar.gz https://snowballstem.org/dist/libstemmer_c-2.2.0.tar.gz; \
-        echo "${LIBSTEMMER_SHA256}  libstemmer_c-2.2.0.tar.gz" | sha256sum -c -; \
-        tar xzf libstemmer_c-2.2.0.tar.gz; \
-        timeout 900 pip install --no-build-isolation . ; \
-    fi; \
-    rm -rf /tmp/probe /tmp/pystemmer
-
 COPY requirements.txt .
-RUN pip install --retries 5 -r requirements.txt
+RUN timeout 1800 pip install --retries 5 --only-binary :all: -r requirements.txt
 
 # Fails the build, not the first query, if the stack cannot import on this
 # architecture.

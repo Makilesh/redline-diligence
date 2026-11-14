@@ -6,8 +6,11 @@
 #   - fastembed model loading changed between versions
 
 # Core orchestration
-langgraph>=0.2.0,<0.3.0
-langchain-core>=0.2.0,<0.3.0
+# 1.x since November 2026. The graph code needed no change from 0.2: the
+# offline suite (real graph, real run_query/stream_query) and the retrieval
+# eval are identical on 0.2.76 and 1.2.21. langchain-core is not imported by
+# this project; it follows langgraph (1.x needs >=1.4.7,<2) and is not pinned.
+langgraph>=1.2.0,<2.0.0
 
 # LLM
 litellm>=1.40.0,<2.0.0
@@ -24,7 +27,13 @@ qdrant-client[async]>=1.17.0,<1.20.0
 
 # Embeddings and reranking
 sentence-transformers>=2.7.0,<3.0.0
-fastembed>=0.3.0,<0.4.0
+# >=0.5: 0.3.x required PyStemmer<3, which has no aarch64 wheel and whose
+# setup.py downloads C sources with no timeout — the hung ARM image build.
+# 0.4.2+ stems with py-rust-stemmers (wheels on every platform). 0.4.x is
+# skipped because it holds onnxruntime at 1.19. BM25 text is normalised in
+# src/vector_db/hybrid_search.py before encoding, so this range and the old one
+# produce the same ranking (retrieval eval identical on 0.3.6 and 0.7.4).
+fastembed>=0.5.0,<0.8.0
 transformers>=4.40.0,<5.0.0
 # Local decision model (src/decisions): typed yes/no and choice judgments with
 # probabilities, no text generation. Pinned exactly — the package is weeks old
@@ -62,21 +71,11 @@ openpyxl>=3.1.0,<4.0.0
 # Database
 asyncpg>=0.29.0,<1.0.0
 psycopg2-binary>=2.9.9,<3.0.0
-# KNOWN MISMATCH, deliberately not "fixed" by version roulette.
-# 2.0.25 warns "You're using incompatible versions of langgraph and
-# checkpoint-postgres" because its guard wants langgraph >= 0.5, while this
-# project pins langgraph <0.3 (the graph is written against the 0.2 API).
-#
-# Left as-is because the alternative changes are both worse bets than a warning:
-# upgrading langgraph crosses three minor versions of a library this project's
-# entire control flow is built on, and downgrading the checkpointer trades a
-# known-good component for an unknown one. The Postgres saver was verified
-# working on this pair — 764 checkpoints across 105 threads written and read
-# back (see DECISIONS_LOG Decision 26) — so the warning describes a risk that
-# has not materialised here.
-#
-# Revisit when the graph is next touched, not before a demo.
-langgraph-checkpoint-postgres>=2.0.0,<3.0.0
+# Matches langgraph 1.x; this ends the "incompatible versions of langgraph and
+# checkpoint-postgres" warning the 0.2 pin carried (Decision 60). Checkpoints
+# written by 2.x are not read back: every run clears its thread first, so old
+# checkpoint tables can simply be dropped on upgrade.
+langgraph-checkpoint-postgres>=3.2.0,<4.0.0
 psycopg[binary]>=3.1.0,<4.0.0
 
 # API and UI

@@ -137,11 +137,11 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f api cadd
 ```
 
 The first build downloads CPU PyTorch and bakes the embedding, reranker and NLI
-weights into the image — 20–30 minutes on 2 ARM cores. On ARM it also compiles
-one small C extension (PyStemmer, which has no aarch64 wheel for the pinned
-FastEmbed); that step has its own timeouts and prints "building from source".
-A build that stops making progress for more than a few minutes is a fault, not
-patience — the network fetches in the Dockerfile are all bounded. The model
+weights into the image — 20–30 minutes on 2 ARM cores. Every Python
+dependency installs from a prebuilt wheel on both architectures (the install
+runs with `--only-binary :all:`), so nothing is compiled. A build that stops
+making progress for more than a few minutes is a fault, not patience — the
+network fetches in the Dockerfile are all bounded. The model
 layers come before the code, so a later `git pull && up -d --build` that only
 changes Python files rebuilds in seconds instead of re-downloading ~5GB.
 
@@ -353,10 +353,11 @@ deals; any other deal answers 404 without the admin key.
 ## Not yet verified
 
 - **The image has not been built on ARM.** The dependency set was checked
-  statically for `linux/aarch64` (`uv pip compile --python-platform
-  aarch64-manylinux_2_28 --only-binary :all:`): every package has an aarch64
-  wheel except PyStemmer, which fastembed 0.3.x requires and which
-  `Dockerfile.hf` therefore builds from source in a bounded, checksummed step.
-  That step was exercised on x86-64 Linux only. The merged compose file and
-  the Caddyfile were validated (`docker compose config`, `caddy validate`).
+  statically for both architectures (`uv pip compile requirements.txt
+  --python-platform aarch64-manylinux_2_28 --python-version 3.11
+  --only-binary :all:`, and the same for x86_64): all 162 packages resolve to
+  wheels. The previous blocker — fastembed 0.3.x requiring PyStemmer, which has
+  no aarch64 wheel and whose source build downloaded with no timeout — is gone
+  with fastembed 0.5+. The merged compose file and the Caddyfile were validated
+  (`docker compose config`, `caddy validate`).
 - **Quality Assessor floor recalibration** for the MiniLM reranker — see step 9.
