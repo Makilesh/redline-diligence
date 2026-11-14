@@ -91,10 +91,20 @@ def _evidence_dimensions(state: AgentState, scores: list[float]) -> tuple[int, f
     Returns:
         (expected evidence count, precision, completeness, overall).
     """
-    usable = [s for s in scores if s >= RELEVANCE_FLOOR]
+    usable = sorted((s for s in scores if s >= RELEVANCE_FLOOR), reverse=True)
     relevance = max(scores)
     expected = EXPECTED_EVIDENCE_COUNT.get(state.get("query_type", ""), 2)
-    precision = float(np.mean(usable)) if usable else 0.0
+    # Mean of the best `expected` usable chunks, not of all of them: averaging
+    # every usable chunk made precision FALL when retrieval found one more
+    # relevant passage — the Decision 17 failure, surviving in this dimension
+    # (audit W8). Measured: comp_05 (answerable) scored [0.459, 0.212, 0.164]
+    # -> 0.278, admitted; with chunk context headers retrieval added the 280G
+    # passage (0.145) from the same section, the mean fell to 0.245 < 0.25 and
+    # the router refused. The top-`expected` mean is never below the old
+    # mean-of-usable (equal while there are at most `expected` usable chunks,
+    # where completeness is the binding dimension) and, once `expected` usable
+    # chunks exist, cannot fall as more are retrieved.
+    precision = float(np.mean(usable[:expected])) if usable else 0.0
     completeness = min(len(usable) / expected, 1.0)
     overall = relevance * 0.4 + completeness * 0.3 + precision * 0.3
     return expected, precision, completeness, overall
