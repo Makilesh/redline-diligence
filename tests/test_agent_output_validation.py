@@ -172,7 +172,15 @@ class TestAgent1Node:
         assert out["current_query"] == "What was FY2023 revenue?"
         assert out["extracted_filters"] == {} and out["sub_questions"] == []
         trace = out["agent_trace"][0]
-        assert trace["degraded"] is True and "every rung failed" in trace["error"]
+        assert trace["degraded"] is True and trace["error"] == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_failure_text_never_reaches_the_trace(self, monkeypatch):
+        """The trace is returned to API callers; provider error text is not."""
+        secret = "https://generativelanguage.googleapis.com/v1?key=AIzaSECRET123"
+        out = await _agent1(monkeypatch, error=RuntimeError(f"upstream said: {secret}"))
+        assert "AIzaSECRET123" not in repr(out)
+        assert out["agent_trace"][0]["error"] == "unknown"
 
 
 class TestQueryRewriterSchema:
@@ -225,6 +233,13 @@ class TestAgent6Node:
         assert out["current_query"] == "current q"
         assert out["rewrite_iteration"] == 1
         assert out["agent_trace"][0]["degraded"] is True
+
+    @pytest.mark.asyncio
+    async def test_failure_text_never_reaches_the_trace(self, monkeypatch):
+        secret = "https://generativelanguage.googleapis.com/v1?key=AIzaSECRET123"
+        out = await _agent6(monkeypatch, error=RuntimeError(f"upstream said: {secret}"))
+        assert "AIzaSECRET123" not in repr(out)
+        assert out["agent_trace"][0]["error"] == "unknown"
 
     @pytest.mark.asyncio
     async def test_trace_names_the_model_that_answered(self, monkeypatch):

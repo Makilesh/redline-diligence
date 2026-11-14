@@ -10,6 +10,7 @@ JSON mode: response_format={"type": "json_object"}
 """
 
 from src.agents.retrieval_strategy import apply_filter_overrides
+from src.llm.failures import classify_failure
 from src.llm.litellm_wrapper import ServedModel, call_structured_agent
 from src.llm.budget_tracker import BudgetTracker
 from src.llm.prompt_templates.query_intelligence import (
@@ -90,7 +91,10 @@ async def query_intelligence_node(state: AgentState) -> dict:
             extra={"error": str(e), "error_type": type(e).__name__},
         )
         result = {}
-        degraded = f"{type(e).__name__}: {e}"
+        # The trace reaches API callers; provider error text can carry request
+        # URLs, hostnames and raw model output. Keep only the failure class —
+        # the full error is in the log line above.
+        degraded = classify_failure(e).kind.value
     model = served.model
 
     # Everything read from the model goes through the schema: a null filter
