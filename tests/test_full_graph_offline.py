@@ -778,12 +778,6 @@ class TestHttp:
         assert not any(fragment in response.text for fragment in INTERNAL_FRAGMENTS)
         assert "request id" in response.json()["detail"]
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason="audit W1/P1: stream_query puts str(exception) in the error event and the "
-        "route forwards it verbatim",
-    )
     async def test_node_failure_mid_stream_does_not_leak_internals(self, offline_pipeline):
         """
         The retrieval node raises after query intelligence has already been
@@ -850,7 +844,6 @@ class TestKnownDefects:
         rejected, _fallback, next_query = p.llm.of("synthesis")
         assert next_query.model == rejected.model
 
-    @known_defect("W5", "agent_trace and rewrite_history use additive reducers on a reused thread")
     async def test_second_query_in_a_session_does_not_return_the_first_ones_trace(
         self, offline_pipeline
     ):
@@ -864,7 +857,6 @@ class TestKnownDefects:
         assert [t["agent"] for t in second.state["agent_trace"]] == ANSWERED
         assert second.state["rewrite_history"] == []
 
-    @known_defect("W5", "thread id is f'{deal_id}_{session_id}', ambiguous for ids containing '_'")
     async def test_sessions_of_different_deals_do_not_share_a_thread(self, offline_pipeline):
         p = offline_pipeline
         await p.load_data_room()
