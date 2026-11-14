@@ -2,11 +2,15 @@
 LiteLLM wrapper for structured agent calls.
 
 Enforces JSON mode via response_format parameter for agents that expect
-structured JSON output (Agents 1, 5, 6, 7, 8).
-Includes retry on JSON parse failure (max 3 attempts).
+structured JSON output (Agents 1, 5, 6, 8), guarantees the result is a JSON
+object, and descends the agent ladder when the selected slot fails.
 
 All agents that return JSON MUST use call_structured_agent().
 Agent 7 (Answer Synthesizer) returns prose and uses call_prose_agent().
+
+Every provider request made here is accounted for in BudgetTracker: selection
+pays for the first, a retry pays for itself, and a request the provider refused
+gives its unit back (see "Accounting at the call boundary").
 """
 
 import asyncio
@@ -17,7 +21,15 @@ import time
 
 import litellm
 
-from src.llm.model_registry import AGENT_LADDER, LOCAL_MODEL
+from src.llm.failures import (
+    Failure,
+    FailureKind,
+    ProseAgentFailed,
+    StructuredOutputError,
+    TokenWindowFull,
+    classify_failure,
+)
+from src.llm.model_registry import AGENT_LADDER, LOCAL_MODEL, is_local
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -45,6 +57,13 @@ def set_trace_context(**fields) -> None:
         **fields: Values to attach to every subsequent call in this context.
     """
     _trace_context.set({k: v for k, v in fields.items() if v is not None})
+
+    # The orchestrator calls this once per query, which makes it the start of
+    # a request as far as routing is concerned: model skips recorded by an
+    # earlier query in the same task must not carry over.
+    from src.llm.budget_tracker import begin_request_scope  # deferred: avoids import cycle
+
+    begin_request_scope()
 
 
 def _langfuse_enabled() -> bool:
@@ -155,9 +174,21 @@ RETRY_BACKOFF_SECONDS = 2.0
 # cannot walk the whole ladder on every request.
 MAX_LADDER_FALLBACKS = 6
 
-# Rate limits are enforced over a rolling minute, so a 429 needs a longer pause
-# than a generic transport error before the next attempt is worth making.
-RATE_LIMIT_BACKOFF_SECONDS = 20.0
+# Same-slot transport retries for the local model only (see _structured_on_slot).
+# A refused connection is excluded: nothing is listening, and waiting six
+# seconds to learn that again helps nobody.
+LOCAL_TRANSPORT_ATTEMPTS = 3
+_LOCAL_RETRY_KINDS = frozenset({
+    FailureKind.TIMEOUT,
+    FailureKind.SERVER_ERROR,
+    FailureKind.SERVICE_UNAVAILABLE,
+    FailureKind.UNKNOWN,
+})
+
+# How much of an unusable reply is echoed back in the repair request. Enough to
+# show the model what it did; bounded so a runaway reply cannot double the
+# prompt.
+REPAIR_ECHO_CHARS = 4000
 
 # Per-request ceilings. LiteLLM defaults to 600s, which is not a timeout so much
 # as an absence of one: when Gemini returned 503 "experiencing high demand", each
@@ -180,18 +211,12 @@ def is_quota_error(exc: Exception) -> bool:
 
     Distinguishing this from a generic failure is what lets a caller move down
     the model ladder instead of retrying a model the provider will keep refusing
-    all day. A per-minute limit and a per-day limit both surface as 429; the
-    caller treats them the same because in either case another rung is a better
-    bet than waiting.
+    all day. A per-minute limit and a per-day limit both surface as 429 and both
+    answer True here — another slot is the better bet either way. What differs
+    is how long the refused slot stays out, and that is decided by
+    BudgetTracker.mark_slot_exhausted from the quota the provider named.
     """
-    name = type(exc).__name__.lower()
-    text = str(exc).lower()
-    return (
-        "ratelimit" in name
-        or "429" in text
-        or "resource_exhausted" in text
-        or "quota" in text
-    )
+    return classify_failure(exc).kind is FailureKind.QUOTA
 
 
 def is_service_unavailable(exc: Exception) -> bool:
@@ -212,15 +237,16 @@ def is_service_unavailable(exc: Exception) -> bool:
     Deliberately NOT treated as quota exhaustion: marking the slot spent would
     retire that model for the rest of the day over a blip that typically clears
     in minutes.
+
+    Also True for a 500/502 and for ProseAgentFailed — a model whose same-model
+    retries all came back empty or errored. The repair is identical (try
+    another model), and without it those cases matched no classifier and ended
+    the caller's ladder in a refusal while six other rungs sat unused.
     """
-    name = type(exc).__name__.lower()
-    text = str(exc).lower()
-    return (
-        "serviceunavailable" in name
-        or "overloaded" in name
-        or "503" in text
-        or "unavailable" in text
-        or "experiencing high demand" in text
+    return classify_failure(exc).kind in (
+        FailureKind.SERVICE_UNAVAILABLE,
+        FailureKind.SERVER_ERROR,
+        FailureKind.MODEL_FAILED,
     )
 
 
@@ -240,14 +266,7 @@ def is_model_unavailable_for_key(exc: Exception) -> bool:
     "this key may never use this model", which is permanent and affects one
     slot.
     """
-    text = str(exc).lower()
-    if "404" not in text and "notfound" not in type(exc).__name__.lower():
-        return False
-    return (
-        "no longer available" in text
-        or "not found for api version" in text
-        or "is not supported for generatecontent" in text
-    )
+    return classify_failure(exc).kind is FailureKind.MODEL_UNAVAILABLE_FOR_KEY
 
 
 def is_timeout_error(exc: Exception) -> bool:
@@ -264,9 +283,7 @@ def is_timeout_error(exc: Exception) -> bool:
     budget expired before the ladder was ever allowed to try a healthy model, so
     the query returned nothing at all rather than a slightly worse answer.
     """
-    name = type(exc).__name__.lower()
-    text = str(exc).lower()
-    return "timeout" in name or "timed out" in text or "timeout passed" in text
+    return classify_failure(exc).kind is FailureKind.TIMEOUT
 
 
 def is_auth_error(exc: Exception) -> bool:
@@ -283,16 +300,554 @@ def is_auth_error(exc: Exception) -> bool:
     entry in GEMINI_API_KEYS had been split by a stray comma into two fragments —
     and every request routed to it died instead of moving to a working key.
     """
-    name = type(exc).__name__.lower()
-    text = str(exc).lower()
-    return (
-        "authentication" in name
-        or "api key not valid" in text
-        or "api_key_invalid" in text
-        or "access_token_type_unsupported" in text
-        or "unauthenticated" in text
-        or "permission_denied" in text
+    return classify_failure(exc).kind is FailureKind.AUTH
+
+
+# ─── Accounting at the call boundary ─────────────────────────────────────────
+#
+# BudgetTracker debits one daily unit and one RPM-window entry when it SELECTS a
+# slot. Everything after that happens here, where the provider's answer is
+# known — so this is where the count is reconciled: a refused request gives its
+# unit back, a same-slot retry pays for itself, and a 429 is annotated with the
+# quota it tripped. Doing it at the call boundary means every caller gets it,
+# including the ladder loops that live in the agents.
+
+
+def _live_tracker():
+    """The process's BudgetTracker if one has been initialised, else None."""
+    from src.llm.budget_tracker import BudgetTracker  # deferred: avoids import cycle
+
+    return BudgetTracker._instance
+
+
+def _owned_slot(api_key: str | None):
+    """
+    Resolves the credential a request was sent with to the tracker's key index.
+
+    Returns:
+        (tracker, key_index) when a tracker is metering this credential, else
+        None — a local model, a direct call with an unmanaged key, or a test
+        double standing in for the tracker.
+    """
+    if not api_key:
+        return None
+    tracker = _live_tracker()
+    lookup = getattr(tracker, "key_index_of", None)
+    if lookup is None:
+        return None
+    key_index = lookup(api_key)
+    return (tracker, key_index) if key_index >= 0 else None
+
+
+async def _settle_failure(model: str, api_key: str | None, failure: Failure) -> None:
+    """
+    Reconciles the tracker with a request that failed before being served.
+
+    Notes the quota a 429 tripped (so mark_slot_exhausted can tell a spent day
+    from a busy minute) and refunds the unit when the provider did not serve
+    the request. Never raises: bookkeeping must not break a fallback path.
+    """
+    owned = _owned_slot(api_key)
+    if owned is None:
+        return
+    tracker, key_index = owned
+    try:
+        if failure.kind is FailureKind.QUOTA:
+            tracker.note_quota_refusal(
+                key_index, model,
+                per_minute=failure.is_per_minute_quota,
+                retry_after=failure.retry_after,
+            )
+        if failure.refundable:
+            await tracker.refund_slot(key_index, model)
+    except Exception as e:
+        logger.error(
+            "Failed to settle quota after a provider failure",
+            extra={"model": model, "error": str(e)},
+        )
+
+
+async def _charge_retry(model: str, api_key: str | None) -> bool:
+    """
+    Pays for one more request on a slot that selection already paid for once.
+
+    Returns:
+        True if the retry may be sent. Always True when nothing is metering the
+        call; False when the slot has no window or daily allowance left, in
+        which case the caller should give up on this slot rather than retry.
+    """
+    owned = _owned_slot(api_key)
+    if owned is None:
+        return True
+    tracker, key_index = owned
+    try:
+        return await tracker.charge_extra_request(key_index, model)
+    except Exception as e:
+        logger.error(
+            "Failed to account for a retry; not retrying on this slot",
+            extra={"model": model, "error": str(e)},
+        )
+        return False
+
+
+# Failures that are evidence about the provider's health for a model, as
+# opposed to our own connectivity or one slot's quota. Only these feed the
+# process-wide cooldown.
+_HEALTH_KINDS = frozenset({
+    FailureKind.SERVICE_UNAVAILABLE,
+    FailureKind.TIMEOUT,
+    FailureKind.SERVER_ERROR,
+})
+
+
+def _report_unhealthy(model: str) -> None:
+    """
+    Tells the tracker the provider failed on this model.
+
+    Reported here, at the call boundary, because this is the only code that
+    actually sees the provider fail. Callers can only keep their own request
+    off a model (BudgetTracker.skip_model_for_request); they have no way to
+    put it in the process-wide cooldown, so a rejected answer can no longer be
+    booked as an outage.
+    """
+    report = getattr(_live_tracker(), "report_model_unavailable", None)
+    if report is not None:
+        report(model)
+
+
+# Characters per input token, for the estimate booked before a request is sent.
+# Deliberately low (English prose runs nearer 4): figures, tables and markup
+# tokenise denser than prose, and an estimate that is too high only matters
+# near the ceiling, where caution is the point. It is replaced by the provider's
+# own prompt-token count as soon as the response arrives.
+CHARS_PER_INPUT_TOKEN = 3.0
+
+
+def _estimate_input_tokens(messages: list[dict]) -> int:
+    """Upper-biased estimate of a request's input tokens, from its length."""
+    chars = sum(len(m.get("content") or "") for m in messages)
+    return int(chars / CHARS_PER_INPUT_TOKEN) + 1
+
+
+def _prompt_tokens(usage) -> int | None:
+    """The provider's prompt-token count from a usage object or dict, if any."""
+    value = getattr(usage, "prompt_tokens", None)
+    if value is None and isinstance(usage, dict):
+        value = usage.get("prompt_tokens")
+    return value if isinstance(value, int) else None
+
+
+async def _reserve_input_tokens(kwargs: dict, model: str, api_key: str | None):
+    """
+    Books the request's input against the slot's tokens-per-minute window.
+
+    Returns:
+        The reservation, or None when nothing meters this call.
+
+    Raises:
+        TokenWindowFull: The request does not fit this minute. It has not been
+            sent; the unit taken for it at selection is handed back and the
+            refusal noted, exactly as for a per-minute 429 from the provider.
+    """
+    owned = _owned_slot(api_key)
+    if owned is None:
+        return None
+    tracker, key_index = owned
+    try:
+        return tracker.reserve_input_tokens(
+            key_index, model, _estimate_input_tokens(kwargs["messages"])
+        )
+    except TokenWindowFull as full:
+        logger.warning(
+            "Request held back: it would overrun the slot's tokens-per-minute window",
+            extra={"model": model, "key_index": key_index,
+                   "retry_after": round(full.retry_after, 1)},
+        )
+        await _settle_failure(model, api_key, classify_failure(full))
+        raise
+
+
+async def _acompletion(kwargs: dict, model: str, api_key: str | None):
+    """
+    litellm.acompletion with the accounts settled either way: input tokens
+    booked before the request and corrected after it, and the quota unit
+    refunded if the provider refused.
+    """
+    reservation = await _reserve_input_tokens(kwargs, model, api_key)
+    try:
+        response = await litellm.acompletion(**kwargs)
+    except Exception as e:
+        failure = classify_failure(e)
+        if reservation is not None and failure.refundable:
+            reservation.release()
+        await _settle_failure(model, api_key, failure)
+        raise
+    if reservation is not None:
+        reservation.adjust(_prompt_tokens(getattr(response, "usage", None)))
+    return response
+
+
+# ─── Structured (JSON) calls ─────────────────────────────────────────────────
+
+
+class ServedModel:
+    """
+    Out-parameter naming the model that actually answered a structured call.
+
+    call_structured_agent may descend the ladder, so the model an agent selected
+    is not necessarily the one that served it. Agents pass one of these to keep
+    their trace truthful; a test double that ignores it leaves the initial
+    model in place.
+    """
+
+    def __init__(self, model: str):
+        self.model = model
+
+
+def _parse_json_object(raw, finish_reason: str | None) -> dict:
+    """
+    Turns a completion into the JSON object the agent asked for.
+
+    Args:
+        raw: The completion text (may be None).
+        finish_reason: Provider finish reason; "length" means the output was
+            cut off at max_tokens.
+
+    Returns:
+        The parsed object.
+
+    Raises:
+        StructuredOutputError: Empty, truncated, unparseable, or valid JSON
+            that is not an object. The last case used to be returned as-is and
+            crashed the caller on its first `.get`.
+    """
+    cut_off = finish_reason == "length"
+    if raw is None or not str(raw).strip():
+        # With a thinking model an empty reply at the token limit means the
+        # budget went on reasoning, so it is reported as truncation: the repair
+        # is more room, not a re-ask.
+        raise StructuredOutputError(
+            "truncated" if cut_off else "empty", "the completion had no content", raw
+        )
+
+    # Strip accidental markdown fences before parsing
+    clean = str(raw).strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    try:
+        parsed = json.loads(clean)
+    except json.JSONDecodeError as e:
+        # JSON mode occasionally wraps the object in a sentence. Salvaging the
+        # outermost braces is free; a repair request costs a quota unit.
+        start, end = clean.find("{"), clean.rfind("}")
+        parsed = None
+        if 0 <= start < end:
+            try:
+                parsed = json.loads(clean[start:end + 1])
+            except json.JSONDecodeError:
+                parsed = None
+        if parsed is None:
+            raise StructuredOutputError(
+                "truncated" if cut_off else "malformed", str(e), raw
+            ) from e
+
+    if not isinstance(parsed, dict):
+        raise StructuredOutputError(
+            "wrong_shape", f"expected a JSON object, got {type(parsed).__name__}", raw
+        )
+    return parsed
+
+
+def _repair_messages(messages: list[dict], error: StructuredOutputError) -> list[dict]:
+    """
+    Messages for the one repair request that follows an unusable reply.
+
+    Sending the identical request again at temperature 0 mostly reproduces the
+    identical reply — the old loop did that twice. A reply that was cut off gets
+    the same question with more room (the caller doubles max_tokens); anything
+    else is shown its own output and the parser's complaint.
+    """
+    if error.problem in ("empty", "truncated"):
+        return messages
+    return messages + [
+        {"role": "assistant", "content": (error.raw or "")[:REPAIR_ECHO_CHARS]},
+        {
+            "role": "user",
+            "content": (
+                f"That reply could not be used ({error.problem}). Reply again with a "
+                "single valid JSON object only — no prose before or after it, no "
+                "code fences."
+            ),
+        },
+    ]
+
+
+async def _structured_request(
+    messages: list[dict],
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    api_key: str | None,
+    agent: str | None,
+) -> dict:
+    """One provider request in JSON mode, parsed. No retries of any kind."""
+    kwargs = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "response_format": {"type": "json_object"},  # Enforces JSON mode
+        "timeout": STRUCTURED_TIMEOUT_SECONDS,
+    }
+    if is_local(model):
+        kwargs["num_ctx"] = 8192  # Expand context window for local Ollama to prevent truncation
+    if api_key:
+        # Explicit per-call credential. With key rotation the key is
+        # chosen per request, so relying on the ambient GEMINI_API_KEY
+        # env var would send every call to key 1 while the tracker
+        # debited whichever key it thought it had picked.
+        kwargs["api_key"] = api_key
+    metadata = _call_metadata(agent)
+    if metadata:
+        kwargs["metadata"] = metadata
+
+    logger.info(
+        "Calling structured agent",
+        extra={"model": model, "temperature": temperature, "max_tokens": max_tokens},
     )
+    started = time.monotonic()
+    response = await _acompletion(kwargs, model, api_key)
+    _log_usage(response, model, agent, started)
+
+    first = response.choices[0]
+    parsed = _parse_json_object(first.message.content, getattr(first, "finish_reason", None))
+    logger.info(
+        "Structured agent call successful",
+        extra={"model": model, "response_keys": list(parsed.keys())},
+    )
+    return parsed
+
+
+async def _structured_on_slot(
+    system_prompt: str,
+    user_prompt: str,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    api_key: str | None,
+    agent: str | None,
+) -> dict:
+    """
+    Everything that is worth doing on ONE (key, model) slot.
+
+    For a metered cloud slot that is a single request, plus at most one repair
+    request when the reply was unusable — and the repair is paid for. Transport
+    failures are not retried here at all: a 429, a 503 or a timeout is true for
+    the next identical request too, so the ladder moves instead.
+
+    The local model is the exception. Nothing meters it and there is no rung
+    below it, so a transient fault there is retried in place as it always was.
+    """
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    transport_attempts = LOCAL_TRANSPORT_ATTEMPTS if is_local(model) else 1
+
+    for attempt in range(1, transport_attempts + 1):
+        try:
+            try:
+                return await _structured_request(
+                    messages, model, temperature, max_tokens, api_key, agent
+                )
+            except StructuredOutputError as unusable:
+                logger.warning(
+                    "Agent returned unusable JSON; sending one repair request",
+                    extra={"model": model, "problem": unusable.problem,
+                           "raw_preview": (unusable.raw or "")[:200] or "empty"},
+                )
+                if not await _charge_retry(model, api_key):
+                    raise
+                room = max_tokens * 2 if unusable.problem in ("empty", "truncated") else max_tokens
+                return await _structured_request(
+                    _repair_messages(messages, unusable), model, temperature, room, api_key, agent
+                )
+        except StructuredOutputError:
+            raise
+        except Exception as e:
+            logger.error(
+                "Structured agent call failed",
+                extra={"model": model, "attempt": attempt, "error": str(e),
+                       "error_type": type(e).__name__},
+            )
+            retryable = classify_failure(e).kind in _LOCAL_RETRY_KINDS
+            if attempt == transport_attempts or not retryable:
+                raise
+            await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
+
+    raise RuntimeError("unreachable: the loop above returns or raises")
+
+
+async def _reroute_after_failure(tracker, choice, exc: Exception, excluded: set[str]) -> bool:
+    """
+    Applies the repair a failure calls for and says whether another rung is
+    worth trying.
+
+    This is the whole failure taxonomy in one place, each class repaired at the
+    scope it is true for:
+
+      429                → this (key, model) slot: rested if per-minute, spent
+                           for the day otherwise. Next key, same model.
+      rejected key       → the key, for every model.
+      404 for this key   → this slot, permanently.
+      503/timeout/5xx    → the model, for every key, on an escalating cooldown.
+      unusable output    → the model, for this request only. Says nothing about
+                           its health, so nobody else is affected.
+      anything else      → stop. A malformed request fails identically on every
+                           rung, and walking the ladder would only spend quota.
+
+    Args:
+        tracker: BudgetTracker (or a stand-in exposing the mark_* methods).
+        choice: The slot that failed.
+        exc: What it raised.
+        excluded: Request-scoped set of models to avoid; updated in place.
+
+    Returns:
+        True if the ladder should select again.
+    """
+    key_index = getattr(choice, "key_index", -1)
+    model = choice.model
+    if key_index < 0 or is_local(model):
+        return False
+
+    failure = classify_failure(exc)
+    kind = failure.kind
+
+    if kind is FailureKind.AUTH:
+        tracker.mark_key_unusable(key_index)
+        return True
+    if kind is FailureKind.QUOTA:
+        await tracker.mark_slot_exhausted(key_index, model)
+        logger.warning(
+            "Agent rung refused by provider, descending the ladder",
+            extra={"model": model, "key_index": key_index,
+                   "quota_window": failure.quota_window},
+        )
+        return True
+    if kind is FailureKind.MODEL_UNAVAILABLE_FOR_KEY:
+        # This key may never use this model. Retire the pair, not the
+        # key and not the model — both are still fine elsewhere.
+        tracker.mark_slot_unavailable(key_index, model)
+        logger.warning(
+            "Model not available for this credential; retiring the slot",
+            extra={"model": model, "key_index": key_index},
+        )
+        return True
+    if failure.another_model_helps:
+        # The model is down or unresponsive for everyone, so rotating
+        # keys is pointless. Keep this request off it, and — when it is the
+        # provider that failed rather than our own connection — tell every
+        # other request too.
+        tracker.skip_model_for_request(model)
+        if kind in _HEALTH_KINDS:
+            report = getattr(tracker, "report_model_unavailable", None)
+            if report is not None:
+                report(model)
+        logger.warning(
+            "Agent rung unavailable provider-side, trying another model",
+            extra={"model": model, "failure": kind.value},
+        )
+        return True
+    if kind is FailureKind.BAD_OUTPUT:
+        excluded.add(model)
+        logger.warning(
+            "Agent rung returned unusable output twice, trying another model",
+            extra={"model": model},
+        )
+        return True
+    return False
+
+
+def _ladder_hops(tracker) -> int:
+    """
+    How many rungs one request may try.
+
+    Each failed hop removes something from future selection (a slot, a key, a
+    model), so the walk is self-limiting; the bound only has to stop a request
+    from touring a provider-wide outage. It grows with the number of keys
+    because a 429 costs one hop per key on the same model: with five keys and a
+    fixed bound of six, a stale counter on the top rung used up five hops
+    rotating keys and left one for the entire rest of the ladder.
+    """
+    keys = getattr(tracker, "_api_keys", None) or ()
+    return MAX_LADDER_FALLBACKS + sum(1 for k in keys if k)
+
+
+async def _structured_with_ladder(tracker, first_choice, on_slot) -> tuple[dict, str]:
+    """
+    Runs a structured call down the agent ladder until a rung answers.
+
+    Args:
+        tracker: BudgetTracker (or a stand-in).
+        first_choice: A slot the caller already selected, or None to select.
+        on_slot: Coroutine function taking a ModelChoice and returning the
+            parsed dict from that slot.
+
+    Returns:
+        (parsed dict, model that served it).
+
+    Raises:
+        Exception: The last cloud failure when no rung — including the local
+            model — produced an answer.
+    """
+    from src.llm.budget_tracker import ModelChoice  # deferred: avoids import cycle
+
+    excluded: set[str] = set()
+    choice = first_choice
+    last_error: Exception | None = None
+    cloud_error: Exception | None = None
+
+    def give_up(error: Exception) -> Exception:
+        # No local model to fall back on (connection refused) is not news; the
+        # cloud failure that sent us there is the one worth reporting.
+        if cloud_error is not None and classify_failure(error).kind is FailureKind.CONNECTION:
+            return cloud_error
+        return error
+
+    for _ in range(_ladder_hops(tracker)):
+        if choice is None:
+            if excluded and hasattr(tracker, "key_index_of"):
+                choice = await tracker.get_model_for_agent(exclude=frozenset(excluded))
+            else:
+                choice = await tracker.get_model_for_agent()
+        try:
+            result = await on_slot(choice)
+        except Exception as e:
+            last_error = e
+            if not is_local(choice.model):
+                cloud_error = e
+            if not await _reroute_after_failure(tracker, choice, e, excluded):
+                break
+            choice = None
+            continue
+        # One good answer ends a failure streak. Only the synthesizer used to
+        # report this, so an agent model that had one bad spell kept its
+        # escalated cooldown for the life of the process.
+        note_healthy = getattr(tracker, "note_model_healthy", None)
+        if note_healthy is not None:
+            note_healthy(choice.model)
+        return result, choice.model
+
+    if choice is not None and is_local(choice.model):
+        raise give_up(last_error) if last_error else RuntimeError("structured call failed")
+
+    logger.warning(
+        "Cloud ladder failed, falling back to local model",
+        extra={"error": str(last_error), "fallback": LOCAL_MODEL},
+    )
+    try:
+        result = await on_slot(ModelChoice(model=LOCAL_MODEL, api_key=None, key_index=-1))
+    except Exception as local_error:
+        raise give_up(local_error)
+    return result, LOCAL_MODEL
 
 
 async def call_structured_agent(
@@ -303,11 +858,21 @@ async def call_structured_agent(
     max_tokens: int = 1000,
     api_key: str | None = None,
     agent: str | None = None,
+    descend: bool = True,
+    served: ServedModel | None = None,
 ) -> dict:
     """
     Wrapper for all agents that return JSON.
-    Enforces JSON mode via response_format parameter.
-    Includes retry on JSON parse failure (max 3 attempts).
+    Enforces JSON mode via response_format parameter and guarantees the result
+    is a JSON object.
+
+    The caller names the slot to try first (`model`, `api_key`, as selected by
+    BudgetTracker.get_model_for_agent). If that slot fails and the tracker is
+    metering the credential, the call descends the agent ladder itself: next
+    key on a 429, next model on a 503 or timeout, and finally the local model.
+    Agents 1, 5 and 6 select once and call this, so before the descent lived
+    here a single 429 on the selected key failed the whole query — after 60
+    seconds of backoff against a key that was not going to answer.
 
     Args:
         system_prompt: System-level instructions for the agent.
@@ -316,111 +881,59 @@ async def call_structured_agent(
         temperature: Sampling temperature (default 0.0 for determinism).
         max_tokens: Maximum output tokens.
         api_key: Credential for this specific call. Required when multiple keys
-            are configured — see the note at the kwargs assembly below.
+            are configured — see the note at the kwargs assembly.
         agent: Calling agent's name, for usage logs and optional tracing.
+        descend: False to try only the named slot and raise. For callers that
+            run their own ladder (the verification path).
+        served: Optional holder updated with the model that actually answered.
 
     Returns:
-        Parsed JSON dict from the agent response.
+        Parsed JSON object from the agent response.
 
     Raises:
-        ValueError: If agent returns invalid JSON after 3 attempts.
-        litellm.exceptions.APIError: On API communication failure.
+        StructuredOutputError: (a ValueError) every rung tried returned
+            unusable JSON.
+        Exception: The provider failure, when no rung could serve the call.
     """
-    for attempt in range(3):
-        try:
-            logger.info(
-                "Calling structured agent",
-                extra={
-                    "model": model,
-                    "attempt": attempt + 1,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                },
-            )
+    owned = _owned_slot(api_key) if descend else None
+    if owned is None:
+        return await _structured_on_slot(
+            system_prompt, user_prompt, model, temperature, max_tokens, api_key, agent
+        )
 
-            kwargs = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "response_format": {"type": "json_object"},  # Enforces JSON mode
-                "timeout": STRUCTURED_TIMEOUT_SECONDS,
-            }
-            if model.startswith("ollama/"):
-                kwargs["num_ctx"] = 8192  # Expand context window for local Ollama to prevent truncation
-            if api_key:
-                # Explicit per-call credential. With key rotation the key is
-                # chosen per request, so relying on the ambient GEMINI_API_KEY
-                # env var would send every call to key 1 while the tracker
-                # debited whichever key it thought it had picked.
-                kwargs["api_key"] = api_key
-            metadata = _call_metadata(agent)
-            if metadata:
-                kwargs["metadata"] = metadata
+    from src.llm.budget_tracker import ModelChoice  # deferred: avoids import cycle
 
-            started = time.monotonic()
-            response = await litellm.acompletion(**kwargs)
-            _log_usage(response, model, agent, started)
+    tracker, key_index = owned
 
-            raw = response.choices[0].message.content
-            # Strip accidental markdown fences before parsing
-            clean = raw.strip().removeprefix("```json").removesuffix("```").strip()
-            parsed = json.loads(clean)
+    async def on_slot(choice):
+        return await _structured_on_slot(
+            system_prompt, user_prompt, choice.model, temperature, max_tokens,
+            choice.api_key, agent,
+        )
 
-            logger.info(
-                "Structured agent call successful",
-                extra={
-                    "model": model,
-                    "attempt": attempt + 1,
-                    "response_keys": list(parsed.keys()) if isinstance(parsed, dict) else "non-dict",
-                },
-            )
-            return parsed
+    result, served_model = await _structured_with_ladder(
+        tracker, ModelChoice(model=model, api_key=api_key, key_index=key_index), on_slot
+    )
+    if served is not None:
+        served.model = served_model
+    return result
 
-        except json.JSONDecodeError as e:
-            logger.warning(
-                "Agent returned invalid JSON",
-                extra={
-                    "model": model,
-                    "attempt": attempt + 1,
-                    "error": str(e),
-                    "raw_preview": raw[:200] if raw else "empty",
-                },
-            )
-            if attempt == 2:
-                raise ValueError(
-                    f"Agent returned invalid JSON after 3 attempts: {e}\nRaw: {raw}"
-                )
-            continue
 
-        except Exception as e:
-            logger.error(
-                "Structured agent call failed",
-                extra={
-                    "model": model,
-                    "attempt": attempt + 1,
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                },
-            )
-            if attempt == 2:
-                raise
-            # Back off before retrying. Retrying a 429 or a connection drop with
-            # no delay just reproduces the same failure — the original loop did
-            # exactly that, so a rate-limited call burned all three attempts
-            # inside a few milliseconds and still failed. Rate limits get a
-            # longer wait than other transport errors because the window they
-            # are enforcing is measured in seconds.
-            is_rate_limit = "ratelimit" in type(e).__name__.lower() or "429" in str(e)
-            delay = RATE_LIMIT_BACKOFF_SECONDS if is_rate_limit else RETRY_BACKOFF_SECONDS
-            await asyncio.sleep(delay * (attempt + 1))
-            continue
-
-    # Should never reach here due to raises above, but satisfy type checker
-    raise ValueError("Unexpected: exhausted all retry attempts without raising")
+# Failures a prose call hands straight to the caller's ladder: retrying the same
+# slot cannot change the answer, or costs more than moving on. A 500 is in the
+# second group — each in-place retry is an admitted request that keeps its
+# daily unit, so three of them spent 15% of a reasoning slot's day on a model
+# that had just failed. A dropped connection and an empty completion are still
+# retried in place first.
+_PROSE_NO_RETRY_KINDS = frozenset({
+    FailureKind.SERVICE_UNAVAILABLE,
+    FailureKind.SERVER_ERROR,
+    FailureKind.TIMEOUT,
+    FailureKind.QUOTA,
+    FailureKind.AUTH,
+    FailureKind.MODEL_UNAVAILABLE_FOR_KEY,
+    FailureKind.REQUEST_INVALID,
+})
 
 
 async def call_prose_agent(
@@ -450,7 +963,10 @@ async def call_prose_agent(
         Raw string response from the agent. Never None.
 
     Raises:
-        RuntimeError: If every attempt fails or returns an empty completion.
+        ProseAgentFailed: (a RuntimeError) every attempt failed or returned an
+            empty completion. Classified so a ladder moves to another model.
+        Exception: A provider refusal the caller's ladder classifies — 429,
+            503, timeout, rejected key, revoked model — raised on first sight.
 
     Retries exist because both failure modes were observed on the golden-set run:
     a transient upstream 503 ("model is currently experiencing high demand") and,
@@ -459,10 +975,15 @@ async def call_prose_agent(
     the whole request with an opaque TypeError. Both are now retried, and an
     exhausted retry raises a typed error the synthesizer converts into a refusal —
     a refusal is a far better outcome for the caller than a 500.
+
+    Every retry is a provider request, so every retry is charged to the slot
+    (see _charge_retry). When the slot cannot pay, the retries stop.
     """
     last_error: Exception | None = None
+    attempts = 0
 
     for attempt in range(1, MAX_RETRIES + 1):
+        attempts = attempt
         logger.info(
             "Calling prose agent",
             extra={
@@ -490,7 +1011,7 @@ async def call_prose_agent(
             if metadata:
                 prose_kwargs["metadata"] = metadata
             started = time.monotonic()
-            response = await litellm.acompletion(**prose_kwargs)
+            response = await _acompletion(prose_kwargs, model, api_key)
             _log_usage(response, model, agent, started)
             content = response.choices[0].message.content
 
@@ -525,16 +1046,27 @@ async def call_prose_agent(
             # Measured: gemini-3.7-flash returning 503 cost three attempts and
             # ~48 seconds of backoff before the ladder was allowed to move to
             # gemini-3.6-flash, which answered on the first try.
-            if is_service_unavailable(e) or is_timeout_error(e):
+            #
+            # The same holds for a 429, a rejected key and a revoked model:
+            # each is a property of the slot, not of this attempt. They used to
+            # be retried here — three requests and six seconds against a key
+            # that had already said no — before the ladder saw them.
+            kind = classify_failure(e).kind
+            if kind in _PROSE_NO_RETRY_KINDS:
+                if kind in _HEALTH_KINDS:
+                    _report_unhealthy(model)
                 raise
 
-        if attempt < MAX_RETRIES:
-            await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
+        if attempt == MAX_RETRIES or not await _charge_retry(model, api_key):
+            break
+        await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
 
-    raise RuntimeError(
-        f"Prose agent failed after {MAX_RETRIES} attempts "
+    if last_error is not None and classify_failure(last_error).kind in _HEALTH_KINDS:
+        _report_unhealthy(model)
+    raise ProseAgentFailed(
+        f"Prose agent failed after {attempts} attempts "
         f"(model={model}): {last_error}"
-    )
+    ) from last_error
 
 
 async def call_verification_agent_with_model(
@@ -570,7 +1102,7 @@ async def call_verification_agent_with_model(
 
     Raises:
         ValueError: If every configured model returns invalid JSON.
-        Exception: The last transport error when even the local fallback fails.
+        Exception: The last cloud failure when even the local fallback fails.
     """
     backend = os.getenv("VERIFICATION_BACKEND", "cloud").strip().lower()
 
@@ -594,76 +1126,25 @@ async def call_verification_agent_with_model(
 
     tracker = await BudgetTracker.get_instance()
 
-    # Descend the ladder on quota refusals rather than failing. The tracker's
+    # Descend the ladder on refusals rather than failing. The tracker's
     # counters can lag the provider's (restarts reset the in-memory fallback,
     # other processes share the key), so a rung it offers may already be closed.
-    last_error: Exception | None = None
-    choice = None
+    # The descent itself is the same one every structured agent uses.
+    async def on_slot(choice):
+        return await call_structured_agent(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=choice.model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            api_key=choice.api_key,
+            agent=agent,
+            descend=False,
+        )
 
-    for _ in range(MAX_LADDER_FALLBACKS):
-        choice = await tracker.get_model_for_agent()
-        try:
-            result = await call_structured_agent(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                model=choice.model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                api_key=choice.api_key,
-                agent=agent,
-            )
-            _last_verification_model.set(choice.model)
-            return result, choice.model
-        except Exception as e:
-            last_error = e
-            if choice.key_index >= 0 and is_auth_error(e):
-                tracker.mark_key_unusable(choice.key_index)
-                continue
-            if is_quota_error(e) and choice.key_index >= 0:
-                await tracker.mark_slot_exhausted(choice.key_index, choice.model)
-                logger.warning(
-                    "Verification rung refused by provider, descending the ladder",
-                    extra={"model": choice.model, "key_index": choice.key_index},
-                )
-                continue
-            if is_model_unavailable_for_key(e) and choice.key_index >= 0:
-                # This key may never use this model. Retire the pair, not the
-                # key and not the model — both are still fine elsewhere.
-                tracker.mark_slot_unavailable(choice.key_index, choice.model)
-                logger.warning(
-                    "Model not available for this credential; retiring the slot",
-                    extra={"model": choice.model, "key_index": choice.key_index},
-                )
-                continue
-            if (is_service_unavailable(e) or is_timeout_error(e)) and choice.key_index >= 0:
-                # The model is down or unresponsive for everyone, so rotating
-                # keys is pointless. Skip the whole model for this request
-                # without debiting quota — this clears in minutes.
-                tracker.skip_model_for_request(choice.model)
-                logger.warning(
-                    "Verification rung unavailable provider-side, trying another model",
-                    extra={"model": choice.model},
-                )
-                continue
-            break
-
-    if choice is not None and choice.model == LOCAL_VERIFICATION_MODEL:
-        raise last_error if last_error else RuntimeError("verification failed")
-
-    logger.warning(
-        "Cloud verification failed, falling back to local model",
-        extra={"error": str(last_error), "fallback": LOCAL_VERIFICATION_MODEL},
-    )
-    result = await call_structured_agent(
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        model=LOCAL_VERIFICATION_MODEL,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        agent=agent,
-    )
-    _last_verification_model.set(LOCAL_VERIFICATION_MODEL)
-    return result, LOCAL_VERIFICATION_MODEL
+    result, model = await _structured_with_ladder(tracker, None, on_slot)
+    _last_verification_model.set(model)
+    return result, model
 
 
 async def call_verification_agent(
@@ -811,6 +1292,7 @@ async def stream_prose_agent(
     emitted = 0
     started = time.monotonic()
     usage = None
+    reservation = await _reserve_input_tokens(kwargs, model, api_key)
     try:
         stream = await litellm.acompletion(**kwargs)
         async for chunk in stream:
@@ -825,17 +1307,27 @@ async def stream_prose_agent(
                 on_token(delta)
     except Exception as e:
         if emitted:
+            # A stream that drops mid-answer is the provider failing, whatever
+            # the exception class says.
+            _report_unhealthy(model)
             raise StreamInterrupted(
                 f"stream from {model} failed after {emitted} chars: {e}", emitted, e
             ) from e
-        if (
-            is_service_unavailable(e)
-            or is_timeout_error(e)
-            or is_quota_error(e)
-            or is_auth_error(e)
-            or is_model_unavailable_for_key(e)
-        ):
+        failure = classify_failure(e)
+        if reservation is not None and failure.refundable:
+            reservation.release()
+        await _settle_failure(model, api_key, failure)
+        if failure.kind in _PROSE_NO_RETRY_KINDS:
+            if failure.kind in _HEALTH_KINDS:
+                _report_unhealthy(model)
             raise
+        # The non-streamed attempt below is a second provider request on this
+        # slot, so it is paid for like any other retry.
+        if not await _charge_retry(model, api_key):
+            raise ProseAgentFailed(
+                f"stream from {model} failed before the first token and the slot "
+                f"has no allowance left for a retry: {e}"
+            ) from e
         logger.warning(
             "Streaming failed before the first token; retrying without streaming",
             extra={"model": model, "error": str(e)},
@@ -853,8 +1345,12 @@ async def stream_prose_agent(
         return text
 
     _log_usage(_UsageHolder(usage), model, agent, started)
+    if reservation is not None:
+        reservation.adjust(_prompt_tokens(usage))
 
     text = "".join(parts)
     if not text.strip():
-        raise RuntimeError(f"empty streamed completion (model={model})")
+        # Typed so the caller's ladder tries another model; as a bare
+        # RuntimeError it matched no classifier and ended in a refusal.
+        raise ProseAgentFailed(f"empty streamed completion (model={model})")
     return text

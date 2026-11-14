@@ -42,17 +42,43 @@ With a single key that is ~80 premium syntheses/day (4 reasoning models x 20)
 before quality degrades, and ~500 agent calls. Adding keys multiplies both,
 which is what BudgetTracker's key rotation is for.
 
-TPM IS DECLARED BUT NOT ENFORCED
---------------------------------
-Tokens-per-minute is recorded here for completeness, but nothing meters it yet:
-enforcing it needs per-call token accounting that the pipeline does not do. At
-current traffic RPM binds long before TPM (15 requests/min against a 250K TPM
-ceiling implies ~16K tokens per request before TPM could bind, well above the
-~8K these prompts run at), so this is a real but presently inactive gap. It is
-recorded rather than left implicit so it does not become a third quota surprise.
+TPM IS METERED ON INPUT TOKENS
+------------------------------
+Tokens-per-minute is an INPUT-token limit, and it is metered per (key, model)
+slot at the call boundary: the wrapper reserves an estimate before sending a
+request and replaces it with the provider's own prompt-token count afterwards
+(BudgetTracker.reserve_input_tokens). A request that would not fit is treated
+exactly like a per-minute 429 that was never sent — the slot rests, the request
+rotates to the next key.
+
+RPM still binds first at ordinary traffic (15 requests/min against 250K TPM
+needs ~16K input tokens per request, and most prompts run ~8K). The case TPM
+exists for is the verification judge under concurrency: it carries up to 9,000
+characters per document, and fifteen of those in a minute on one key is over
+the ceiling.
+
+QUOTAS ARE PER PROJECT, AND THE DAY IS PACIFIC
+----------------------------------------------
+Two facts from the provider's rate-limit documentation that the accounting
+depends on (https://ai.google.dev/gemini-api/docs/rate-limits, read 2026-11-14):
+
+  * "Rate limits are applied per project, not per API key." Key rotation
+    therefore multiplies capacity only when every key in GEMINI_API_KEYS comes
+    from a DIFFERENT Google Cloud project. Two keys from one project share one
+    quota, and the tracker — which counts per key — will believe it has twice
+    what the provider will serve. BudgetTracker warns when it sees the
+    signature of that (see _warn_if_keys_share_a_project).
+  * "Requests per day (RPD) quotas reset at midnight Pacific time." The daily
+    counters reset on that calendar (quota_day below), not on UTC.
+
+The same page labels TPM "Tokens per minute (input)": it is an input-token
+limit. It does not publish per-model free-tier numbers — those are shown only
+in the AI Studio console, which is why the table above is a transcription.
 """
 
 from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 @dataclass(frozen=True)
@@ -60,7 +86,7 @@ class ModelLimits:
     """Provider-enforced quotas for a single upstream model."""
 
     rpm: int          # requests per minute
-    tpm: int          # tokens per minute — declared, not currently enforced
+    tpm: int          # input tokens per minute
     rpd: int          # requests per day
     reasoning: bool   # True for full Flash models, False for Lite variants
 
@@ -145,6 +171,40 @@ AGENT_LADDER: list[str] = [
 ]
 
 
+# Where the provider's daily quota turns over.
+QUOTA_RESET_TIMEZONE = "America/Los_Angeles"
+
+# Used only when the IANA database is unavailable (a slim container without
+# tzdata). Pacific STANDARD time, deliberately: during daylight saving the real
+# reset is an hour earlier than this says, so the fallback errs towards
+# treating a fresh slot as spent for one hour — never towards offering a slot
+# the provider has not reset yet.
+_QUOTA_RESET_FALLBACK = timezone(timedelta(hours=-8))
+
+
+def _quota_timezone():
+    """The provider's reset timezone, or the fixed-offset fallback."""
+    try:
+        return ZoneInfo(QUOTA_RESET_TIMEZONE)
+    except ZoneInfoNotFoundError:
+        return _QUOTA_RESET_FALLBACK
+
+
+def quota_day(now: datetime | None = None) -> date:
+    """
+    The provider's quota day for a moment in time.
+
+    Args:
+        now: An aware datetime; defaults to the current time.
+
+    Returns:
+        The calendar date in the provider's reset timezone. Daily counters
+        belong to this date and reset when it changes.
+    """
+    moment = now if now is not None else datetime.now(timezone.utc)
+    return moment.astimezone(_quota_timezone()).date()
+
+
 def usable_rpd(model: str) -> int:
     """Daily request allowance after the safety margin."""
     limits = MODEL_LIMITS.get(model)
@@ -157,6 +217,17 @@ def rpm_for(model: str) -> int:
     """Requests-per-minute ceiling for a model."""
     limits = MODEL_LIMITS.get(model)
     return limits.rpm if limits else 5
+
+
+def usable_tpm(model: str) -> int | None:
+    """
+    Input tokens per minute we allow ourselves on a model, after the safety
+    margin — or None when the model is not metered (local, or not in the table).
+    """
+    limits = MODEL_LIMITS.get(model)
+    if limits is None or is_local(model):
+        return None
+    return max(1, int(limits.tpm * SAFETY_MARGIN))
 
 
 def is_local(model: str) -> bool:
