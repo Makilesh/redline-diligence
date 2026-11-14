@@ -1,0 +1,26 @@
+{
+ "generated_at": "2026-11-14T18:59:45+00:00",
+ "command": "python -m eval.run_verification_eval --no-nli --update-baseline eval/verification_baseline.json",
+ "nli": "off",
+ "splits": {
+  "dev": {
+   "false_pass_rate": 0.0299,
+   "false_alarm_rate": 0.0,
+   "supported_pass_rate": 0.4862
+  },
+  "test": {
+   "false_pass_rate": 0.0667,
+   "false_alarm_rate": 0.0,
+   "supported_pass_rate": 0.4554
+  }
+ },
+ "random_figure_grounding": {
+  "$X.Y million": 0.022,
+  "$X million": 0.098,
+  "$X.Y billion": 0.021,
+  "N%": 0.349,
+  "N.N%": 0.064,
+  "N.Nx": 0.111,
+  "N bps": 0.095
+ }
+}

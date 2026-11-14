@@ -6,15 +6,15 @@ Datasets (`eval/decisions/data/`, provenance in each file's `_meta`): corpus chu
 
 ## Risk signals (chunk x 10 categories)
 
-Rows: DEV 67, TEST 90; 22 borderline (row, category) pairs unscored. TEST positives: {'change_of_control': 9, 'key_person_dependency': 3, 'litigation': 8, 'ip_risk': 9, 'indemnification': 4, 'regulatory_risk': 5, 'customer_concentration': 2, 'material_adverse_change': 1, 'financial_distress': 3, 'environmental_liability': 2}.
+Rows: DEV 67, TEST 89; 22 borderline (row, category) pairs unscored. TEST positives: {'change_of_control': 9, 'key_person_dependency': 3, 'litigation': 8, 'ip_risk': 9, 'indemnification': 4, 'regulatory_risk': 5, 'customer_concentration': 2, 'material_adverse_change': 1, 'financial_distress': 3, 'environmental_liability': 2}.
 
-Phrasing search on DEV (Laya alone, best threshold): `disclose` F1 0.508 @ 0.55, `disclose_negation` F1 0.450 @ 0.5, `reviewer` F1 0.448 @ 0.55 -> `disclose`.
+Phrasing search on DEV (Laya alone, best threshold): `disclose` F1 0.508 @ 0.55, `disclose_negation` F1 0.469 @ 0.5, `reviewer` F1 0.448 @ 0.55 -> `disclose`.
 
 | design | params | DEV F1 | TEST P | TEST R | TEST F1 | TEST tp/fp/fn |
 |---|---|---|---|---|---|---|
 | regex_legacy |  | 0.596 | 0.741 | 0.435 | 0.548 | 20/7/26 |
 | regex_fixed |  | 0.643 | 0.808 | 0.457 | 0.583 | 21/5/25 |
-| laya | phrasing=disclose, threshold=0.55 | 0.508 | 0.517 | 0.674 | 0.585 | 31/29/15 |
+| laya | phrasing=disclose, threshold=0.55 | 0.508 | 0.525 | 0.696 | 0.598 | 32/29/14 |
 | hybrid_confirm | phrasing=disclose, confirm_threshold=0.375 | 0.706 | 1.000 | 0.457 | 0.627 | 21/0/25 |
 | hybrid_union | phrasing=disclose, threshold=0.675, confirm_threshold=0.375 | 0.731 | 0.889 | 0.522 | 0.658 | 24/3/22 |
 | wired_union | phrasing=disclose, threshold=0.675, confirm_threshold=0.375 | 0.731 | 0.889 | 0.522 | 0.658 | 24/3/22 |
@@ -24,7 +24,7 @@ Per-category TEST F1:
 
 | category | regex_legacy | regex_fixed | laya | hybrid_confirm | hybrid_union | wired_union | wired_confirm |
 |---|---|---|---|---|---|---|---|
-| change_of_control | 0.78 (7/2/2) | 0.78 (7/2/2) | 0.57 (8/11/1) | 0.88 (7/0/2) | 0.82 (7/1/2) | 0.82 (7/1/2) | 0.88 (7/0/2) |
+| change_of_control | 0.78 (7/2/2) | 0.78 (7/2/2) | 0.62 (9/11/0) | 0.88 (7/0/2) | 0.82 (7/1/2) | 0.82 (7/1/2) | 0.88 (7/0/2) |
 | material_adverse_change | 0.67 (1/1/0) | 1.00 (1/0/0) | 0.29 (1/5/0) | 1.00 (1/0/0) | 0.67 (1/1/0) | 0.67 (1/1/0) | 1.00 (1/0/0) |
 | litigation | 0.46 (3/2/5) | 0.46 (3/2/5) | 0.80 (6/1/2) | 0.55 (3/0/5) | 0.86 (6/0/2) | 0.86 (6/0/2) | 0.55 (3/0/5) |
 | regulatory_risk | 0.00 (0/0/5) | 0.00 (0/0/5) | 0.27 (2/8/3) | 0.00 (0/0/5) | 0.00 (0/1/5) | 0.00 (0/1/5) | 0.00 (0/0/5) |
@@ -37,19 +37,19 @@ Per-category TEST F1:
 
 ## PII (chunk flag; flagged chunks are excluded from retrieval)
 
-Rows: DEV 59, TEST 83; positives DEV 7, TEST 9; 3 borderline rows unscored.
+Rows: DEV 59, TEST 82; positives DEV 7, TEST 9; 3 borderline rows unscored.
 
 Phrasing search on DEV (Laya alone): `single` F1 0.923 @ 0.275, `named_person` F1 0.833 @ 0.375, `split` F1 0.857 @ 0.4 -> `single`.
 
 | design | params | DEV F1 | TEST P | TEST R | TEST F1 | TEST tp/fp/fn | TEST recall by kind |
 |---|---|---|---|---|---|---|---|
 | regex_legacy |  | 0.615 | 0.750 | 0.333 | 0.462 | 3/1/6 | compensation 0/4, identifier 3/5 |
-| regex_fixed |  | 0.667 | 0.750 | 0.333 | 0.462 | 3/1/6 | compensation 0/4, identifier 3/5 |
-| laya | phrasing=single, threshold=0.275 | 0.923 | 0.500 | 0.667 | 0.571 | 6/6/3 | compensation 2/4, identifier 4/5 |
+| regex_fixed |  | 0.667 | 0.800 | 0.444 | 0.571 | 4/1/5 | compensation 1/4, identifier 3/5 |
+| laya | phrasing=single, threshold=0.275 | 0.923 | 0.500 | 0.556 | 0.526 | 5/5/4 | compensation 1/4, identifier 4/5 |
 | hybrid_confirm | phrasing=single, confirm_threshold=0.45 | 0.727 | 1.000 | 0.111 | 0.200 | 1/0/8 | compensation 0/4, identifier 1/5 |
-| hybrid_strong | phrasing=single, threshold=0.25, confirm_threshold=0.25 | 0.923 | 0.400 | 0.667 | 0.500 | 6/9/3 | compensation 2/4, identifier 4/5 |
+| hybrid_strong | phrasing=single, threshold=0.25, confirm_threshold=0.25 | 0.923 | 0.385 | 0.556 | 0.455 | 5/8/4 | compensation 1/4, identifier 4/5 |
 | hybrid_veto | phrasing=single, confirm_threshold=0.45 | 0.727 | 0.500 | 0.111 | 0.182 | 1/1/8 | compensation 0/4, identifier 1/5 |
-| wired_laya_pii | phrasing=single, threshold=0.25, confirm_threshold=0.25 | 0.923 | 0.400 | 0.667 | 0.500 | 6/9/3 | compensation 2/4, identifier 4/5 |
+| wired_laya_pii | phrasing=single, threshold=0.25, confirm_threshold=0.25 | 0.923 | 0.385 | 0.556 | 0.455 | 5/8/4 | compensation 1/4, identifier 4/5 |
 
 Retrieval damage over all 112 corpus chunks (both splits):
 
@@ -57,11 +57,11 @@ Retrieval damage over all 112 corpus chunks (both splits):
 |---|---|---|---|---|
 | regex_legacy | 0 | 0  | 0 | - |
 | regex_fixed | 0 | 0  | 0 | - |
-| laya | 5 | 2 ['employment_and_retention_agreements#10', 'employment_and_retention_agreements#2'] | 1 | sum_04 |
+| laya | 3 | 1 ['employment_and_retention_agreements#9'] | 1 | sum_04 |
 | hybrid_confirm | 0 | 0  | 0 | - |
-| hybrid_strong | 5 | 2 ['employment_and_retention_agreements#10', 'employment_and_retention_agreements#2'] | 1 | sum_04 |
+| hybrid_strong | 3 | 1 ['employment_and_retention_agreements#9'] | 1 | sum_04 |
 | hybrid_veto | 0 | 0  | 0 | - |
-| wired_laya_pii | 5 | 2 ['employment_and_retention_agreements#10', 'employment_and_retention_agreements#2'] | 1 | sum_04 |
+| wired_laya_pii | 3 | 1 ['employment_and_retention_agreements#9'] | 1 | sum_04 |
 
 ## Document category
 
@@ -87,7 +87,7 @@ TEST errors (gold->predicted):
 
 - risk `wired_union`: F1 0.583 -> 0.658, recall 0.457 -> 0.522: PASS
 - risk `wired_confirm`: F1 0.583 -> 0.627, recall 0.457 -> 0.457: PASS
-- PII `wired_laya_pii`: precision 0.750 -> 0.400, recall 0.333 -> 0.667, corpus chunks excluded 0 -> 5: FAIL
+- PII `wired_laya_pii`: precision 0.800 -> 0.385, recall 0.444 -> 0.556, corpus chunks excluded 0 -> 3: FAIL
 - category `laya`: accuracy 0.773 -> 0.955: PASS
 
 Shipped defaults (src/decisions/ingest_signals.py): LAYA_RISK=1, LAYA_PII=0, LAYA_CATEGORY=1, LAYA_RISK_MODE=auto (union on CUDA, confirm on CPU).
