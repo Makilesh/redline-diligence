@@ -23,6 +23,18 @@ os.environ.setdefault("API_URL", "http://127.0.0.1:9")
 # accident on a machine that has the weights cached.
 os.environ.setdefault("WARM_MODELS", "0")
 
+# `import litellm` calls dotenv.load_dotenv(), which walks up from litellm's own
+# install directory. With the venv inside the checkout that finds the
+# developer's .env and loads all of it into the test process — measured: 25
+# variables, among them real GEMINI_API_KEYS, ADMIN_API_KEY, ENVIRONMENT,
+# VERIFY_NLI, VERIFICATION_BACKEND, POSTGRES_URL and QDRANT_URL. A local run then
+# tests a different configuration than CI (which has no .env), and any unmocked
+# LLM path spends real quota — the thing CI blanks the keys to prevent.
+# litellm skips the load outside its "DEV" mode, and reads the variable for
+# nothing else. Live tests need the real keys, so they keep the default.
+if os.getenv("RUN_LIVE_TESTS", "").strip().lower() not in {"1", "true", "yes"}:
+    os.environ.setdefault("LITELLM_MODE", "PRODUCTION")
+
 
 # Scripts that live in tests/ but are not test modules. test_pipeline_offline.py
 # matches the test_*.py glob yet defines no tests — it is a CLI validation run
