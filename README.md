@@ -164,20 +164,25 @@ The Gemini free tier is lopsided in a way that dictates the whole design: every 
 
 Putting agent traffic on a reasoning model would drain it in five queries and leave nothing for synthesis — the one call whose quality reaches the user. Hence **two ladders**: the agent ladder ordered by *daily capacity* with reasoning models excluded (enforced by a test), and the synthesis ladder ordered by *capability*, spilling to Lite only once the good models are spent, and finally to local Ollama.
 
-**Keys multiply capacity, so rotation drains one key on a model before stepping down a rung** — answer quality degrades last, not first. That required a non-blocking `try_acquire()`: the natural `acquire()` sleeps until the rate window opens, which would block on a saturated key while another sat idle.
+**Keys multiply capacity, so rotation drains one key on a model before stepping down a rung** — answer quality degrades last, not first. That required a non-blocking `try_acquire()`: the natural `acquire()` sleeps until the rate window opens, which would block on a saturated key while another sat idle. Google meters per *project*, not per key, so this holds only when each key comes from a different Google Cloud project; the tracker warns when two keys behave like one.
 
 **Failures are classified by what they actually mean**, because each implies a different repair:
 
-| Signal | Meaning | Response |
-|---|---|---|
-| 429 | this key is spent on this model | rotate to another key |
-| 503 / timeout | the model is unresponsive for everyone | skip the model, escalating per-model backoff |
-| 404 "no longer available" | this key may never use this model | retire that one slot, permanently |
-| auth error | the credential is bad | retire the key across all models |
+| Signal | Meaning | Response | Daily unit |
+|---|---|---|---|
+| 429, per-day quota | this key is spent on this model today | mark the slot spent, rotate to another key | slot set to its limit |
+| 429, per-minute quota — or a request that would overrun TPM | the slot is busy this minute | rest the slot for the provider's retry delay, rotate | refunded |
+| 503 | the model is unresponsive for everyone | skip the model, escalating per-model backoff | refunded |
+| timeout / 5xx | same — but the request was admitted | skip the model, escalating per-model backoff | kept |
+| 404 "no longer available" | this key may never use this model | retire that one slot, permanently | refunded |
+| auth error | the credential is bad | retire the key across all models | refunded |
+| 200, unusable JSON | the model ignored the output contract | one paid repair request, then another model for this request only | each request counted |
 
 That taxonomy is not academic. `gemini-2.5-flash` answers on two of five configured keys and 404s on the rest — Google grandfathers older keys when a model closes to new sign-ups, so **availability is a property of the (key, model) pair, not of the model.** Retiring the model would have discarded real capacity; retiring the key would have discarded more.
 
-Quotas live in one table — [`src/llm/model_registry.py`](src/llm/model_registry.py) — with invariant tests, because two earlier quota bugs were arithmetic errors over constants duplicated across three files. The full failure taxonomy currently applies to synthesis and verification calls; see [Limitations](#limitations).
+Quotas live in one table — [`src/llm/model_registry.py`](src/llm/model_registry.py) — with invariant tests, because two earlier quota bugs were arithmetic errors over constants duplicated across three files.
+
+The taxonomy is applied in one place, the call wrapper, so every agent gets it: a structured call that fails on its selected slot descends the ladder itself, and ends on local Ollama. The same wrapper keeps the count honest — selection pays for one request, every retry pays for itself, and a request the provider refused gives its unit back — and the daily counters turn over when Google's do, at midnight Pacific. LiteLLM's own `Router` was evaluated for this job and not adopted: it has no per-day limit, and on a 503 it retries the same deployment and then tries the *next key on the same model*, which is the opposite of what a model-wide outage calls for ([Decision 51](DECISIONS_LOG.md)).
 
 ---
 
@@ -344,17 +349,19 @@ A few decisions driven by measurement rather than intuition. The full record —
 - **Arithmetic across documents is model-dependent.** Retrieval supplies the inputs for an implied multiple; whether the model combines them correctly varies by rung. The validator marks such figures as derived or unverified rather than pretending to check them.
 - **PII detection is rule-based.** The decision model did not beat it on the labelled set, so PII stays regex-only, and PII-flagged chunks are excluded from retrieval. Risk-signal recall is still modest (0.52), and `regulatory_risk` is rarely caught.
 - **The answerability gate's margin is thin.** The lowest-scoring answerable golden question sits at 0.39 against a 0.35 veto threshold, and two controls (ctrl_04, ctrl_05) are still admitted because the data room partly answers them. On a CPU-only host it is too slow to run per query and is disabled there.
-- **Agents 1, 5 and 6 don't descend the model ladder** on a 429 — they retry the same key, then fail the query. Synthesis and verification do descend. Quota is debited at selection, so a 503 still spends a daily unit.
-- **Structured LLM output is JSON-mode, not schema-validated.**
-- **Rate limits and cooldowns are in-process.** The daily quota counters are shared through Postgres; per-minute limits assume a single API worker.
-- **TPM is declared but not enforced.** RPM and RPD are.
+- **Quota refunds follow a rule, not a measurement.** A unit is returned when the provider explicitly refused the request (503, per-minute 429, rejected key, revoked model) and kept after a timeout or a 5xx, because Google does not document whether those count. An under-count costs one wasted call before the next 429 corrects it; the rule is a single set in `src/llm/failures.py`.
+- **Structured output is JSON mode plus validation, not native schema enforcement.** Agents 1 and 6 read replies through lenient Pydantic models and an unusable reply gets one repair request, but Gemini's response schema is not used: LiteLLM maps it differently per rung and three laddered models are missing from its capability map, which cannot be settled without live calls. The Quality Assessor's LLM branch is still unvalidated.
+- **Rate limits and cooldowns are in-process.** The daily quota counters are shared through Postgres; per-minute request and token windows assume a single API worker.
+- **The quota table is a transcription.** Google publishes free-tier limits only in the AI Studio console, so `model_registry.py` cannot be checked against public documentation, and a 429 with no quota id is assumed to be the daily cap.
 
 ---
 
 ## Roadmap
 
-- [ ] One LLM router for every agent: typed LiteLLM exceptions, ladder descent everywhere, quota refunded on 503/timeout
-- [ ] Pydantic-schema structured output for the JSON agents
+- [x] One LLM router for every agent: typed LiteLLM exceptions, ladder descent everywhere, quota refunded when the provider refuses a request
+- [x] Pydantic-schema validation for the query-analysis and rewrite agents
+- [ ] Gemini-native response schemas, validated per rung with live calls; schema validation for the Quality Assessor's LLM branch
+- [ ] Probe and add `gemini-3.8-flash`; move `gemini-2.5-flash` off the reasoning rungs before it starts routing to a Lite model (1 December 2026)
 - [ ] Recalibrate the Quality Assessor floors per reranker model (the Space runs MiniLM)
 - [ ] Qdrant Query API (server-side prefetch + fusion) and BM25 with the IDF modifier
 - [ ] Rerun the end-to-end golden set on the reworked pipeline

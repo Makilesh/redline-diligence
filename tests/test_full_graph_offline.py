@@ -38,7 +38,6 @@ from tests.fixtures.pipeline_harness import (
     SUPERSEDED_FEE,
     HarnessSeamMoved,
     LexicalReranker,
-    PipelineErrored,
     ScriptedLLM,
     ScriptedRateLimitError,
     _patch_seam,
@@ -836,7 +835,6 @@ class TestKnownDefects:
         assert "$452.8 million" in run.answer
         assert run.cited_sources == {FINANCIALS_FILE}
 
-    @known_defect("L1", "a content rejection is recorded as a provider outage (process-wide cooldown)")
     async def test_discarded_draft_does_not_sideline_the_model_for_the_next_query(
         self, offline_pipeline
     ):
@@ -884,7 +882,6 @@ class TestKnownDefects:
             pytest.param({"query_type": "summary", "reformulated_query": None}, id="null-query"),
         ],
     )
-    @known_defect("W2", "Agent 1's JSON is used unvalidated", raises=PipelineErrored)
     async def test_malformed_query_intelligence_output_degrades(
         self, offline_pipeline, agent_1_output
     ):

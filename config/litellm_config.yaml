@@ -73,7 +73,12 @@ routing:
 # ==============================================================================
 # Multi-key rotation
 # ==============================================================================
-# Quotas are enforced per API key, so keys multiply capacity. Set any of:
+# Quotas are enforced per Google Cloud PROJECT, not per API key ("Rate limits
+# are applied per project, not per API key" — Gemini API rate-limit docs). Keys
+# multiply capacity only when each one comes from a DIFFERENT project; keys from
+# one project share a single quota, and the tracker, which counts per key, will
+# over-count what the provider will serve. The tracker logs a warning when it
+# sees that pattern. Set any of:
 #     GEMINI_API_KEYS=key1,key2,key3
 #     GEMINI_API_KEY_1 / GEMINI_API_KEY_2 / ...
 #     GEMINI_API_KEY                        (single, legacy)
@@ -82,6 +87,8 @@ routing:
 # SAME model, and only steps down a rung once every key is spent — so answer
 # quality degrades last, not first. With two keys that is ~152 reasoning-grade
 # syntheses before any downgrade, then ~1,900 lite calls, then local.
+#
+# Daily counters reset when the provider's do: midnight Pacific time, not UTC.
 
 sampling:
   synthesis:
@@ -96,11 +103,12 @@ sampling:
 
 general:
   json_mode: true                # structured agents enforce response_format
-  retry_on_json_failure: 3       # max attempts for JSON parse
+  retry_on_json_failure: 1       # one repair request on the same slot, then the next model
   safety_margin: 0.95            # fraction of each provider quota we spend
 
-# TPM (250K/min) is recorded in the registry but NOT enforced — metering it
-# needs per-call token accounting the pipeline does not do. At current traffic
-# RPM binds first (15 req/min against 250K TPM implies ~16K tokens/request
-# before TPM could bind; these prompts run ~8K). Recorded rather than left
-# implicit so it does not become a third quota surprise.
+# TPM (250K/min) is an INPUT-token limit and is metered per (key, model) slot at
+# the call boundary: an estimate is booked before each request and replaced by
+# the provider's prompt-token count afterwards. A request that would not fit is
+# not sent — it is handled like a per-minute 429 (rest the slot, rotate keys).
+# At ordinary traffic RPM still binds first (15 req/min against 250K TPM needs
+# ~16K input tokens/request; most prompts run ~8K).

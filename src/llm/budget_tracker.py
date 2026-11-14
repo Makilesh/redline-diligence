@@ -6,7 +6,7 @@ The BudgetTracker must be:
 - Per (API key, model) — quotas are enforced per key and per model, so
   accounting at any coarser granularity mis-counts
 - Thread-safe — uses DB transactions for increment
-- UTC-midnight resetting — checked on every call
+- Resetting on the provider's quota day (midnight Pacific) — checked on every call
 - Exposed in the UI — Streamlit sidebar shows live budget status
 
 INITIALIZATION:
@@ -21,19 +21,25 @@ RATE LIMITERS:
 """
 
 import asyncio
+import contextvars
 import os
+import time
+from collections import deque
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date
 
 import asyncpg
 
+from src.llm.failures import TokenWindowFull
 from src.llm.model_registry import (
     AGENT_LADDER,
     LOCAL_MODEL,
     SYNTHESIS_LADDER,
     is_local,
+    quota_day,
     rpm_for,
     usable_rpd,
+    usable_tpm,
 )
 from src.llm.rate_limiter import RateLimiter
 from src.utils.logger import setup_logger
@@ -58,15 +64,70 @@ SERVICE_COOLDOWN_SECONDS = 90.0
 MAX_SERVICE_COOLDOWN_SECONDS = 1800.0
 
 # How long a pinned synthesis run will wait for its model to come back before
-# giving up. Sized against the cooldown ladder: a model that has failed enough
-# times to sit at the 720s maximum gets two chances to recover within this
-# window before the run is abandoned.
+# giving up. Sized against the cooldown ladder: it equals the longest single
+# cooldown (MAX_SERVICE_COOLDOWN_SECONDS), so a model at the cap is waited out
+# once before the run is abandoned.
 PIN_MAX_WAIT_SECONDS = float(os.getenv("SYNTHESIS_PIN_MAX_WAIT_SECONDS", "1800"))
 
+# How long a (key, model) slot sits out after a per-MINUTE 429 when the provider
+# did not say how long to wait. Per-minute limits are enforced over a rolling
+# minute, so a full minute is the longest the refusal can remain true.
+RATE_LIMIT_COOLDOWN_SECONDS = 60.0
+# Bounds on a provider-supplied retry delay, so a malformed or hostile value can
+# neither spin the selector nor park a slot for hours.
+MIN_RATE_LIMIT_COOLDOWN_SECONDS = 1.0
+MAX_RATE_LIMIT_COOLDOWN_SECONDS = 300.0
 
-def _utc_today() -> date:
+# Models the current request has asked not to be offered again, as
+# {model: monotonic time of the skip}. Held in a ContextVar so it belongs to one
+# request: LangGraph runs each node in a task whose context is a copy of the
+# request's, and the orchestrator opens a fresh scope per query.
+_request_skips: contextvars.ContextVar[dict[str, float] | None] = contextvars.ContextVar(
+    "llm_request_skipped_models", default=None
+)
+
+# Longest a request-scoped skip is honoured. A request is over well inside this
+# (the API's own budget is 300s); the bound exists so that a skip recorded by a
+# long-lived task that never opens a new scope — a script looping over queries —
+# cannot quietly steer every later query away from a model.
+REQUEST_SKIP_TTL_SECONDS = 300.0
+
+
+def begin_request_scope() -> None:
+    """Starts a query with no request-scoped model skips. Call once per query."""
+    _request_skips.set({})
+
+
+def _models_skipped_for_request() -> frozenset[str]:
+    """Models the current request has skipped (see skip_model_for_request)."""
+    skips = _request_skips.get()
+    if not skips:
+        return frozenset()
+    horizon = time.monotonic() - REQUEST_SKIP_TTL_SECONDS
+    return frozenset(m for m, at in skips.items() if at >= horizon)
+
+
+# A note about which quota a 429 tripped is only trusted for this long. It is
+# written by the call wrapper at the moment of failure and read by
+# mark_slot_exhausted a few statements later; anything older belongs to some
+# other request.
+QUOTA_HINT_TTL_SECONDS = 30.0
+_quota_hint: contextvars.ContextVar[tuple[str, bool, float | None, float] | None] = (
+    contextvars.ContextVar("llm_quota_refusal_note", default=None)
+)
+
+
+def _quota_today() -> date:
     """
-    Today's date in UTC — the unit the daily quota resets on.
+    The provider's current quota day — the unit the daily counters reset on.
+
+    This is a date in the provider's reset timezone (midnight Pacific for
+    Gemini; see model_registry.quota_day), not UTC. It was UTC, which opened a
+    seven-to-eight hour window every day in which the two calendars disagreed:
+    from 00:00 UTC the counters read zero while the provider's were still
+    spent, every slot the selector then offered answered 429, and each 429
+    stamped the slot "spent" for the NEW UTC day — so when the provider did
+    reset, the tracker kept the slot closed for the remaining sixteen hours.
 
     Returns a `date`, not a string, because asyncpg binds parameters by the
     type it infers from the statement: `reset_date = $1::date` infers `date`
@@ -81,18 +142,18 @@ def _utc_today() -> date:
     means it was never a dev-only quirk: it broke every first deploy, and
     every query with it, while the developer's own machine stayed green.
     """
-    return datetime.now(timezone.utc).date()
+    return quota_day()
 
 
-def _utc_today_iso() -> str:
+def _quota_today_iso() -> str:
     """
-    Today's date as an ISO string, for comparison against ModelBudget.reset_date.
+    The quota day as an ISO string, for comparison against ModelBudget.reset_date.
 
     ModelBudget carries reset_date as a string, so the in-Python comparisons
     (and the mock backend) need this form. Anything crossing into SQL must use
-    `_utc_today()` instead.
+    `_quota_today()` instead.
     """
-    return _utc_today().isoformat()
+    return _quota_today().isoformat()
 
 
 @dataclass(frozen=True)
@@ -111,6 +172,28 @@ class ModelChoice:
     key_index: int       # -1 for local; otherwise position in the key list
 
 
+class TokenReservation:
+    """One request's entry in a slot's tokens-per-minute window."""
+
+    __slots__ = ("_window", "_entry")
+
+    def __init__(self, window: deque, entry: list):
+        self._window = window
+        self._entry = entry
+
+    def adjust(self, tokens: int | None) -> None:
+        """Replaces the estimate with the provider's prompt-token count."""
+        if isinstance(tokens, int) and tokens > 0:
+            self._entry[1] = tokens
+
+    def release(self) -> None:
+        """Drops the entry — the provider refused the request without reading it."""
+        try:
+            self._window.remove(self._entry)
+        except ValueError:
+            pass  # already rolled out of the window
+
+
 @dataclass
 class ModelBudget:
     """Current budget state for a single model."""
@@ -118,7 +201,7 @@ class ModelBudget:
     model_key: str
     daily_limit: int
     used_today: int
-    reset_date: str  # ISO date string UTC
+    reset_date: str  # ISO date string, provider quota day
 
 
 class BudgetTracker:
@@ -166,6 +249,10 @@ class BudgetTracker:
 
         Order is meaningful: the selector drains key 1 on a given model before
         touching key 2, so the first key should be the one you most want spent.
+
+        Each key must come from a DIFFERENT Google Cloud project. The provider
+        applies rate limits per project, not per key, so two keys from one
+        project share a single quota while this tracker counts them as two.
 
         Returns:
             De-duplicated list of keys, preserving order. Empty if none set,
@@ -325,10 +412,11 @@ class BudgetTracker:
                 await conn.execute(
                     """
                     INSERT INTO api_budget (model_key, used_today, reset_date)
-                    VALUES ($1, 0, CURRENT_DATE)
+                    VALUES ($1, 0, $2::date)
                     ON CONFLICT (model_key) DO NOTHING
                 """,
                     model_key,
+                    _quota_today(),
                 )
         logger.info("Budget schema verified")
 
@@ -386,7 +474,281 @@ class BudgetTracker:
         """True if this (key, model) pair has been found permanently unusable."""
         return slot in getattr(self, "_unavailable_slots", ())
 
+    def key_index_of(self, api_key: str | None) -> int:
+        """
+        Position of a live API key, or -1 if it is unknown, retired or absent.
+
+        Lets the call wrapper settle accounts for a request knowing only the
+        credential it was sent with — the agents pass `model` and `api_key`
+        down, not the ModelChoice they came from.
+
+        Args:
+            api_key: Credential a request was sent with.
+
+        Returns:
+            Index into the key list, or -1.
+        """
+        if not api_key:
+            return -1
+        try:
+            return self._api_keys.index(api_key)
+        except ValueError:
+            return -1
+
+    # ── Per-minute refusals ──────────────────────────────────────────────────
+    #
+    # A 429 does not always mean the day is spent. Gemini names the quota that
+    # tripped, and a per-minute one (RPM drift between processes, or TPM, which
+    # is not metered here at all) clears within the minute. Marking the slot
+    # exhausted for that — the only response the tracker used to have — set
+    # used_today to the limit: measured in the scenario harness, one 429 on a
+    # volume slot recorded 475 units against a single request the provider had
+    # not even served.
+
+    def note_quota_refusal(
+        self,
+        key_index: int,
+        model: str,
+        per_minute: bool,
+        retry_after: float | None = None,
+    ) -> None:
+        """
+        Records which quota a 429 tripped, for the mark_slot_exhausted call that
+        follows it.
+
+        The split exists because the two facts arrive in different places: the
+        call wrapper sees the exception (and so the quota id), while the ladder
+        loops in the agents call mark_slot_exhausted(key_index, model) with no
+        exception in hand. The note carries the detail across without changing
+        that call's signature.
+
+        The note is held in the calling task's context, not on the tracker. Both
+        halves run in the same task (the ladder awaits the wrapper), and a note
+        stored per slot on the shared tracker could be consumed by a concurrent
+        request that hit the same 429 — leaving this one with no note, which
+        reads as "per-day" and spends the slot.
+
+        Args:
+            key_index: Position of the API key.
+            model: Upstream model that refused.
+            per_minute: True if the provider attributed the 429 to a per-minute
+                limit.
+            retry_after: Seconds the provider asked for, when it said.
+        """
+        if key_index < 0 or is_local(model):
+            return
+        _quota_hint.set(
+            (self._slot(key_index, model), per_minute, retry_after, time.monotonic())
+        )
+
+    def _take_quota_hint(self, slot: str) -> tuple[bool, float | None] | None:
+        """Consumes this task's fresh note for `slot`, if there is one."""
+        hint = _quota_hint.get()
+        if hint is None:
+            return None
+        noted_slot, per_minute, retry_after, noted_at = hint
+        if noted_slot != slot:
+            return None
+        _quota_hint.set(None)
+        if time.monotonic() - noted_at > QUOTA_HINT_TTL_SECONDS:
+            return None
+        return per_minute, retry_after
+
+    def _cool_slot(self, slot: str, seconds: float | None) -> float:
+        """Sidelines one (key, model) slot for a bounded time; returns the time."""
+        wait = RATE_LIMIT_COOLDOWN_SECONDS if seconds is None else seconds
+        wait = max(MIN_RATE_LIMIT_COOLDOWN_SECONDS, min(wait, MAX_RATE_LIMIT_COOLDOWN_SECONDS))
+        if not hasattr(self, "_slot_cooldowns"):
+            self._slot_cooldowns = {}
+        self._slot_cooldowns[slot] = time.monotonic() + wait
+        return wait
+
+    def _slot_in_cooldown(self, slot: str) -> bool:
+        """True while a slot is sitting out a per-minute refusal."""
+        cooldowns = getattr(self, "_slot_cooldowns", None)
+        if not cooldowns:
+            return False
+        until = cooldowns.get(slot)
+        if until is None:
+            return False
+        if until <= time.monotonic():
+            del cooldowns[slot]
+            return False
+        return True
+
+    # ── Keeping the daily counter equal to what the provider served ──────────
+
+    async def refund_slot(self, key_index: int, model: str) -> None:
+        """
+        Returns one daily unit for a request the provider did not serve.
+
+        The unit is debited at selection, before the call, because that is the
+        only point where the debit can be atomic with the capacity check. So a
+        request the provider then refuses — 503, a rejected key, a revoked
+        model, a per-minute 429 — has already been charged. On a 20-RPD
+        reasoning slot that is 5% of the day per refusal, and a 503 spell
+        produces them in runs.
+
+        Never refunds a slot the provider itself has declared spent today: a
+        concurrent request's refund must not reopen a rung the provider has
+        closed.
+
+        Args:
+            key_index: Position of the API key, or -1 for local (ignored).
+            model: Upstream model the request was sent to.
+        """
+        if key_index < 0 or is_local(model):
+            return
+        slot = self._slot(key_index, model)
+        today = _quota_today()
+        if getattr(self, "_provider_exhausted", {}).get(slot) == today:
+            return
+
+        if getattr(self, "_is_mock", False):
+            b = self._mock_budgets.get(slot)
+            if b and b["reset_date"] == today.isoformat() and b["used_today"] > 0:
+                b["used_today"] -= 1
+            return
+
+        try:
+            async with self._pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE api_budget SET used_today = used_today - 1 "
+                    "WHERE model_key = $1 AND used_today > 0 AND reset_date = $2::date",
+                    slot, today,
+                )
+        except Exception as e:
+            # A lost refund over-counts by one; never worth failing the request.
+            logger.error("Failed to refund slot", extra={"slot": slot, "error": str(e)})
+
+    async def charge_extra_request(self, key_index: int, model: str) -> bool:
+        """
+        Accounts for one more provider request on a slot already selected.
+
+        Selection pays for exactly one request. A same-slot retry (a JSON repair
+        request, a prose retry after an empty completion) is a second request
+        the provider counts against RPM and RPD, and it used to be free: up to
+        three requests went out against one debited unit, so the local counter
+        ran behind the provider's precisely when calls were failing.
+
+        Never blocks. If the slot has no window or no daily allowance left the
+        answer is False and the caller should move on rather than retry here.
+
+        Args:
+            key_index: Position of the API key, or -1 for local.
+            model: Upstream model.
+
+        Returns:
+            True if the request is accounted for and may be sent.
+        """
+        if key_index < 0 or is_local(model):
+            return True
+        if key_index >= len(self._api_keys) or not self._api_keys[key_index]:
+            return False
+        slot = self._slot(key_index, model)
+        if self._slot_is_unavailable(slot) or self._slot_in_cooldown(slot):
+            return False
+        limiter = self._get_rate_limiter(slot)
+        if not await limiter.try_acquire():
+            return False
+        if await self._try_consume(slot):
+            return True
+        await limiter.release()
+        return False
+
+    def reserve_input_tokens(
+        self, key_index: int, model: str, tokens: int
+    ) -> "TokenReservation | None":
+        """
+        Books a request's input tokens against the slot's tokens-per-minute
+        window, or refuses if they do not fit.
+
+        The window is a rolling minute of [time, tokens] entries per (key,
+        model) slot. The caller reserves an estimate before sending and corrects
+        it to the provider's count afterwards, so completed requests are exact
+        and only in-flight ones are estimated.
+
+        A single request larger than the whole allowance is let through: no
+        window could ever admit it, and the provider is the one to refuse it.
+
+        Args:
+            key_index: Position of the API key, or -1 for local.
+            model: Upstream model.
+            tokens: Estimated input tokens.
+
+        Returns:
+            A reservation to adjust or release, or None when the slot is not
+            metered (local model, unknown model).
+
+        Raises:
+            TokenWindowFull: The tokens do not fit this minute; carries the
+                seconds until they would.
+        """
+        limit = usable_tpm(model)
+        if key_index < 0 or limit is None:
+            return None
+        if not hasattr(self, "_token_windows"):
+            self._token_windows = {}
+        window = self._token_windows.setdefault(self._slot(key_index, model), deque())
+
+        now = time.monotonic()
+        while window and window[0][0] <= now - 60.0:
+            window.popleft()
+
+        used = sum(entry[1] for entry in window)
+        if tokens <= limit and used + tokens > limit:
+            # Earliest moment enough of the window has rolled off.
+            to_free = used + tokens - limit
+            wait = 60.0
+            for stamp, booked in window:
+                to_free -= booked
+                if to_free <= 0:
+                    wait = stamp + 60.0 - now
+                    break
+            raise TokenWindowFull(model, tokens, max(wait, MIN_RATE_LIMIT_COOLDOWN_SECONDS))
+
+        entry = [now, int(tokens)]
+        window.append(entry)
+        return TokenReservation(window, entry)
+
     def skip_model_for_request(self, model: str) -> None:
+        """
+        Keeps the CURRENT request off a model. Nothing else.
+
+        This is what a caller says when a model's answer was no use to it — an
+        uncited synthesis, a draft that failed a content check — or when it has
+        already watched the model fail and wants the next selection to go
+        elsewhere. It is a statement about one request, so it is stored in that
+        request's context and no other request can see it.
+
+        It used to write the process-wide cooldown below, despite the name.
+        Measured: every synthesis model returned the same correct, cited,
+        101-character answer, each was rejected as too short, and one query
+        left all six models in an escalating 90-second cooldown — so the next
+        user's question was answered by a lite model. A content rejection is
+        not evidence about the provider, and provider health is now reported
+        only by the code that observes the provider (report_model_unavailable).
+
+        Ignored outside a running task: with no request there is nothing to
+        scope the skip to, and writing it into a long-lived context would turn
+        it back into the global side effect this method exists to avoid.
+
+        Args:
+            model: Upstream model this request should not be offered again.
+        """
+        if is_local(model):
+            return
+        try:
+            asyncio.current_task()
+        except RuntimeError:
+            return
+        skips = _request_skips.get()
+        if skips is None:
+            skips = {}
+            _request_skips.set(skips)
+        skips[model] = time.monotonic()
+
+    def report_model_unavailable(self, model: str) -> None:
         """
         Marks a model as provider-side unavailable for a short cooldown.
 
@@ -400,11 +762,12 @@ class BudgetTracker:
         The cooldown is in-memory and per-process by design: it is a hint about
         the last few seconds of provider behaviour, not durable accounting.
 
+        Called by the call wrapper when it sees the provider fail (503, timeout,
+        5xx, a dropped stream) — never for a response a caller merely disliked.
+
         Args:
             model: Upstream model the provider reported as unavailable.
         """
-        import time
-
         if is_local(model):
             return
         if not hasattr(self, "_model_cooldowns"):
@@ -445,8 +808,6 @@ class BudgetTracker:
 
     def _models_in_cooldown(self) -> set[str]:
         """Models currently skipped after a provider-side unavailability."""
-        import time
-
         cooldowns = getattr(self, "_model_cooldowns", None)
         if not cooldowns:
             return set()
@@ -456,7 +817,12 @@ class BudgetTracker:
             del cooldowns[m]
         return set(cooldowns)
 
-    async def _select_from_ladder(self, ladder: list[str], purpose: str) -> ModelChoice:
+    async def _select_from_ladder(
+        self,
+        ladder: list[str],
+        purpose: str,
+        exclude: frozenset[str] | tuple[str, ...] = (),
+    ) -> ModelChoice:
         """
         Walks a model ladder and the configured keys to find capacity.
 
@@ -481,42 +847,61 @@ class BudgetTracker:
         Args:
             ladder: Models in preference order.
             purpose: "synthesis" or "agent", for logging.
+            exclude: Models to pass over for THIS request only — rungs that
+                already returned unusable output to the caller. Unlike a
+                cooldown this says nothing about the model's health, so it
+                must not affect any other request.
 
         Returns:
             ModelChoice naming the model and the key to bill it to.
         """
         cooled = self._models_in_cooldown()
+        # A request-scoped skip means "offer me a different rung". On a ladder
+        # of one — a pinned run — there is no different rung, and honouring the
+        # skip would silently substitute the local model for the pin.
+        if len(ladder) > 1:
+            exclude = frozenset(exclude) | _models_skipped_for_request()
 
         # Pass 1 — immediate capacity anywhere.
         for model in ladder:
             if is_local(model):
                 break
-            if model in cooled:
+            if model in cooled or model in exclude:
                 continue
             for key_index, api_key in enumerate(self._api_keys):
                 if not api_key:  # retired by mark_key_unusable
                     continue
                 slot = self._slot(key_index, model)
-                if self._slot_is_unavailable(slot):
+                if self._slot_is_unavailable(slot) or self._slot_in_cooldown(slot):
                     continue
                 if not await self._budget_available(slot):
                     continue
-                if not await self._get_rate_limiter(slot).try_acquire():
+                limiter = self._get_rate_limiter(slot)
+                if not await limiter.try_acquire():
                     continue
                 if await self._try_consume(slot):
                     return ModelChoice(model=model, api_key=api_key, key_index=key_index)
+                # Lost the race for the slot's last daily unit: the request is
+                # going elsewhere, so the window entry taken for it goes back.
+                await limiter.release()
 
         # Pass 2 — everything is rate-limited; wait rather than degrade quality.
         # Cooldowns are ignored here: if the only remaining capacity is on a
         # model the provider just 503'd, trying it beats degrading to local.
+        #
+        # A slot the PROVIDER rate-limited is different from one our own window
+        # says is full: its wait is not ours to measure, so it is passed over
+        # here rather than slept on.
         for model in ladder:
             if is_local(model):
                 break
+            if model in exclude:
+                continue
             for key_index, api_key in enumerate(self._api_keys):
                 if not api_key:  # retired by mark_key_unusable
                     continue
                 slot = self._slot(key_index, model)
-                if self._slot_is_unavailable(slot):
+                if self._slot_is_unavailable(slot) or self._slot_in_cooldown(slot):
                     continue
                 if not await self._budget_available(slot):
                     continue
@@ -524,9 +909,11 @@ class BudgetTracker:
                     "All slots rate-limited; waiting for capacity",
                     extra={"purpose": purpose, "model": model, "key_index": key_index},
                 )
-                await self._get_rate_limiter(slot).acquire()
+                limiter = self._get_rate_limiter(slot)
+                await limiter.acquire()
                 if await self._try_consume(slot):
                     return ModelChoice(model=model, api_key=api_key, key_index=key_index)
+                await limiter.release()
 
         logger.warning(
             "All cloud quota exhausted, falling back to local model",
@@ -586,10 +973,10 @@ class BudgetTracker:
 
         # Two reasons the pin can be unavailable, and they need opposite
         # responses. A 503 puts the model in an escalating, process-wide
-        # cooldown (90s doubling to 720s) — measured against this provider, the
+        # cooldown (90s doubling to 1800s) — measured against this provider, the
         # reasoning rungs 503 several times an hour, so a pinned 41-question run
         # would almost certainly meet one. That is transient and worth waiting
-        # out. Daily quota exhaustion is not: it clears at the UTC reset, and no
+        # out. Daily quota exhaustion is not: it clears at the daily reset, and no
         # amount of waiting inside one run will help.
         #
         # Failing on the first cooldown would make the pin unusable for exactly
@@ -607,7 +994,8 @@ class BudgetTracker:
                 raise RuntimeError(
                     f"SYNTHESIS_MODEL_PIN={pin} has no daily quota left on any "
                     f"configured key, and a pinned run must not substitute another "
-                    f"model. Wait for the UTC quota reset, add another key, or unset "
+                    f"model. Wait for the daily quota reset (midnight Pacific), add "
+                    f"another key, or unset "
                     f"the pin to restore normal ladder behaviour."
                 )
 
@@ -657,7 +1045,9 @@ class BudgetTracker:
                 return True
         return False
 
-    async def get_model_for_agent(self) -> ModelChoice:
+    async def get_model_for_agent(
+        self, exclude: frozenset[str] | tuple[str, ...] = ()
+    ) -> ModelChoice:
         """
         Picks a model for the high-volume agent calls.
 
@@ -668,9 +1058,15 @@ class BudgetTracker:
         drained by five queries and then be unavailable to synthesis, which is
         where that quality actually matters.
 
+        Args:
+            exclude: Models to pass over for this request only (see
+                _select_from_ladder).
+
         Returns:
             ModelChoice with the model and the API key to bill it to.
         """
+        if exclude:
+            return await self._select_from_ladder(AGENT_LADDER, "agent", exclude)
         return await self._select_from_ladder(AGENT_LADDER, "agent")
 
     async def mark_slot_exhausted(self, key_index: int, model: str) -> None:
@@ -694,6 +1090,13 @@ class BudgetTracker:
         Burning the local counter makes the provider's 429 authoritative, so the
         next selection skips this rung immediately.
 
+        That is the right response to a per-DAY refusal only. When the call
+        wrapper has noted (note_quota_refusal) that this 429 was a per-minute
+        limit, the slot is rested for the provider's retry delay instead and the
+        day's allowance is left alone. With no note the refusal is treated as
+        daily, as it always was: on the free tier the daily cap is the one that
+        binds, and guessing "per-minute" would re-offer a spent slot each time.
+
         Args:
             key_index: Position of the API key, or -1 for local (ignored).
             model: Upstream model the provider refused.
@@ -703,7 +1106,22 @@ class BudgetTracker:
 
         slot = self._slot(key_index, model)
         limit = self._slot_limit(slot)
-        today = _utc_today()
+        today = _quota_today()
+
+        hint = self._take_quota_hint(slot)
+        if hint is not None and hint[0]:
+            wait = self._cool_slot(slot, hint[1])
+            logger.warning(
+                "Provider rate-limited this slot per minute; resting it",
+                extra={"model": model, "key_index": key_index,
+                       "cooldown_seconds": round(wait, 1)},
+            )
+            return
+
+        if not hasattr(self, "_provider_exhausted"):
+            self._provider_exhausted = {}
+        await self._warn_if_keys_share_a_project(slot, model, today)
+        self._provider_exhausted[slot] = today
 
         logger.warning(
             "Provider refused further calls; marking slot exhausted for today",
@@ -729,6 +1147,55 @@ class BudgetTracker:
             # Never let bookkeeping failure break the caller's fallback path.
             logger.error("Failed to persist exhausted slot",
                          extra={"slot": slot, "error": str(e)})
+
+    async def _warn_if_keys_share_a_project(self, slot: str, model: str, today: date) -> None:
+        """
+        Logs, once, when two keys look like they draw on the same quota.
+
+        The provider's limits are per Google Cloud project, not per key, so keys
+        created in one project share a single allowance — but this tracker
+        counts per key and would believe it has N times that. Nothing in an API
+        key says which project it belongs to, so the only evidence is
+        behavioural: the provider declares a slot's day spent while our own
+        count for it is well under the limit, and it has already done the same
+        for another key on the same model today.
+
+        That pattern has one other cause — counters lost in a restart on the
+        in-memory fallback — and the message says so rather than guess.
+
+        Args:
+            slot: The slot the provider just refused for the day.
+            model: Its model.
+            today: Current quota day.
+        """
+        if getattr(self, "_shared_project_warned", False):
+            return
+        also_refused = [
+            s for s, day in self._provider_exhausted.items()
+            if day == today and s != slot and self._slot_model(s) == model
+        ]
+        if not also_refused:
+            return
+        try:
+            budget = await self._load_budget(slot)
+        except Exception:
+            return
+        used = budget.used_today if budget.reset_date == today.isoformat() else 0
+        if used * 2 >= self._slot_limit(slot):
+            return
+
+        self._shared_project_warned = True
+        logger.warning(
+            "The provider declared a model's daily quota spent on two API keys "
+            "while this process had counted well under the limit on the second. "
+            "Gemini rate limits are per Google Cloud PROJECT, not per key: keys "
+            "created in the same project share one quota and add no capacity. "
+            "Check that every key in GEMINI_API_KEYS comes from a different "
+            "project. (The other explanation is counters lost in a restart "
+            "while running on the in-memory fallback.)",
+            extra={"model": model, "slots": sorted(also_refused + [slot]),
+                   "locally_counted": used, "limit": self._slot_limit(slot)},
+        )
 
     def mark_key_unusable(self, key_index: int) -> None:
         """
@@ -776,7 +1243,7 @@ class BudgetTracker:
             Dict of model -> {used, limit, remaining, reset_date, keys}.
         """
         status: dict[str, dict] = {}
-        today = _utc_today_iso()
+        today = _quota_today_iso()
 
         for slot in self._all_slots():
             # A slot this credential may never use is not capacity. Before it is
@@ -827,7 +1294,7 @@ class BudgetTracker:
             True if budget is available for this model today.
         """
         budget = await self._load_budget(model_key)
-        today = _utc_today_iso()
+        today = _quota_today_iso()
         if budget.reset_date != today:
             return True
         return budget.used_today < self._slot_limit(model_key)
@@ -848,13 +1315,13 @@ class BudgetTracker:
         Returns:
             True if budget was consumed, False if exhausted.
         """
-        today = _utc_today()
+        today = _quota_today()
         today_iso = today.isoformat()
         if getattr(self, "_is_mock", False):
             if model_key not in self._mock_budgets:
                 self._mock_budgets[model_key] = {"used_today": 0, "reset_date": today_iso}
             b = self._mock_budgets[model_key]
-            if b["reset_date"] < today_iso:
+            if b["reset_date"] != today_iso:
                 b["used_today"] = 0
                 b["reset_date"] = today_iso
             if b["used_today"] < self._slot_limit(model_key):
@@ -867,10 +1334,14 @@ class BudgetTracker:
             return False
 
         async with self._pool.acquire() as conn:
-            # Reset if new day (idempotent)
+            # Reset if the stored day is not the current quota day (idempotent).
+            # "<>" rather than "<": rows written when the day was counted in UTC
+            # can carry a date AHEAD of the quota day, and _budget_available
+            # already treats any other date as a full allowance — the two must
+            # agree or the selector offers a slot the debit then refuses.
             await conn.execute(
                 "UPDATE api_budget SET used_today = 0, reset_date = $1::date "
-                "WHERE model_key = $2 AND reset_date < $1::date",
+                "WHERE model_key = $2 AND reset_date <> $1::date",
                 today,
                 model_key,
             )
@@ -907,7 +1378,7 @@ class BudgetTracker:
         Returns:
             ModelBudget dataclass with used_today and reset_date.
         """
-        today = _utc_today_iso()
+        today = _quota_today_iso()
         if getattr(self, "_is_mock", False):
             if model_key not in self._mock_budgets:
                 self._mock_budgets[model_key] = {"used_today": 0, "reset_date": today}
@@ -928,14 +1399,15 @@ class BudgetTracker:
                 # First use — insert default
                 await conn.execute(
                     "INSERT INTO api_budget (model_key, used_today, reset_date) "
-                    "VALUES ($1, 0, CURRENT_DATE)",
+                    "VALUES ($1, 0, $2::date)",
                     model_key,
+                    _quota_today(),
                 )
                 return ModelBudget(
                     model_key=model_key,
                     daily_limit=self._slot_limit(model_key),
                     used_today=0,
-                    reset_date=_utc_today_iso(),
+                    reset_date=_quota_today_iso(),
                 )
             return ModelBudget(
                 model_key=row["model_key"],
