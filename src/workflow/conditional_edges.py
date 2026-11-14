@@ -77,9 +77,30 @@ def _meets_type_threshold(state: AgentState) -> bool:
     Returns:
         True if every dimension score >= its threshold for this query type.
     """
-    breakdown = state.get("quality_breakdown", {})
+    breakdown = state.get("quality_breakdown") or {}
+    if not isinstance(breakdown, dict):
+        breakdown = {}
     thresholds = THRESHOLDS.get(state["query_type"], {})
-    return all(breakdown.get(k, 0.0) >= v for k, v in thresholds.items())
+    return all(_as_score(breakdown.get(k)) >= v for k, v in thresholds.items())
+
+
+def _as_score(value) -> float:
+    """
+    Reads a quality score as a float, treating anything unreadable as 0.0.
+
+    In the ambiguous band the scores come from an LLM, as JSON. A model that
+    returns `"0.8"` or `null` used to raise TypeError in the comparison below —
+    inside an edge function, which fails the whole query. An unreadable score
+    is not evidence of quality, so it counts as none: the query is rewritten or
+    refused rather than crashed, and never admitted on a value nobody could
+    parse.
+    """
+    if isinstance(value, bool):
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def route_after_quality_check(state: AgentState) -> str:
@@ -97,7 +118,7 @@ def route_after_quality_check(state: AgentState) -> str:
     Returns:
         Routing string for the next node.
     """
-    score = state["context_quality_score"]
+    score = _as_score(state["context_quality_score"])
     iteration = state["rewrite_iteration"]
 
     # The thresholds read reranker relevance; an answerability veto says the
@@ -124,6 +145,32 @@ def route_after_quality_check(state: AgentState) -> str:
         extra={"score": score, "iteration": iteration, "answerability_veto": vetoed},
     )
     return "query_rewriter"
+
+
+def route_after_synthesis(state: AgentState) -> str:
+    """
+    Sends a failed synthesis around the validator instead of through it.
+
+    When every model on the ladder fails, the synthesizer degrades to a fixed
+    apology rather than an exception. That apology used to go to the validator
+    like any answer: the LLM judge was called about it while the provider was
+    failing, and if the judge called it "supported" it came back `passed` with
+    confidence 1.0 and `is_refusal` false — an outage reported as a verified
+    answer (audit V7). The synthesizer marks its trace entry `synthesis_failed`;
+    this reads that mark.
+
+    Args:
+        state: Current AgentState.
+
+    Returns:
+        "synthesis_unavailable" or "hallucination_validator".
+    """
+    trace = state.get("agent_trace") or []
+    last = trace[-1] if trace and isinstance(trace[-1], dict) else {}
+    if last.get("synthesis_failed"):
+        logger.info("Synthesis failed; skipping validation")
+        return "synthesis_unavailable"
+    return "hallucination_validator"
 
 
 # Validations allowed per query: the first, plus one after a single re-synthesis.

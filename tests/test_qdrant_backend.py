@@ -92,6 +92,12 @@ class TestServerMode:
     def test_credentials_in_the_url_are_not_reported(self, monkeypatch):
         monkeypatch.setenv("QDRANT_URL", "https://user:s3cret@cluster.example.com:6333/path")
         monkeypatch.setenv("QDRANT_API_KEY", "k")
+        # The real client's constructor runs a version check over HTTP: here a
+        # DNS lookup of cluster.example.com, from an offline suite, whose
+        # failure surfaced as a "Failed to obtain server version" warning
+        # attributed to whichever test was running when it came back. Only the
+        # reported location is under test, so the client is a stand-in.
+        monkeypatch.setattr(qc, "AsyncQdrantClient", lambda **kwargs: object())
 
         qc.get_qdrant_client()
 

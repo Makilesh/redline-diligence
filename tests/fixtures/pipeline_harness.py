@@ -652,6 +652,9 @@ class OfflinePipeline:
             self._monkeypatch.setenv(name, "1000")
         self._monkeypatch.setenv("MAX_CONCURRENT_PIPELINES", "2")
         self._monkeypatch.delenv("TRUST_PROXY_HEADERS", raising=False)
+        # Public callers may read only the deals named here (and sandboxes);
+        # the suite's main deal is the public one, OTHER_DEAL stays private.
+        self._monkeypatch.setenv("PUBLIC_DEAL_IDS", DEAL)
         security.reset_limits()
         transport = httpx.ASGITransport(app=api_main.app)
         try:

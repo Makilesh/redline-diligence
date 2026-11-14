@@ -89,6 +89,15 @@ say "Waiting for https://$DOMAIN/health (model loading takes a few minutes)"
 for _ in $(seq 1 120); do
   if curl -fsS --max-time 10 "https://$DOMAIN/health" >/dev/null 2>&1; then
     echo "   up."
+    # Up is not the same as healthy: show any fallback it is running on
+    # (in-memory checkpoints, a model that failed to load, a stale index).
+    ready="$(curl -sS --max-time 20 -H "X-Admin-Key: $(env_value ADMIN_API_KEY)" \
+      "https://$DOMAIN/ready" || true)"
+    echo "   /ready: $ready"
+    case "$ready" in
+      *'"degraded":[]'*) ;;
+      *) echo "   WARNING: the service reports degraded modes; see degraded_detail above." ;;
+    esac
     echo
     echo "Next:"
     echo "  bash scripts/seed_demo.sh                 # index the sample data room"
