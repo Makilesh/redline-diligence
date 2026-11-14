@@ -562,14 +562,14 @@ class TestDateBindingToPostgres:
         )
         assert dates, "expected the exhaustion UPDATE to bind a date parameter"
 
-    def test_utc_today_returns_a_date_not_a_string(self):
+    def test_quota_today_returns_a_date_not_a_string(self):
         from datetime import date
 
-        from src.llm.budget_tracker import _utc_today, _utc_today_iso
+        from src.llm.budget_tracker import _quota_today, _quota_today_iso
 
-        assert isinstance(_utc_today(), date)
-        assert isinstance(_utc_today_iso(), str)
-        assert _utc_today_iso() == _utc_today().isoformat()
+        assert isinstance(_quota_today(), date)
+        assert isinstance(_quota_today_iso(), str)
+        assert _quota_today_iso() == _quota_today().isoformat()
 
 
 class TestRequestTimeouts:
@@ -828,9 +828,9 @@ class TestBudgetStatusReporting:
 
     @pytest.mark.asyncio
     async def test_todays_usage_is_reported(self):
-        from src.llm.budget_tracker import _utc_today_iso
+        from src.llm.budget_tracker import _quota_today_iso
 
-        t = self._tracker(used_today=5, reset_date=_utc_today_iso())
+        t = self._tracker(used_today=5, reset_date=_quota_today_iso())
         status = await t.get_budget_status()
 
         assert status, "no models reported"
@@ -840,7 +840,7 @@ class TestBudgetStatusReporting:
     @pytest.mark.asyncio
     async def test_stale_counter_reports_as_unused(self):
         """Yesterday's spend must not be shown as today's."""
-        from src.llm.budget_tracker import _utc_today_iso
+        from src.llm.budget_tracker import _quota_today_iso
 
         t = self._tracker(used_today=19, reset_date="2000-01-01")
         status = await t.get_budget_status()
@@ -850,7 +850,7 @@ class TestBudgetStatusReporting:
             "a counter from a previous day was reported as today's usage"
         )
         assert entry["remaining"] == entry["limit"]
-        assert entry["reset_date"] == _utc_today_iso()
+        assert entry["reset_date"] == _quota_today_iso()
 
     @pytest.mark.asyncio
     async def test_display_agrees_with_availability(self):

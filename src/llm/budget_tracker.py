@@ -6,7 +6,7 @@ The BudgetTracker must be:
 - Per (API key, model) — quotas are enforced per key and per model, so
   accounting at any coarser granularity mis-counts
 - Thread-safe — uses DB transactions for increment
-- UTC-midnight resetting — checked on every call
+- Resetting on the provider's quota day (midnight Pacific) — checked on every call
 - Exposed in the UI — Streamlit sidebar shows live budget status
 
 INITIALIZATION:
@@ -25,7 +25,7 @@ import contextvars
 import os
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date
 
 import asyncpg
 
@@ -34,6 +34,7 @@ from src.llm.model_registry import (
     LOCAL_MODEL,
     SYNTHESIS_LADDER,
     is_local,
+    quota_day,
     rpm_for,
     usable_rpd,
 )
@@ -110,9 +111,17 @@ def _models_skipped_for_request() -> frozenset[str]:
 QUOTA_HINT_TTL_SECONDS = 30.0
 
 
-def _utc_today() -> date:
+def _quota_today() -> date:
     """
-    Today's date in UTC — the unit the daily quota resets on.
+    The provider's current quota day — the unit the daily counters reset on.
+
+    This is a date in the provider's reset timezone (midnight Pacific for
+    Gemini; see model_registry.quota_day), not UTC. It was UTC, which opened a
+    seven-to-eight hour window every day in which the two calendars disagreed:
+    from 00:00 UTC the counters read zero while the provider's were still
+    spent, every slot the selector then offered answered 429, and each 429
+    stamped the slot "spent" for the NEW UTC day — so when the provider did
+    reset, the tracker kept the slot closed for the remaining sixteen hours.
 
     Returns a `date`, not a string, because asyncpg binds parameters by the
     type it infers from the statement: `reset_date = $1::date` infers `date`
@@ -127,18 +136,18 @@ def _utc_today() -> date:
     means it was never a dev-only quirk: it broke every first deploy, and
     every query with it, while the developer's own machine stayed green.
     """
-    return datetime.now(timezone.utc).date()
+    return quota_day()
 
 
-def _utc_today_iso() -> str:
+def _quota_today_iso() -> str:
     """
-    Today's date as an ISO string, for comparison against ModelBudget.reset_date.
+    The quota day as an ISO string, for comparison against ModelBudget.reset_date.
 
     ModelBudget carries reset_date as a string, so the in-Python comparisons
     (and the mock backend) need this form. Anything crossing into SQL must use
-    `_utc_today()` instead.
+    `_quota_today()` instead.
     """
-    return _utc_today().isoformat()
+    return _quota_today().isoformat()
 
 
 @dataclass(frozen=True)
@@ -164,7 +173,7 @@ class ModelBudget:
     model_key: str
     daily_limit: int
     used_today: int
-    reset_date: str  # ISO date string UTC
+    reset_date: str  # ISO date string, provider quota day
 
 
 class BudgetTracker:
@@ -212,6 +221,10 @@ class BudgetTracker:
 
         Order is meaningful: the selector drains key 1 on a given model before
         touching key 2, so the first key should be the one you most want spent.
+
+        Each key must come from a DIFFERENT Google Cloud project. The provider
+        applies rate limits per project, not per key, so two keys from one
+        project share a single quota while this tracker counts them as two.
 
         Returns:
             De-duplicated list of keys, preserving order. Empty if none set,
@@ -371,10 +384,11 @@ class BudgetTracker:
                 await conn.execute(
                     """
                     INSERT INTO api_budget (model_key, used_today, reset_date)
-                    VALUES ($1, 0, CURRENT_DATE)
+                    VALUES ($1, 0, $2::date)
                     ON CONFLICT (model_key) DO NOTHING
                 """,
                     model_key,
+                    _quota_today(),
                 )
         logger.info("Budget schema verified")
 
@@ -554,7 +568,7 @@ class BudgetTracker:
         if key_index < 0 or is_local(model):
             return
         slot = self._slot(key_index, model)
-        today = _utc_today()
+        today = _quota_today()
         if getattr(self, "_provider_exhausted", {}).get(slot) == today:
             return
 
@@ -875,7 +889,7 @@ class BudgetTracker:
         # cooldown (90s doubling to 1800s) — measured against this provider, the
         # reasoning rungs 503 several times an hour, so a pinned 41-question run
         # would almost certainly meet one. That is transient and worth waiting
-        # out. Daily quota exhaustion is not: it clears at the UTC reset, and no
+        # out. Daily quota exhaustion is not: it clears at the daily reset, and no
         # amount of waiting inside one run will help.
         #
         # Failing on the first cooldown would make the pin unusable for exactly
@@ -893,7 +907,8 @@ class BudgetTracker:
                 raise RuntimeError(
                     f"SYNTHESIS_MODEL_PIN={pin} has no daily quota left on any "
                     f"configured key, and a pinned run must not substitute another "
-                    f"model. Wait for the UTC quota reset, add another key, or unset "
+                    f"model. Wait for the daily quota reset (midnight Pacific), add "
+                    f"another key, or unset "
                     f"the pin to restore normal ladder behaviour."
                 )
 
@@ -1004,7 +1019,7 @@ class BudgetTracker:
 
         slot = self._slot(key_index, model)
         limit = self._slot_limit(slot)
-        today = _utc_today()
+        today = _quota_today()
 
         hint = self._take_quota_hint(slot)
         if hint is not None and hint[0]:
@@ -1018,6 +1033,7 @@ class BudgetTracker:
 
         if not hasattr(self, "_provider_exhausted"):
             self._provider_exhausted = {}
+        await self._warn_if_keys_share_a_project(slot, model, today)
         self._provider_exhausted[slot] = today
 
         logger.warning(
@@ -1044,6 +1060,55 @@ class BudgetTracker:
             # Never let bookkeeping failure break the caller's fallback path.
             logger.error("Failed to persist exhausted slot",
                          extra={"slot": slot, "error": str(e)})
+
+    async def _warn_if_keys_share_a_project(self, slot: str, model: str, today: date) -> None:
+        """
+        Logs, once, when two keys look like they draw on the same quota.
+
+        The provider's limits are per Google Cloud project, not per key, so keys
+        created in one project share a single allowance — but this tracker
+        counts per key and would believe it has N times that. Nothing in an API
+        key says which project it belongs to, so the only evidence is
+        behavioural: the provider declares a slot's day spent while our own
+        count for it is well under the limit, and it has already done the same
+        for another key on the same model today.
+
+        That pattern has one other cause — counters lost in a restart on the
+        in-memory fallback — and the message says so rather than guess.
+
+        Args:
+            slot: The slot the provider just refused for the day.
+            model: Its model.
+            today: Current quota day.
+        """
+        if getattr(self, "_shared_project_warned", False):
+            return
+        also_refused = [
+            s for s, day in self._provider_exhausted.items()
+            if day == today and s != slot and self._slot_model(s) == model
+        ]
+        if not also_refused:
+            return
+        try:
+            budget = await self._load_budget(slot)
+        except Exception:
+            return
+        used = budget.used_today if budget.reset_date == today.isoformat() else 0
+        if used * 2 >= self._slot_limit(slot):
+            return
+
+        self._shared_project_warned = True
+        logger.warning(
+            "The provider declared a model's daily quota spent on two API keys "
+            "while this process had counted well under the limit on the second. "
+            "Gemini rate limits are per Google Cloud PROJECT, not per key: keys "
+            "created in the same project share one quota and add no capacity. "
+            "Check that every key in GEMINI_API_KEYS comes from a different "
+            "project. (The other explanation is counters lost in a restart "
+            "while running on the in-memory fallback.)",
+            extra={"model": model, "slots": sorted(also_refused + [slot]),
+                   "locally_counted": used, "limit": self._slot_limit(slot)},
+        )
 
     def mark_key_unusable(self, key_index: int) -> None:
         """
@@ -1091,7 +1156,7 @@ class BudgetTracker:
             Dict of model -> {used, limit, remaining, reset_date, keys}.
         """
         status: dict[str, dict] = {}
-        today = _utc_today_iso()
+        today = _quota_today_iso()
 
         for slot in self._all_slots():
             # A slot this credential may never use is not capacity. Before it is
@@ -1142,7 +1207,7 @@ class BudgetTracker:
             True if budget is available for this model today.
         """
         budget = await self._load_budget(model_key)
-        today = _utc_today_iso()
+        today = _quota_today_iso()
         if budget.reset_date != today:
             return True
         return budget.used_today < self._slot_limit(model_key)
@@ -1163,13 +1228,13 @@ class BudgetTracker:
         Returns:
             True if budget was consumed, False if exhausted.
         """
-        today = _utc_today()
+        today = _quota_today()
         today_iso = today.isoformat()
         if getattr(self, "_is_mock", False):
             if model_key not in self._mock_budgets:
                 self._mock_budgets[model_key] = {"used_today": 0, "reset_date": today_iso}
             b = self._mock_budgets[model_key]
-            if b["reset_date"] < today_iso:
+            if b["reset_date"] != today_iso:
                 b["used_today"] = 0
                 b["reset_date"] = today_iso
             if b["used_today"] < self._slot_limit(model_key):
@@ -1182,10 +1247,14 @@ class BudgetTracker:
             return False
 
         async with self._pool.acquire() as conn:
-            # Reset if new day (idempotent)
+            # Reset if the stored day is not the current quota day (idempotent).
+            # "<>" rather than "<": rows written when the day was counted in UTC
+            # can carry a date AHEAD of the quota day, and _budget_available
+            # already treats any other date as a full allowance — the two must
+            # agree or the selector offers a slot the debit then refuses.
             await conn.execute(
                 "UPDATE api_budget SET used_today = 0, reset_date = $1::date "
-                "WHERE model_key = $2 AND reset_date < $1::date",
+                "WHERE model_key = $2 AND reset_date <> $1::date",
                 today,
                 model_key,
             )
@@ -1222,7 +1291,7 @@ class BudgetTracker:
         Returns:
             ModelBudget dataclass with used_today and reset_date.
         """
-        today = _utc_today_iso()
+        today = _quota_today_iso()
         if getattr(self, "_is_mock", False):
             if model_key not in self._mock_budgets:
                 self._mock_budgets[model_key] = {"used_today": 0, "reset_date": today}
@@ -1243,14 +1312,15 @@ class BudgetTracker:
                 # First use — insert default
                 await conn.execute(
                     "INSERT INTO api_budget (model_key, used_today, reset_date) "
-                    "VALUES ($1, 0, CURRENT_DATE)",
+                    "VALUES ($1, 0, $2::date)",
                     model_key,
+                    _quota_today(),
                 )
                 return ModelBudget(
                     model_key=model_key,
                     daily_limit=self._slot_limit(model_key),
                     used_today=0,
-                    reset_date=_utc_today_iso(),
+                    reset_date=_quota_today_iso(),
                 )
             return ModelBudget(
                 model_key=row["model_key"],

@@ -221,3 +221,142 @@ class TestRequestScopedExclusion:
         t = _tracker()
         cloud = frozenset(m for m in AGENT_LADDER if m != LOCAL_MODEL)
         assert (await t.get_model_for_agent(exclude=cloud)).model == LOCAL_MODEL
+
+
+class TestQuotaDay:
+    """The daily counters reset when the PROVIDER's day changes: midnight Pacific."""
+
+    def test_quota_day_is_the_pacific_calendar_date(self):
+        from datetime import date, datetime, timezone
+
+        from src.llm.model_registry import quota_day
+
+        # 03:00 UTC on 15 Nov is still 14 Nov in Los Angeles (19:00 PST).
+        assert quota_day(datetime(2026, 11, 15, 3, 0, tzinfo=timezone.utc)) == date(2026, 11, 14)
+        # 08:00 UTC is midnight PST: the provider's day has just turned.
+        assert quota_day(datetime(2026, 11, 15, 8, 0, tzinfo=timezone.utc)) == date(2026, 11, 15)
+        # In summer the reset is at 07:00 UTC (PDT).
+        assert quota_day(datetime(2026, 7, 1, 6, 59, tzinfo=timezone.utc)) == date(2026, 6, 30)
+        assert quota_day(datetime(2026, 7, 1, 7, 0, tzinfo=timezone.utc)) == date(2026, 7, 1)
+
+    def test_fallback_without_tzdata_never_resets_early(self, monkeypatch):
+        """
+        No IANA database: fixed UTC-8. In summer that is an hour LATE, which
+        only withholds a fresh slot for an hour; an hour early would offer a
+        slot the provider still considers spent.
+        """
+        from datetime import date, datetime, timezone
+
+        import src.llm.model_registry as registry
+
+        def missing(_name):
+            raise registry.ZoneInfoNotFoundError("no tzdata")
+
+        monkeypatch.setattr(registry, "ZoneInfo", missing)
+        assert registry.quota_day(datetime(2026, 7, 1, 7, 30, tzinfo=timezone.utc)) == date(2026, 6, 30)
+        assert registry.quota_day(datetime(2026, 7, 1, 8, 0, tzinfo=timezone.utc)) == date(2026, 7, 1)
+
+    @pytest.mark.asyncio
+    async def test_utc_midnight_does_not_reset_the_counters(self, monkeypatch):
+        """
+        The audit scenario. A slot is spent; UTC midnight passes; the provider
+        has NOT reset. The slot must stay closed until the Pacific day turns,
+        and then open — it used to open 8 hours early, 429, and be stamped
+        spent for the whole next day.
+        """
+        from datetime import date
+
+        import src.llm.budget_tracker as bt
+
+        day = {"today": date(2026, 11, 14)}
+        monkeypatch.setattr(bt, "quota_day", lambda: day["today"])
+
+        t = _tracker(keys=(K0,))
+        await t.mark_slot_exhausted(0, TOP)                 # provider: spent for 14 Nov
+        assert (await t.get_model_for_agent()).model == SECOND
+
+        # 00:30 UTC on the 15th is still the 14th in Pacific: quota_day unchanged.
+        assert (await t.get_model_for_agent()).model == SECOND
+
+        day["today"] = date(2026, 11, 15)                   # midnight Pacific
+        assert (await t.get_model_for_agent()).model == TOP
+        assert _used(t, 0, TOP) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_counter_dated_ahead_of_the_quota_day_is_reset(self, monkeypatch):
+        """
+        Rows written when the day was counted in UTC can be dated tomorrow.
+        The availability check and the debit must agree about them.
+        """
+        from datetime import date
+
+        import src.llm.budget_tracker as bt
+
+        monkeypatch.setattr(bt, "quota_day", lambda: date(2026, 11, 14))
+        t = _tracker(keys=(K0,))
+        slot = t._slot(0, TOP)
+        t._mock_budgets[slot] = {"used_today": usable_rpd(TOP), "reset_date": "2026-11-15"}
+
+        assert await t._budget_available(slot)
+        assert await t._try_consume(slot), "offered by the check, so the debit must succeed"
+        assert t._mock_budgets[slot] == {"used_today": 1, "reset_date": "2026-11-14"}
+
+    @pytest.mark.asyncio
+    async def test_sql_reset_matches_any_other_day(self):
+        """Postgres path: the reset must fire for a stored date on either side."""
+        calls = []
+
+        class _Conn:
+            async def execute(self, query, *args):
+                calls.append(query)
+                return "UPDATE 1"
+
+        class _Acquire:
+            async def __aenter__(self):
+                return _Conn()
+
+            async def __aexit__(self, *exc):
+                return False
+
+        t = _tracker(keys=(K0,))
+        t._is_mock = False
+        t._pool = type("P", (), {"acquire": lambda self: _Acquire()})()
+
+        assert await t._try_consume(t._slot(0, TOP))
+        reset = next(q for q in calls if "used_today = 0" in q)
+        assert "reset_date <> $1::date" in reset
+
+
+class TestSharedProjectWarning:
+    """Limits are per Google Cloud project; keys from one project add nothing."""
+
+    @staticmethod
+    def _warnings(caplog):
+        return [r for r in caplog.records if "per Google Cloud PROJECT" in r.getMessage()]
+
+    @pytest.mark.asyncio
+    async def test_warns_once_when_two_keys_are_refused_with_headroom(self, caplog):
+        import logging
+
+        t = _tracker()
+        with caplog.at_level(logging.WARNING, logger="src.llm.budget_tracker"):
+            await t.mark_slot_exhausted(0, TOP)
+            assert not self._warnings(caplog), "one refusal proves nothing"
+            await t.mark_slot_exhausted(1, TOP)             # we had counted 0 of 475
+            await t.mark_slot_exhausted(1, SECOND)
+            await t.mark_slot_exhausted(0, SECOND)
+        assert len(self._warnings(caplog)) == 1
+
+    @pytest.mark.asyncio
+    async def test_silent_when_our_own_count_explains_the_refusal(self, caplog):
+        import logging
+
+        t = _tracker()
+        slot = t._slot(1, TOP)
+        for _ in range(usable_rpd(TOP) - 3):
+            await t._try_consume(slot)                      # we really did spend it
+
+        with caplog.at_level(logging.WARNING, logger="src.llm.budget_tracker"):
+            await t.mark_slot_exhausted(0, TOP)
+            await t.mark_slot_exhausted(1, TOP)
+        assert not self._warnings(caplog)

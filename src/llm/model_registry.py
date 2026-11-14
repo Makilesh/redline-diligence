@@ -50,9 +50,29 @@ current traffic RPM binds long before TPM (15 requests/min against a 250K TPM
 ceiling implies ~16K tokens per request before TPM could bind, well above the
 ~8K these prompts run at), so this is a real but presently inactive gap. It is
 recorded rather than left implicit so it does not become a third quota surprise.
+
+QUOTAS ARE PER PROJECT, AND THE DAY IS PACIFIC
+----------------------------------------------
+Two facts from the provider's rate-limit documentation that the accounting
+depends on (https://ai.google.dev/gemini-api/docs/rate-limits, read 2026-11-14):
+
+  * "Rate limits are applied per project, not per API key." Key rotation
+    therefore multiplies capacity only when every key in GEMINI_API_KEYS comes
+    from a DIFFERENT Google Cloud project. Two keys from one project share one
+    quota, and the tracker — which counts per key — will believe it has twice
+    what the provider will serve. BudgetTracker warns when it sees the
+    signature of that (see _warn_if_keys_share_a_project).
+  * "Requests per day (RPD) quotas reset at midnight Pacific time." The daily
+    counters reset on that calendar (quota_day below), not on UTC.
+
+The same page labels TPM "Tokens per minute (input)": it is an input-token
+limit. It does not publish per-model free-tier numbers — those are shown only
+in the AI Studio console, which is why the table above is a transcription.
 """
 
 from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 @dataclass(frozen=True)
@@ -143,6 +163,40 @@ AGENT_LADDER: list[str] = [
     "gemini/gemini-2.5-flash-lite",
     LOCAL_MODEL,
 ]
+
+
+# Where the provider's daily quota turns over.
+QUOTA_RESET_TIMEZONE = "America/Los_Angeles"
+
+# Used only when the IANA database is unavailable (a slim container without
+# tzdata). Pacific STANDARD time, deliberately: during daylight saving the real
+# reset is an hour earlier than this says, so the fallback errs towards
+# treating a fresh slot as spent for one hour — never towards offering a slot
+# the provider has not reset yet.
+_QUOTA_RESET_FALLBACK = timezone(timedelta(hours=-8))
+
+
+def _quota_timezone():
+    """The provider's reset timezone, or the fixed-offset fallback."""
+    try:
+        return ZoneInfo(QUOTA_RESET_TIMEZONE)
+    except ZoneInfoNotFoundError:
+        return _QUOTA_RESET_FALLBACK
+
+
+def quota_day(now: datetime | None = None) -> date:
+    """
+    The provider's quota day for a moment in time.
+
+    Args:
+        now: An aware datetime; defaults to the current time.
+
+    Returns:
+        The calendar date in the provider's reset timezone. Daily counters
+        belong to this date and reset when it changes.
+    """
+    moment = now if now is not None else datetime.now(timezone.utc)
+    return moment.astimezone(_quota_timezone()).date()
 
 
 def usable_rpd(model: str) -> int:
