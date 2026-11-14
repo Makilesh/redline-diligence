@@ -164,14 +164,19 @@ print('models cached')"
 
 # Laya's typed-decisions checkpoint (~1.7GB) for the decision layer in
 # src/decisions — same reasoning: fetched here once, not on the first request.
-# (No backticks in the probe question: inside this double-quoted shell string
-# they would be command substitution.)
+# The app loads a pinned Hub commit (src/decisions/laya_client.py,
+# DEFAULT_REVISION), so the cache must hold that commit, not whatever upstream
+# main is today: the files below are exactly what _pinned_checkpoint() requests, so
+# the runtime resolves them from this cache with no network. Keep the default
+# equal to DEFAULT_REVISION and bump both together, with the decision evals.
+ARG LAYA_REVISION=85cc74ddae6109077ebe2853a9b3077fb6606a78
+ENV LAYA_REVISION=${LAYA_REVISION}
 RUN timeout 3600 python -c "\
-from laya import Router; \
-Router(device='cpu', max_loaded=1).predict({'passage': 'probe'}, \
-    {'q': {'type': 'noul', 'instructions': 'Is the passage empty?'}}, \
-    model='typed-decisions'); \
-print('laya cached')"
+from huggingface_hub import snapshot_download; \
+snapshot_download('convaiinnovations/laya', revision='${LAYA_REVISION}', \
+    allow_patterns=['typed-decisions/' + n for n in \
+        ('rl_agent_config.json', 'model.safetensors', 'tokenizer/*', 'encoder/*')]); \
+print('laya cached at ${LAYA_REVISION}')"
 
 # FastEmbed's BM25 model is small but is fetched on first use like the others.
 RUN timeout 600 python -c "\
