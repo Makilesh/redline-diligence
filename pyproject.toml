@@ -3,6 +3,25 @@
 # of pytest settings; do not add [tool.pytest.ini_options] here, pytest.ini
 # would silently win).
 
+# Read by `pytest --cov` (pytest-cov). Branch coverage, because most of the
+# interesting code here is routing: which rung, which gate, which refusal.
+[tool.coverage.run]
+source = ["src", "api", "app"]
+branch = true
+
+[tool.coverage.report]
+# Measured 77% on the offline suite (498 tests; 74% before the full-graph
+# tests). The floor sits well under that on purpose: it is not a target, it is a
+# tripwire for losing tests wholesale — a file that stops being collected, a
+# marker typo that deselects a class — which a green run otherwise hides.
+fail_under = 70
+skip_covered = true
+show_missing = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
+
 [tool.ruff]
 target-version = "py311"  # matches the Dockerfiles and CI
 line-length = 100
