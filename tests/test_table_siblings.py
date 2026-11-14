@@ -262,3 +262,128 @@ class TestIsolation:
 
         assert [c["chunk_id"] for c in default] == [hit["chunk_id"], table[1]["chunk_id"]]
         assert {c["chunk_id"] for c in with_pii} == {hit["chunk_id"], table[1]["chunk_id"], "pii"}
+
+
+# ==============================================================================
+# Section tables: a retrieved section brings the table printed inside it
+# ==============================================================================
+
+SECTION = "HART-SCOTT-RODINO (UNITED STATES)"
+
+
+def _prose_in(section: str, index: int, doc_id: str = "doc", **overrides) -> dict:
+    payload = {
+        "chunk_id": f"{doc_id}_prose_{index:04d}", "deal_id": DEAL, "doc_id": doc_id,
+        "text": f"prose {index}", "is_table": 0, "section_heading": section,
+        "chunk_index": index, "is_current_version": 1, "contains_pii": 0,
+        "parent_chunk_id": f"{doc_id}_p0",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _section_table(section: str, index: int, representation: str | None = None,
+                   table_id: str = "t-sec", doc_id: str = "doc", **overrides) -> dict:
+    chunk = _chunk(index, representation, table_id=table_id, section_heading=section,
+                   doc_id=doc_id)
+    chunk["chunk_id"] = f"{doc_id}_{table_id}_{index:04d}"
+    chunk.update(overrides)
+    return chunk
+
+
+class TestSectionTables:
+    @pytest.mark.asyncio
+    async def test_the_table_inside_a_retrieved_section_follows_its_prose(self):
+        """
+        The case from the eval: the HSR paragraph ranks, the fee / waiting-period
+        table printed under it does not, and the parent section holds prose only.
+        """
+        prose = _prose_in(SECTION, 1)
+        table = _section_table(SECTION, 2)
+        elsewhere = _section_table("FOREIGN MERGER CONTROL", 4, table_id="t-other")
+        client = await _client_with([prose, table, elsewhere])
+
+        out = await expand_context([_prose("p1"), dict(prose), _prose("p2")],
+                                   client=client, deal_id=DEAL)
+
+        assert [c["chunk_id"] for c in out] == ["p1", prose["chunk_id"], table["chunk_id"], "p2"]
+
+    @pytest.mark.asyncio
+    async def test_only_the_grid_nearest_the_prose_and_never_twice(self):
+        prose = _prose_in(SECTION, 10)
+        grid = [_section_table(SECTION, i, "markdown") for i in (11, 12, 13, 14, 15)]
+        narrative = _section_table(SECTION, 16, "narrative")
+        client = await _client_with([prose, *grid, narrative])
+        already_retrieved = dict(grid[1])
+
+        out = await expand_context([dict(prose), already_retrieved], client=client, deal_id=DEAL,
+                                   include_siblings=False)
+
+        ids = [c["chunk_id"] for c in out]
+        assert len(ids) == len(set(ids))
+        attached = out[1:-1]
+        assert len(attached) == sr.MAX_SECTION_TABLE_CHUNKS
+        assert [c["chunk_index"] for c in attached] == [11, 13, 14]  # 12 is already there
+        assert all(c["table_representation"] == "markdown" for c in attached)
+
+    @pytest.mark.asyncio
+    async def test_an_attached_table_does_not_pull_in_its_other_representations(self):
+        prose = _prose_in(SECTION, 1)
+        table = [_section_table(SECTION, 2, "narrative"), _section_table(SECTION, 3, "row_by_row"),
+                 _section_table(SECTION, 4, "markdown")]
+        client = await _client_with([prose, *table])
+
+        out = await expand_context([dict(prose)], client=client, deal_id=DEAL)
+
+        assert [c.get("table_representation") for c in out[1:]] == ["markdown"]
+
+    @pytest.mark.asyncio
+    async def test_same_heading_in_another_document_is_not_the_same_section(self):
+        prose = _prose_in(SECTION, 1)
+        foreign = _section_table(SECTION, 2, doc_id="another-doc")
+        client = await _client_with([prose, foreign])
+
+        out = await expand_context([dict(prose)], client=client, deal_id=DEAL)
+
+        assert [c["chunk_id"] for c in out] == [prose["chunk_id"]]
+
+    @pytest.mark.asyncio
+    async def test_section_tables_obey_deal_version_and_pii_filters(self):
+        prose = _prose_in(SECTION, 1)
+        outsiders = [
+            _section_table(SECTION, 2, table_id="t-deal", deal_id="another-deal"),
+            _section_table(SECTION, 3, table_id="t-old", is_current_version=0),
+            _section_table(SECTION, 4, table_id="t-pii", contains_pii=1),
+        ]
+        client = await _client_with([prose, *outsiders])
+
+        default = await expand_context([dict(prose)], client=client, deal_id=DEAL)
+        with_pii = await expand_context([dict(prose)], client=client, deal_id=DEAL,
+                                        include_pii=True)
+
+        assert [c["chunk_id"] for c in default] == [prose["chunk_id"]]
+        assert [c["chunk_id"] for c in with_pii] == [prose["chunk_id"], outsiders[2]["chunk_id"]]
+
+    @pytest.mark.asyncio
+    async def test_off_when_parent_expansion_is_off(self):
+        prose = _prose_in(SECTION, 1)
+        client = await _client_with([prose, _section_table(SECTION, 2)])
+
+        out = await expand_context([dict(prose)], client=client, deal_id=DEAL,
+                                   include_parents=False)
+
+        assert len(out) == 1
+
+    @pytest.mark.asyncio
+    async def test_failed_lookup_is_marked_not_raised(self, monkeypatch):
+        monkeypatch.setattr(sr, "QDRANT_BASE_DELAY_S", 0.0)
+
+        class Down:
+            async def scroll(self, **kwargs):
+                raise ConnectionError("qdrant down")
+
+        chunks = [_prose_in(SECTION, 1), _prose("p1")]
+        out = await sr.fetch_section_tables(chunks, Down(), deal_id=DEAL)
+
+        assert [c["chunk_id"] for c in out] == [chunks[0]["chunk_id"], "p1"]
+        assert out[0]["section_tables_missing"] is True

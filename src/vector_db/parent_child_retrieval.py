@@ -38,7 +38,7 @@ from src.vector_db.constants import (
     QDRANT_MAX_DELAY_S,
 )
 from src.vector_db.qdrant_client import get_qdrant_client
-from src.vector_db.sibling_retrieval import fetch_table_siblings
+from src.vector_db.sibling_retrieval import fetch_section_tables, fetch_table_siblings
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -205,6 +205,19 @@ async def expand_context(
         expanded = await fetch_table_siblings(
             expanded,
             required_representations=["narrative", "row_by_row", "metrics_summary", "markdown"],
+            client=client,
+            include_pii=include_pii,
+            deal_id=deal_id,
+            collection_name=collection_name,
+        )
+
+    # Section tables. Part of showing the parent section: a parent is built from
+    # prose only, so the table printed inside a retrieved section has to be
+    # attached separately. Runs after sibling expansion so that a table attached
+    # here does not in turn pull in its other representations.
+    if include_parents:
+        expanded = await fetch_section_tables(
+            expanded,
             client=client,
             include_pii=include_pii,
             deal_id=deal_id,

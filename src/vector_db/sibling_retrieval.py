@@ -24,6 +24,7 @@ from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import (
     FieldCondition,
     Filter,
+    MatchAny,
     MatchValue,
 )
 
@@ -48,7 +49,12 @@ MAX_SIBLINGS_PER_TABLE = 8
 # tables of roughly 180 rows; a larger grid is attached around the hit.
 MAX_GRID_CHUNKS_PER_TABLE = 12
 
-# Hard bound on points read for one table_id, and the scroll page size.
+# Table chunks attached to a retrieved prose chunk of the same section (see
+# fetch_section_tables). An inline table is one or two chunks; a section whose
+# table is larger contributes the part nearest the prose that was retrieved.
+MAX_SECTION_TABLE_CHUNKS = 3
+
+# Hard bound on points read for one lookup, and the scroll page size.
 MAX_TABLE_POINTS = 512
 _SCROLL_PAGE_SIZE = 64
 
@@ -164,6 +170,74 @@ def select_siblings(
     return selected, omitted
 
 
+async def _scroll_all(
+    client: AsyncQdrantClient,
+    collection_name: str,
+    must_conditions: list[FieldCondition],
+    what: dict,
+) -> list[dict]:
+    """
+    Every payload matching the conditions (paginated), with exponential backoff retry.
+
+    Args:
+        client: AsyncQdrantClient.
+        collection_name: Collection to scroll.
+        must_conditions: Filter conditions, all required.
+        what: Identifies the lookup in log lines (e.g. {"table_id": ...}).
+
+    Returns:
+        Up to MAX_TABLE_POINTS payloads.
+
+    Raises:
+        Exception: The last error once QDRANT_MAX_RETRIES attempts have failed.
+    """
+    for attempt in range(QDRANT_MAX_RETRIES):
+        try:
+            op_start = time.monotonic()
+            payloads: list[dict] = []
+            offset = None
+            while True:
+                page, offset = await client.scroll(
+                    collection_name=collection_name,
+                    scroll_filter=Filter(must=must_conditions),
+                    limit=_SCROLL_PAGE_SIZE,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                payloads.extend(point.payload for point in page)
+                if offset is None or len(payloads) >= MAX_TABLE_POINTS:
+                    break
+            op_elapsed_ms = (time.monotonic() - op_start) * 1000
+            logger.info(
+                "scroll for table siblings completed",
+                extra={
+                    **what,
+                    "siblings_found": len(payloads),
+                    "elapsed_ms": round(op_elapsed_ms, 2),
+                    "attempt": attempt + 1,
+                },
+            )
+            return payloads
+        except Exception as e:
+            if attempt == QDRANT_MAX_RETRIES - 1:
+                logger.error(
+                    "scroll for table siblings failed after max retries",
+                    extra={**what, "error": str(e), "attempts": QDRANT_MAX_RETRIES},
+                )
+                raise
+            delay = min(
+                QDRANT_BASE_DELAY_S * (2 ** attempt),
+                QDRANT_MAX_DELAY_S,
+            )
+            logger.warning(
+                f"scroll for table siblings attempt {attempt + 1} failed, retrying",
+                extra={**what, "error": str(e), "delay_s": delay},
+            )
+            await asyncio.sleep(delay)
+    return []  # unreachable, but satisfies type checker
+
+
 async def fetch_table_siblings(
     chunks: list[dict],
     required_representations: list[str],
@@ -256,59 +330,7 @@ async def fetch_table_siblings(
                 FieldCondition(key="contains_pii", match=MatchValue(value=0))
             )
 
-        for attempt in range(QDRANT_MAX_RETRIES):
-            try:
-                op_start = time.monotonic()
-                payloads: list[dict] = []
-                offset = None
-                while True:
-                    page, offset = await client.scroll(
-                        collection_name=collection_name,
-                        scroll_filter=Filter(must=must_conditions),
-                        limit=_SCROLL_PAGE_SIZE,
-                        offset=offset,
-                        with_payload=True,
-                        with_vectors=False,
-                    )
-                    payloads.extend(point.payload for point in page)
-                    if offset is None or len(payloads) >= MAX_TABLE_POINTS:
-                        break
-                op_elapsed_ms = (time.monotonic() - op_start) * 1000
-                logger.info(
-                    "scroll for table siblings completed",
-                    extra={
-                        "table_id": tid,
-                        "siblings_found": len(payloads),
-                        "elapsed_ms": round(op_elapsed_ms, 2),
-                        "attempt": attempt + 1,
-                    },
-                )
-                return payloads
-            except Exception as e:
-                if attempt == QDRANT_MAX_RETRIES - 1:
-                    logger.error(
-                        "scroll for table siblings failed after max retries",
-                        extra={
-                            "table_id": tid,
-                            "error": str(e),
-                            "attempts": QDRANT_MAX_RETRIES,
-                        },
-                    )
-                    raise
-                delay = min(
-                    QDRANT_BASE_DELAY_S * (2 ** attempt),
-                    QDRANT_MAX_DELAY_S,
-                )
-                logger.warning(
-                    f"scroll for table siblings attempt {attempt + 1} failed, retrying",
-                    extra={
-                        "table_id": tid,
-                        "error": str(e),
-                        "delay_s": delay,
-                    },
-                )
-                await asyncio.sleep(delay)
-        return []  # unreachable, but satisfies type checker
+        return await _scroll_all(client, collection_name, must_conditions, {"table_id": tid})
 
     # Launch all sibling scroll tasks concurrently
     table_ids = list(hits_by_table)
@@ -363,5 +385,118 @@ async def fetch_table_siblings(
             "total_chunks": len(expanded),
             "elapsed_ms": round(elapsed_ms, 2),
         },
+    )
+    return expanded
+
+
+async def fetch_section_tables(
+    chunks: list[dict],
+    client: AsyncQdrantClient,
+    include_pii: bool = False,
+    deal_id: str | None = None,
+    collection_name: str = COLLECTION_NAME,
+) -> list[dict]:
+    """
+    For each retrieved prose chunk, adds the table that sits in its own section.
+
+    Ingestion indexes a table separately from the prose around it, and a parent
+    section is built from prose only, so the parent text shown for "the filing
+    is reportable under Hart-Scott-Rodino ..." never contains the fee and
+    waiting-period table printed directly under that sentence. The table is then
+    in the context only if it ranks on its own, and a short key-value table
+    scores poorly against a question about the section as a whole: measured on
+    the retrieval eval, the cross-encoder gave that table 0.007 (rank 14 of 112
+    chunks) for "summarize the regulatory approvals required", while the prose
+    introducing it was retrieved at rank 5.
+
+    So a section that is in the context brings its table with it: table chunks
+    with the same document and section heading as a retrieved prose chunk are
+    inserted directly after it, grid representation only, nearest first, at most
+    MAX_SECTION_TABLE_CHUNKS per section. Tables already in the context are not
+    repeated. Deal, version and PII conditions are those of every other lookup.
+
+    A document whose lookup fails after retries is left as it was and its prose
+    chunks are marked `section_tables_missing`.
+
+    Args:
+        chunks: Context chunks, best first.
+        client: AsyncQdrantClient.
+        include_pii: Compliance authorization override.
+        deal_id: Deal scope; when None it is taken from each chunk's payload.
+        collection_name: Collection to scroll.
+
+    Returns:
+        The chunks with section tables inserted after the first prose chunk of
+        each section.
+    """
+    # (doc_id, section_heading) -> the best-ranked prose chunk of that section
+    sections: dict[tuple[str, str], dict] = {}
+    for c in chunks:
+        if c.get("is_table") == 1 or not c.get("doc_id") or not c.get("section_heading"):
+            continue
+        sections.setdefault((c["doc_id"], c["section_heading"]), c)
+    if not sections:
+        return chunks
+
+    headings_by_doc: dict[str, list[str]] = {}
+    for doc_id, heading in sections:
+        headings_by_doc.setdefault(doc_id, []).append(heading)
+
+    async def _tables_of(doc_id: str) -> list[dict]:
+        doc_deal_id = deal_id or next(
+            (c.get("deal_id") for (d, _), c in sections.items() if d == doc_id), None)
+        if not doc_deal_id:
+            # Without a deal scope the lookup could cross deals; skip it.
+            return []
+        must_conditions = [
+            FieldCondition(key="deal_id", match=MatchValue(value=doc_deal_id)),
+            FieldCondition(key="doc_id", match=MatchValue(value=doc_id)),
+            FieldCondition(key="is_table", match=MatchValue(value=1)),
+            FieldCondition(key="section_heading", match=MatchAny(any=headings_by_doc[doc_id])),
+            FieldCondition(key="is_current_version", match=MatchValue(value=1)),
+        ]
+        if not include_pii:
+            must_conditions.append(FieldCondition(key="contains_pii", match=MatchValue(value=0)))
+        return await _scroll_all(client, collection_name, must_conditions, {"doc_id": doc_id})
+
+    doc_ids = list(headings_by_doc)
+    results = await asyncio.gather(*[_tables_of(d) for d in doc_ids], return_exceptions=True)
+
+    existing_ids = {c["chunk_id"] for c in chunks}
+    tables_after: dict[int, list[dict]] = {}
+    added = 0
+    for doc_id, table_points in zip(doc_ids, results):
+        if isinstance(table_points, BaseException):
+            logger.error(
+                "section table lookup failed",
+                extra={"doc_id": doc_id, "error": str(table_points)},
+            )
+            for (d, _), hit in sections.items():
+                if d == doc_id:
+                    hit["section_tables_missing"] = True
+            continue
+        for heading in headings_by_doc[doc_id]:
+            hit = sections[(doc_id, heading)]
+            anchor = hit.get("chunk_index") or 0
+            candidates = [
+                p for p in table_points
+                if p.get("section_heading") == heading
+                and _representation(p) in (None, _GRID_REPRESENTATION)
+                and p["chunk_id"] not in existing_ids
+            ]
+            candidates.sort(key=lambda p: (abs((p.get("chunk_index") or 0) - anchor),
+                                           str(p.get("chunk_id"))))
+            chosen = _in_table_order(candidates[:MAX_SECTION_TABLE_CHUNKS])
+            existing_ids.update(p["chunk_id"] for p in chosen)
+            tables_after[id(hit)] = chosen
+            added += len(chosen)
+
+    expanded: list[dict] = []
+    for chunk in chunks:
+        expanded.append(chunk)
+        expanded.extend(tables_after.get(id(chunk), []))
+    logger.info(
+        "fetch_section_tables completed",
+        extra={"sections": len(sections), "tables_added": added, "total_chunks": len(expanded)},
     )
     return expanded

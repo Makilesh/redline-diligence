@@ -415,6 +415,9 @@ async def retrieval_executor_node(state: AgentState) -> dict:
     siblings_missing = sorted(
         {c["table_id"] for c in expanded if c.get("table_siblings_missing")}
     )
+    section_tables_missing = sorted(
+        {c.get("source_file", "") for c in expanded if c.get("section_tables_missing")}
+    )
 
     logger.info(
         "Agent 3: Retrieval Executor complete",
@@ -454,6 +457,8 @@ async def retrieval_executor_node(state: AgentState) -> dict:
                     {c.get("source_file", "") for c in reranked} - {""}
                 ),
                 **({"table_siblings_missing": siblings_missing} if siblings_missing else {}),
+                **({"section_tables_missing": section_tables_missing}
+                   if section_tables_missing else {}),
             }
         ],
     }

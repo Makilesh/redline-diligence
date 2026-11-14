@@ -330,6 +330,9 @@ async def create_payload_indexes(
         # Which BM25 text normalisation wrote the point's sparse vector; counted
         # by sparse_index_status to find points that need re-indexing.
         ("sparse_encoding",     PayloadSchemaType.INTEGER),
+        # Section-table lookup filters on it (sibling_retrieval.fetch_section_tables);
+        # a server in strict mode rejects a filter on an unindexed field.
+        ("section_heading",     PayloadSchemaType.KEYWORD),
     ]
 
     for field_name, field_type in indexes:
