@@ -112,6 +112,7 @@ class NumericMention:
             rounding tolerance.
         start: Offset in the source text.
         end: End offset in the source text.
+        currency: "USD", "EUR" or "GBP" when the text names one, else "".
     """
 
     raw: str
@@ -122,6 +123,7 @@ class NumericMention:
     decimals: int
     start: int
     end: int
+    currency: str = ""
 
     @property
     def half_unit(self) -> float:
@@ -232,7 +234,7 @@ def extract_numbers(text: str, claims_only: bool = True) -> list[NumericMention]
         else:
             kind = "plain"
 
-        mention = NumericMention(
+        mentions.append(NumericMention(
             raw=m.group(0).strip(),
             value=abs(mantissa) * scale,
             kind=kind,
@@ -241,20 +243,79 @@ def extract_numbers(text: str, claims_only: bool = True) -> list[NumericMention]
             decimals=decimals,
             start=m.start(),
             end=m.end(),
-        )
-        if claims_only and not mention.is_claim:
-            continue
-        mentions.append(mention)
+            currency=_CURRENCY_CODES.get(cur.upper(), "") if cur else "",
+        ))
 
+    mentions = _share_range_units(scrubbed, mentions)
+    if claims_only:
+        mentions = [mention for mention in mentions if mention.is_claim]
     return mentions
+
+
+_CURRENCY_CODES = {"$": "USD", "US$": "USD", "USD": "USD", "€": "EUR", "EUR": "EUR", "£": "GBP", "GBP": "GBP"}
+
+# What may stand between the two ends of a range: "225 to 175 basis points",
+# "$3.5 – $8.0 million", "between 10 and 15%".
+_RANGE_JOIN_RE = re.compile(r"\s*(?:to|and|or|through|[-–—])\s*")
+
+
+def _share_range_units(text: str, mentions: list[NumericMention]) -> list[NumericMention]:
+    """
+    Gives the first figure of a range the unit stated once, after the second.
+
+    "From 225 to 175 basis points" and "$3.5 to $8.0 million" state the unit
+    one time for both ends. Read literally the first end is a bare 225 (not a
+    figure at all) or $3.5 (three dollars fifty), so a correct range could
+    neither be grounded nor used as an operand.
+
+    Args:
+        text: The text the mentions were extracted from.
+        mentions: Figures in text order.
+
+    Returns:
+        The mentions, with range starts completed.
+    """
+    out = list(mentions)
+    for i in range(len(out) - 1):
+        first, second = out[i], out[i + 1]
+        if second.start - first.end > 12 or not _RANGE_JOIN_RE.fullmatch(
+            text[first.end: second.start]
+        ):
+            continue
+        ratio = second.kind in ("percent", "pp", "bps", "multiple")
+        if first.kind == "plain" and (ratio or (second.kind == "count" and second.explicit_scale)):
+            kind, scale, explicit = second.kind, second.scale, second.explicit_scale
+        elif (
+            first.kind == second.kind == "currency"
+            and second.explicit_scale
+            and not first.explicit_scale
+        ):
+            kind, scale, explicit = first.kind, second.scale, True
+        else:
+            continue
+        out[i] = NumericMention(
+            raw=first.raw,
+            value=first.value * scale,
+            kind=kind,
+            explicit_scale=explicit,
+            scale=scale,
+            decimals=first.decimals,
+            start=first.start,
+            end=first.end,
+            currency=first.currency,
+        )
+    return out
 
 
 # ─── Units and periods a document states ──────────────────────────────────────
 
 # A unit header: "(in millions of USD)", "$ in thousands", "USD m". Shared with
 # the financial verifier's registry so both read a table's unit the same way.
+# Every quantifier is followed by something it cannot itself match: this runs
+# over counterparty-supplied text, where "(" plus a long run of spaces made the
+# earlier `\(\s*(?:…)?\s*` form quadratic.
 SCALE_HINT_RE = re.compile(
-    r"\(\s*(?:\$|USD|US\$|EUR|GBP)?\s*(?:in\s+)?(thousands|millions|billions)\b"
+    r"\(\s*(?:(?:\$|USD|US\$|EUR|GBP)\s*)?(?:in\s+)?(thousands|millions|billions)\b"
     r"|\bin\s+(thousands|millions|billions)\s+of\b"
     r"|\b(?:USD|\$)\s*(thousands|millions|billions|000s|mm|m)\b",
     re.IGNORECASE,
@@ -294,10 +355,17 @@ _COMPARISON_TRAIL_RE = re.compile(
     re.IGNORECASE,
 )
 
-_RULE_LINE_RE = re.compile(r"^\s*[=\-_*~|:\s]{4,}\s*$")
+_RULE_CHARS = frozenset("=-_*~|: \t")
+_PARENTHETICAL_RE = re.compile(r"\(([^()\n]*)\)")
 _COLUMN_GAP_RE = re.compile(r"\S(?:\s{2,}|\t|\s*\|\s*)\S")
-_LABEL_COLON_RE = re.compile(r"^\s*[^:\n]{2,60}:\s")
-_SENTENCE_END_RE = re.compile(r"(?<=[.!?;])\s+(?=[A-Z0-9(\"'$])")
+# Applied to a left-stripped line (see _is_listed).
+_LABEL_COLON_RE = re.compile(r"[^:\n]{2,60}:\s")
+# A sentence ends before a capital, a figure or a list bullet: without the
+# bullet, "…$10 million per fiscal year;\n  - Dispose of assets … $20 million"
+# is one sentence, and every figure in a bulleted list shares one anchor.
+_SENTENCE_END_RE = re.compile(
+    r"(?<=[.!?;])\s+(?=[-•*]\s|[A-Z0-9(\"'$])|(?<=:)\s+(?=[-•*]\s)"
+)
 _BINDING_WORD_RE = re.compile(r"[a-z][a-z&]{2,}")
 _BINDING_STOPWORDS = {
     "the", "and", "for", "with", "that", "this", "from", "was", "were", "are", "has",
@@ -376,25 +444,35 @@ def figure_periods(text: str, spans: list[tuple[int, int]]) -> list[str]:
             "*" if _is_comparison(text, start, end) else "" for start, end in spans
         ]
 
+    # Only the nearest period on each side can be adjacent, and only the
+    # neighbouring figure can sit in between — so this is a bisect per figure,
+    # not a scan of every period (a document line can hold thousands of both).
+    period_starts = [p[0] for p in periods]
+    comparison = [_is_comparison(text, start, end) for start, end in spans]
     adjacent: list[str] = []
-    for start, end in spans:
+    for i, (start, end) in enumerate(spans):
         best: tuple[int, int, str] | None = None
-        for p_start, p_end, year in periods:
-            if p_end <= start:
-                gap, lo, hi, after = start - p_end, p_end, start, 1
-            elif p_start >= end:
-                gap, lo, hi, after = p_start - end, end, p_start, 0
-            else:
-                continue
-            if gap > _PERIOD_ADJACENCY:
-                continue
-            if any(s < hi and e > lo for s, e in spans if (s, e) != (start, end)):
-                continue
-            if best is None or (gap, after) < best[:2]:
-                best = (gap, after, year)
+        k = bisect.bisect_left(period_starts, end)
+        if k < len(periods):
+            p_start, _, year = periods[k]
+            next_figure = spans[i + 1][0] if i + 1 < len(spans) else p_start
+            if p_start - end <= _PERIOD_ADJACENCY and next_figure >= p_start:
+                best = (p_start - end, 0, year)
+        j = bisect.bisect_right(period_starts, start) - 1
+        # "…in FY2023, up from $387.1M": the period before a comparison figure
+        # belongs to the figure it is being compared with.
+        if j >= 0 and periods[j][1] <= start and not comparison[i]:
+            _, p_end, year = periods[j]
+            previous_figure = spans[i - 1][1] if i else p_end
+            gap = start - p_end
+            if (
+                gap <= _PERIOD_ADJACENCY
+                and previous_figure <= p_end
+                and (best is None or (gap, 1) < best[:2])
+            ):
+                best = (gap, 1, year)
         adjacent.append(best[2] if best else "")
 
-    comparison = [_is_comparison(text, start, end) for start, end in spans]
     years = {year for _, _, year in periods}
     only = next(iter(years)) if len(years) == 1 else ""
     # The single period is "taken" when it sits next to a comparison figure.
@@ -468,10 +546,15 @@ class ContextFigure:
         source_file: File the chunk came from.
         snippet: Text around the figure, for display.
         cell: True when the figure is a cell of a table row.
-        row: Index into ContextIndex.rows of that row, else -1.
-        anchor_tokens: binding_tokens of the row or sentence the figure sits in.
+        unit: Index into ContextIndex.units of the row or sentence it sits in.
+        anchor_tokens: binding_tokens of that row or sentence.
+        alias_tokens: For a cell, the label words inside parentheses —
+            "Operating Income (EBIT)" is also just "EBIT".
         period: Year the figure is stated for — its column header, or a period
             next to it — "" when the document does not say.
+        column_unknown: True for a cell in a row of several like figures whose
+            columns no retrieved header names: one of them is this period's
+            figure, and nothing retrieved says which.
     """
 
     mention: NumericMention
@@ -479,17 +562,47 @@ class ContextFigure:
     source_file: str
     snippet: str
     cell: bool = False
-    row: int = -1
+    unit: int = -1
     anchor_tokens: frozenset = frozenset()
+    alias_tokens: frozenset = frozenset()
     period: str = ""
+    column_unknown: bool = False
+
+    def named_by(self, claim_tokens: set[str]) -> bool:
+        """
+        True when a claim names the row or sentence this figure sits in.
+
+        A cell: the claim uses LABEL_COVERAGE of the row's label words — of the
+        whole label, of the label without its parenthetical, or all of the
+        parenthetical alone. A figure in prose: the sentence holds
+        SENTENCE_COVERAGE of the claim's words, or the claim holds the label of
+        a short "Label: value" line.
+        """
+        anchor = self.anchor_tokens
+        shared = len(anchor & claim_tokens)
+        if not self.cell:
+            return bool(claim_tokens) and (
+                shared / len(claim_tokens) >= SENTENCE_COVERAGE
+                or (0 < len(anchor) <= 6 and shared / len(anchor) >= LABEL_COVERAGE)
+            )
+        if anchor and shared / len(anchor) >= LABEL_COVERAGE:
+            return True
+        alias = self.alias_tokens
+        if not alias:
+            return False
+        main = anchor - alias
+        return alias <= claim_tokens or (
+            bool(main) and len(main & claim_tokens) / len(main) >= LABEL_COVERAGE
+        )
 
 
 @dataclass
-class _Row:
-    """One table row: its label words and the figures in it."""
+class _Unit:
+    """A table row or a sentence that holds figures: its words and its figures."""
 
     tokens: frozenset
     figures: list[int]
+    tabular: bool
 
 
 @dataclass
@@ -500,8 +613,9 @@ class Binding:
     status: "bound"    — the claim names the row or sentence the figure sits
                          in, for the period it sits in;
             "conflict" — it names that row, but for another period, or it
-                         names a more specific row whose figure is different;
-            "unbound"  — the value occurs, in a place the claim does not name.
+                         names another line more fully whose figure differs;
+            "unbound"  — the value occurs, in a place the claim does not name
+                         (or in a row whose columns cannot be told apart).
     """
 
     status: str
@@ -535,15 +649,16 @@ class ContextIndex:
 
     def __init__(self, chunks: Iterable[dict]):
         self.figures: list[ContextFigure] = []
-        self.rows: list[_Row] = []
+        self.units: list[_Unit] = []
         # (value at one magnitude, figure id, True when that magnitude is assumed)
         keyed: list[tuple[float, int, bool]] = []
 
         from src.verification.evidence import chunk_evidence_text
 
         # Unit headers and column headers are properties of a document: a table
-        # chunk is often retrieved without the heading that states them. So
-        # every body is parsed first, and what each file declares is shared.
+        # chunk is often retrieved without the heading that states them (the
+        # sample financials' key-metrics table has neither). So every body is
+        # parsed first, and what each file declares is shared across its chunks.
         parsed = []
         file_scales: dict[str, set[float]] = {}
         file_headers: dict[str, set[tuple[str, ...]]] = {}
@@ -567,6 +682,7 @@ class ContextIndex:
         for ci, source, body, hints, units in parsed:
             mentions = extract_numbers(body, claims_only=False)
             declared = sorted(file_scales.get(source, ()))
+            hint_positions = [pos for pos, _ in hints]
             header: tuple[str, ...] = ()
             cursor = 0
             for start, end, tabular, unit_header in units:
@@ -584,29 +700,33 @@ class ContextIndex:
 
                 text = body[start:end]
                 tokens = frozenset(binding_tokens(text))
-                spans = [(m.start - start, m.end - start) for m in in_unit]
-                stated = figure_periods(text, spans)
+                stated = figure_periods(text, [(m.start - start, m.end - start) for m in in_unit])
                 per_unit = bool(_PER_UNIT_RE.search(text))
-                nearest = next((s for pos, s in reversed(hints) if pos <= start), None)
+                at = bisect.bisect_right(hint_positions, start) - 1
+                nearest = hints[at][1] if at >= 0 else None
 
-                row_id = -1
+                alias = frozenset(
+                    binding_tokens(" ".join(_PARENTHETICAL_RE.findall(text)))
+                ) if tabular else frozenset()
+
+                unit_id = len(self.units)
+                self.units.append(_Unit(tokens=tokens, figures=[], tabular=tabular))
+
+                # A column header applies to a row of like figures of the same
+                # count: "Revenue  $452.8  $387.1" under "FY2023  FY2022", not
+                # "$189.6  41.9%".
                 columns: tuple[str, ...] = ()
-                if tabular:
-                    row_id = len(self.rows)
-                    self.rows.append(_Row(tokens=tokens, figures=[]))
-                    # A column header applies to a row of like figures of the
-                    # same count: "Revenue  $452.8  $387.1" under "FY2023
-                    # FY2022", not "$189.6  41.9%".
-                    families = {m.kind in _RATIO_KINDS for m in in_unit}
-                    if len(families) == 1:
-                        options = [header] if header else sorted(
-                            h for h in file_headers.get(source, ()) if len(h) == len(in_unit)
-                        )
-                        if len(options) == 1 and len(options[0]) == len(in_unit):
-                            columns = options[0]
+                alike = tabular and len(in_unit) > 1 and len({m.kind for m in in_unit}) == 1
+                if alike:
+                    options = [header] if header else sorted(
+                        h for h in file_headers.get(source, ()) if len(h) == len(in_unit)
+                    )
+                    if len(options) == 1 and len(options[0]) == len(in_unit):
+                        columns = options[0]
 
                 for k, mention in enumerate(in_unit):
                     period = columns[k] if columns else stated[k]
+                    period = "" if period == "*" else period
                     lo = max(0, mention.start - 60)
                     idx = len(self.figures)
                     self.figures.append(ContextFigure(
@@ -615,12 +735,13 @@ class ContextIndex:
                         source_file=source,
                         snippet=body[lo: mention.end + 20].replace("\n", " ").strip(),
                         cell=tabular,
-                        row=row_id,
+                        unit=unit_id,
                         anchor_tokens=tokens,
-                        period="" if period == "*" else period,
+                        alias_tokens=alias,
+                        period=period,
+                        column_unknown=alike and not period,
                     ))
-                    if row_id >= 0:
-                        self.rows[row_id].figures.append(idx)
+                    self.units[unit_id].figures.append(idx)
                     keyed.append((mention.value, idx, False))
                     for s in _assumed_scales(mention, tabular, per_unit, declared, nearest):
                         keyed.append((mention.value * s, idx, True))
@@ -633,6 +754,13 @@ class ContextIndex:
     def __len__(self) -> int:
         return len(self.figures)
 
+    def _within(self, target: float, tol: float) -> range:
+        """Positions in the sorted index whose value is within tol of target."""
+        return range(
+            bisect.bisect_left(self._values, target - tol),
+            bisect.bisect_right(self._values, target + tol),
+        )
+
     def candidates(self, mention: NumericMention) -> list[ContextFigure]:
         """
         Every context figure a claimed figure could be, within rounding.
@@ -640,7 +768,10 @@ class ContextIndex:
         A ratio is compared as printed. An amount that states its unit is
         compared at that value; one that does not ("$452.8" quoted from a
         millions table) may also equal a context figure that does — but only
-        one side of a comparison is ever given an assumed unit.
+        one side of a comparison is ever given an assumed unit. An amount in
+        one currency is never grounded by the same number in another. A
+        percentage and a basis-point figure are the same quantity in two
+        notations, so "2.25%" is grounded by "225 bps" and the reverse.
 
         Args:
             mention: Figure from the answer.
@@ -656,13 +787,26 @@ class ContextIndex:
         for s in scales:
             target = mention.value * s
             tol = max(mention.half_unit * s, _REL_TOLERANCE * target, 1e-9)
-            lo = bisect.bisect_left(self._values, target - tol)
-            hi = bisect.bisect_right(self._values, target + tol)
-            for k in range(lo, hi):
+            for k in self._within(target, tol):
                 if s != 1.0 and self._assumed[k]:
                     continue
                 fig = self.figures[self._ids[k]]
-                if _kinds_compatible(mention.kind, fig.mention.kind, fig.cell):
+                if not _kinds_compatible(mention.kind, fig.mention.kind, fig.cell):
+                    continue
+                if mention.currency and fig.mention.currency and mention.currency != fig.mention.currency:
+                    continue
+                found.setdefault(self._ids[k], fig)
+
+        # A margin quoted in basis points, restated as a percentage: "SOFR plus
+        # 2.25%" for "225 bps". Only this direction — answers convert to
+        # percentages for readability; grounding every "N bps" against every
+        # small percentage raised the random-figure rate for bps from 16% to 25%.
+        if mention.kind == "percent":
+            target = mention.value * 100.0
+            tol = max(mention.half_unit * 100.0, _REL_TOLERANCE * target, 1e-9)
+            for k in self._within(target, tol):
+                fig = self.figures[self._ids[k]]
+                if fig.mention.kind == "bps" and not self._assumed[k]:
                     found.setdefault(self._ids[k], fig)
         return [found[i] for i in sorted(found)]
 
@@ -685,7 +829,7 @@ class ContextIndex:
         claim_tokens: set[str],
         claim_period: str,
         claim_kind: str,
-        explained_rows: set[int],
+        explained_units: set[int],
     ) -> Binding:
         """
         Decides whether any matching context figure is the figure the claim means.
@@ -699,13 +843,24 @@ class ContextIndex:
         the claim says the figure IS:
 
         - a table cell — the claim uses at least LABEL_COVERAGE of the row's
-          label words, the cell's column period is the period the claim states
-          for it, and the claim does not name another row more fully ("Adjusted
-          EBITDA Margin" when the match sits in "EBITDA Margin") that none of
-          its own figures match;
+          label words;
         - a figure in prose — the sentence holds at least SENTENCE_COVERAGE of
           the claim's words (or the claim holds the label of a short "Label:
-          value" line), for the same period.
+          value" line);
+
+        and, for a match tied that way:
+
+        - the period the document states for the figure (its column header, or
+          a period next to it) is the period the claim states for it;
+        - the claim does not name another row or sentence more fully ("Adjusted
+          EBITDA Margin" when the match sits in "EBITDA Margin") that none of
+          its own figures match.
+
+        A tied match that fails one of those is a "conflict": evidence the
+        figure belongs elsewhere. A conflict outranks a tied match whose period
+        simply is not stated — "Total Revenue $452.8" in an undated table must
+        not vouch for "FY2022 revenue was $452.8 million" when the income
+        statement puts $452.8 under FY2023.
 
         The test is lexical and deliberately one-sided: a paraphrase sharing no
         words with its row comes back "unbound" and is left to the entailment
@@ -717,65 +872,90 @@ class ContextIndex:
             claim_tokens: binding_tokens of the claim.
             claim_period: Year the claim states for this figure, "*" or "".
             claim_kind: Kind of the claimed figure.
-            explained_rows: Rows matched by some figure of the same claim.
+            explained_units: Rows and sentences matched by a figure of the claim.
 
         Returns:
-            The best Binding over the candidates: bound, else conflict, else
-            unbound.
+            The Binding for the figure.
         """
-        best = Binding("unbound")
-        for fig in candidates:
-            anchor = fig.anchor_tokens
-            shared = len(anchor & claim_tokens)
-            if fig.cell:
-                tied = bool(anchor) and shared / len(anchor) >= LABEL_COVERAGE
-            else:
-                tied = bool(claim_tokens) and (
-                    shared / len(claim_tokens) >= SENTENCE_COVERAGE
-                    or (0 < len(anchor) <= 6 and shared / len(anchor) >= LABEL_COVERAGE)
-                )
-            if not tied:
-                continue
-            note = ""
-            if fig.period and claim_period not in ("", "*") and fig.period != claim_period:
-                note = f"the documents give this figure for {fig.period}, not {claim_period}"
-            elif fig.cell:
-                rival = self._rival_row(fig, claim_tokens, claim_kind, shared, explained_rows)
-                if rival:
-                    note = f"the statement names another line item ({rival}) with a different figure"
-            if not note:
-                return Binding("bound", figure=fig)
-            if best.status == "unbound":
-                best = Binding("conflict", note=note, figure=fig)
-        return best
+        year = claim_period if claim_period not in ("", "*") else ""
+        conflict: Binding | None = None
+        undated: ContextFigure | None = None
+        ambiguous: ContextFigure | None = None
 
-    def _rival_row(
+        for fig in candidates:
+            if not fig.named_by(claim_tokens):
+                continue
+            shared = len(fig.anchor_tokens & claim_tokens)
+
+            if year and fig.period and fig.period != year:
+                conflict = conflict or Binding(
+                    "conflict",
+                    note=f"the documents give this figure for {fig.period}, not {year}",
+                    figure=fig,
+                )
+                continue
+            rival = self._rival_unit(fig, claim_tokens, claim_kind, shared, explained_units)
+            if rival:
+                conflict = conflict or Binding(
+                    "conflict",
+                    note=f"the statement names another item ({rival}) whose figure is different",
+                    figure=fig,
+                )
+                continue
+            if year and not fig.period:
+                if fig.column_unknown:
+                    ambiguous = ambiguous or fig
+                else:
+                    undated = undated or fig
+                continue
+            return Binding("bound", figure=fig)
+
+        if conflict:
+            return conflict
+        if undated:
+            return Binding("bound", figure=undated)
+        if ambiguous:
+            return Binding(
+                "unbound",
+                note=f"the retrieved table does not show which column is {year}",
+                figure=ambiguous,
+            )
+        return Binding("unbound")
+
+    def _rival_unit(
         self,
         fig: ContextFigure,
         claim_tokens: set[str],
         claim_kind: str,
         shared: int,
-        explained_rows: set[int],
+        explained_units: set[int],
     ) -> str:
         """
-        Label words of a row the claim names more fully than fig's own row.
+        Words of a row or sentence the claim names more fully than fig's own.
 
         "Professional Services revenue was $452.8 million" matches the Revenue
-        row on one word and the Professional Services row on two. A row that
-        one of the claim's other figures matches is not a rival — the claim
-        simply states both ("revenue of $452.8M and gross profit of $271.7M").
+        row on one word and the Professional Services row on two; "Gross
+        revenue retention was 118%" matches the net-retention sentence on two
+        words and the gross-retention sentence on three. A row or sentence that
+        one of the claim's figures does match is not a rival — the claim simply
+        states both ("revenue of $452.8M and gross profit of $271.7M").
         """
-        for ri, row in enumerate(self.rows):
-            if ri == fig.row or ri in explained_rows or not row.tokens:
+        for ui, unit in enumerate(self.units):
+            if ui == fig.unit or ui in explained_units or not unit.tokens:
                 continue
-            overlap = len(row.tokens & claim_tokens)
-            if overlap <= shared or overlap / len(row.tokens) < LABEL_COVERAGE:
+            overlap = len(unit.tokens & claim_tokens)
+            if overlap <= shared:
+                continue
+            if unit.tabular:
+                if overlap / len(unit.tokens) < LABEL_COVERAGE:
+                    continue
+            elif overlap / len(claim_tokens) < SENTENCE_COVERAGE:
                 continue
             if any(
                 _kinds_compatible(claim_kind, self.figures[i].mention.kind, True)
-                for i in row.figures
+                for i in unit.figures
             ):
-                return " ".join(sorted(row.tokens))
+                return " ".join(sorted(unit.tokens & claim_tokens))
         return ""
 
 
@@ -817,6 +997,18 @@ def _assumed_scales(
     return ()
 
 
+def _is_rule_line(line: str) -> bool:
+    """True for a separator line ("=====", "-----  -----", "|---|---|")."""
+    stripped = line.strip()
+    return len(stripped) >= 4 and _RULE_CHARS.issuperset(stripped)
+
+
+def _is_listed(line: str) -> bool:
+    """True for a line that is a table row or a "Label: value" entry."""
+    stripped = line.strip()
+    return bool(_COLUMN_GAP_RE.search(stripped) or _LABEL_COLON_RE.match(line.lstrip()))
+
+
 def _body_units(body: str) -> list[tuple[int, int, bool, tuple[str, ...]]]:
     """
     Splits evidence text into the rows and sentences its figures sit in.
@@ -828,6 +1020,10 @@ def _body_units(body: str) -> list[tuple[int, int, bool, tuple[str, ...]]]:
     only names columns ("FY2023   FY2022", "ASSETS   FY2023   FY2022") is
     returned as a column header.
 
+    Lines are walked with plain string operations: this runs over
+    counterparty-supplied text, and a paragraph regex with nested quantifiers
+    took cubic time on a long whitespace-padded line.
+
     Args:
         body: Evidence text of one chunk.
 
@@ -836,39 +1032,43 @@ def _body_units(body: str) -> list[tuple[int, int, bool, tuple[str, ...]]]:
         years of a column-header line and () otherwise.
     """
     units: list[tuple[int, int, bool, tuple[str, ...]]] = []
-    for para in re.finditer(r"(?:[^\n]*\S[^\n]*(?:\n|$))+", body):
-        lines = []
-        offset = para.start()
-        for raw in para.group(0).splitlines(keepends=True):
-            if raw.strip() and not _RULE_LINE_RE.match(raw):
-                lines.append((offset, offset + len(raw.rstrip("\r\n")), raw))
-            offset += len(raw)
-        if not lines:
-            continue
-        listed = sum(
-            1 for _, _, raw in lines
-            if _COLUMN_GAP_RE.search(raw.strip()) or _LABEL_COLON_RE.match(raw)
-        )
-        if listed >= max(1, len(lines) // 2):
-            for start, end, raw in lines:
+    paragraph: list[tuple[int, int, str]] = []
+
+    def flush() -> None:
+        if not paragraph:
+            return
+        listed = sum(1 for _, _, raw in paragraph if _is_listed(raw))
+        if listed >= max(1, len(paragraph) // 2):
+            for start, end, raw in paragraph:
                 if _COLUMN_GAP_RE.search(raw.strip()):
                     units.append((start, end, True, _column_header(raw)))
                     continue
                 # "Revenue Growth: 17.0% YoY. The Company was in compliance…":
                 # the label owns its own sentence, not the rest of the line.
+                labelled = bool(_LABEL_COLON_RE.match(raw.lstrip()))
                 cut = 0
                 for m in _SENTENCE_END_RE.finditer(body[start:end]):
-                    units.append((start + cut, start + m.start(), cut == 0, ()))
+                    units.append((start + cut, start + m.start(), labelled and cut == 0, ()))
                     cut = m.end()
-                units.append((start + cut, end, cut == 0, ()))
-            continue
-        start, end = lines[0][0], lines[-1][1]
-        text = body[start:end]
-        cut = 0
-        for m in _SENTENCE_END_RE.finditer(text):
-            units.append((start + cut, start + m.start(), False, ()))
-            cut = m.end()
-        units.append((start + cut, end, False, ()))
+                units.append((start + cut, end, labelled and cut == 0, ()))
+        else:
+            start, end = paragraph[0][0], paragraph[-1][1]
+            cut = 0
+            for m in _SENTENCE_END_RE.finditer(body[start:end]):
+                units.append((start + cut, start + m.start(), False, ()))
+                cut = m.end()
+            units.append((start + cut, end, False, ()))
+        paragraph.clear()
+
+    offset = 0
+    for raw in body.splitlines(keepends=True):
+        line = raw.rstrip("\r\n")
+        if not line.strip():
+            flush()
+        elif not _is_rule_line(line):
+            paragraph.append((offset, offset + len(line), line))
+        offset += len(raw)
+    flush()
     return units
 
 
@@ -887,7 +1087,8 @@ def _column_header(line: str) -> tuple[str, ...]:
     if extract_numbers(PERIOD_RE.sub(" ", line), claims_only=False):
         return ()
     for m in periods:
-        if not re.search(r"(?:^|\s{2,}|\t|\|\s*)$", line[: m.start()]):
+        before = line[: m.start()]
+        if before.strip() and not before.endswith(("  ", "\t")) and not before.rstrip(" ").endswith("|"):
             return ()
     return tuple(year for _, _, year in _periods_in(line))
 
@@ -936,8 +1137,12 @@ class NumericCheck:
 
     @property
     def is_confirmed(self) -> bool:
-        """True when the figure is reproduced AND tied to what the claim says it is."""
-        return self.status == "derived" or (self.status == "grounded" and self.binding == "bound")
+        """True when the figure is reproduced AND tied to what the claim says it is.
+
+        A figure computed from the claim's own figures has no binding of its
+        own (""): its operands carry theirs.
+        """
+        return self.status in ("grounded", "derived") and self.binding in ("bound", "")
 
     def to_dict(self) -> dict:
         """Serialisable form for AgentState."""
@@ -1029,6 +1234,10 @@ def _derive(
                     if close(target, abs(a - b), s):
                         return f"|{a:g}% - {b:g}%|"
         elif kind == "bps":
+            for i, a in enumerate(basis_points):
+                for b in basis_points[i + 1:]:
+                    if close(target, abs(a - b), s):
+                        return f"|{a:g} bps - {b:g} bps|"
             for i, a in enumerate(percents):
                 for b in percents[i + 1:]:
                     if close(target, abs(a - b) * 100, s):
@@ -1081,7 +1290,7 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
             ((m.start, m.end) for m in every),
             figure_periods(text, [(m.start, m.end) for m in every]),
         ))
-        explained = {fig.row for group in found for fig in group if fig.row >= 0}
+        explained = {fig.unit for group in found for fig in group}
 
         for mention, group in zip(mentions, found):
             if group:
@@ -1111,6 +1320,10 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
                     binding=binding.status,
                     binding_note=binding.note,
                 )
+                if fig.mention.kind == "bps" and mention.kind == "percent":
+                    # Found in the other notation: a conversion, shown as one.
+                    check.status = "derived"
+                    check.formula = f"{fig.mention.value:g} bps / 100"
                 checks.append(check)
                 grounded.append((mention, check, value))
             else:

@@ -192,8 +192,12 @@ class TestGrounding:
 class TestSampleDataRoom:
     """Figures from real RESULTS.md answers against the real sample documents."""
 
+    # A staticmethod: a class-scoped fixture defined as an instance method is
+    # deprecated (it runs once, on an instance no test ever sees) and is an
+    # error from pytest 10.
+    @staticmethod
     @pytest.fixture(scope="class")
-    def chunks(self):
+    def chunks():
         if not SAMPLE_DEAL.exists():
             pytest.skip("sample data room not present")
         return [
