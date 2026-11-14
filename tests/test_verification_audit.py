@@ -1058,6 +1058,33 @@ class TestI4RegistryReadsConvertedTables:
         registry = NumericalRegistry.from_chunks([chunk("a.pdf", 452.8), chunk("b.pdf", 448.1)])
         assert [i["metric"] for i in registry.find_inconsistencies()] == ["Revenue"]
 
+    def test_text_printed_as_stated_meets_structured_rows_normalised(self):
+        """
+        The ingestion branch makes the converter print cells as the source
+        states them ("FY2023=452.8", unit once) and carry the normalised value
+        only in structured_rows. A text-only chunk of one document must then
+        agree with the structured rows of another that states the same figure,
+        and disagree with one that does not.
+        """
+        from src.utils.numerical_registry import NumericalRegistry
+
+        def structured(source, value):
+            return {
+                "source_file": source,
+                "text": f"Revenue: FY2023={value}",  # read from the rows, not this
+                "structured_rows": [{
+                    "line_item": "Revenue",
+                    "values": {"FY2023": {"raw_value": value, "normalized_value": value * 1e6,
+                                          "currency": "USD", "scale_factor": 1e6}},
+                }],
+            }
+
+        as_stated = {"source_file": "deck.pptx", "text": "Revenue: FY2023=452.8 FY2022=387.1"}
+        same = NumericalRegistry.from_chunks([as_stated, structured("cim.pdf", 452.8)])
+        assert same.cross_checked_count() == 1 and same.find_inconsistencies() == []
+        other = NumericalRegistry.from_chunks([as_stated, structured("cim.pdf", 448.1)])
+        assert [i["metric"] for i in other.find_inconsistencies()] == ["Revenue"]
+
     def test_a_label_with_a_period_and_a_colon_is_not_mistaken_for_a_row(self):
         from src.utils.numerical_registry import NumericalRegistry
 

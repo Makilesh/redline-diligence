@@ -156,12 +156,16 @@ def _values_agree(a: NumericalEntry, b: NumericalEntry) -> bool:
     """
     if a.kind != b.kind and {a.kind, b.kind} & {"percent", "multiple"}:
         return False
-    tol = max(a.tolerance, b.tolerance, 1e-9)
     if a.scale_known and b.scale_known:
-        return abs(a.normalized_value - b.normalized_value) <= tol
-    for s in _SCALES:
-        for x, y in ((a, b), (b, a)):
-            if abs(x.normalized_value - y.normalized_value * s) <= max(tol * s, tol):
+        return abs(a.normalized_value - b.normalized_value) <= max(a.tolerance, b.tolerance, 1e-9)
+    # Rescale only the side whose unit is unknown, and its rounding slack with
+    # it. Multiplying the combined slack by the scale — as this used to — let a
+    # millions table's 50,000 slack grow to 5e10 and call 452.8 and $448.1M equal.
+    for x, y in ((a, b), (b, a)):
+        if y.scale_known:
+            continue
+        for s in _SCALES:
+            if abs(x.normalized_value - y.normalized_value * s) <= max(x.tolerance, y.tolerance * s, 1e-9):
                 return True
     return False
 
@@ -294,7 +298,9 @@ class NumericalRegistry:
         for line in text.splitlines():
             if not line.strip() or _RULE_LINE.match(line):
                 continue
-            if self._register_keyed_row(line, source, page):
+            # A chunk that carries structured_rows has been read from them; its
+            # text is the same table again.
+            if not chunk.get("structured_rows") and self._register_keyed_row(line, source, page):
                 continue
 
             header_periods = _PERIOD.findall(line)
@@ -341,10 +347,13 @@ class NumericalRegistry:
 
         The table converter writes each row as "Label: FY2023=452,800,000
         FY2022=387,100,000" (row by row) or "Label: FY2023: 452,800,000;
-        FY2022: 387,100,000" (narrative), with values already multiplied out to
-        full units. The structured form of the same row (`structured_rows`) is
-        not in the stored payload, so this text is the only place a converted
-        table's figures reach the registry.
+        FY2022: 387,100,000" (narrative). Whether those values are multiplied
+        out to full units or printed as the source states them ("452.8", unit
+        stated once) depends on the converter version, so the scale is recorded
+        as unknown and compared across a power of 1,000 (see _values_agree).
+        This is the fallback for chunks without `structured_rows` — the sibling
+        representations of a table, and payloads written before ingestion
+        carried the structured form.
 
         Args:
             line: One line of chunk text.
@@ -381,7 +390,7 @@ class NumericalRegistry:
                     "multiple" if num.kind == "multiple" else "currency"
                 ),
                 decimals=num.decimals,
-                scale_known=True,
+                scale_known=num.kind in ("percent", "pp", "multiple"),
                 raw_text=f"{label}  {num.raw}",
             ))
         return True
