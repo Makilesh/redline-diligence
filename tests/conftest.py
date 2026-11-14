@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 
 import pytest
+import pytest_asyncio
 
 # Decision-model (Laya) paths are stubbed in unit tests. Without this default an
 # unstubbed path — the API's query guard, say — loads the real 1.7GB checkpoint
@@ -111,6 +112,24 @@ def _dead_api_refuses_at_once():
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(HTTPAdapter, "send", send)
         yield
+
+
+@pytest_asyncio.fixture
+async def offline_pipeline(monkeypatch, tmp_path):
+    """
+    The real compiled graph over an in-memory index with a scripted LLM.
+
+    See tests/fixtures/pipeline_harness.py for what is real, what is replaced
+    and where. Yields an OfflinePipeline; `.llm` is the ScriptedLLM.
+    """
+    from tests.fixtures import pipeline_harness
+
+    pipeline = pipeline_harness.install(monkeypatch, tmp_path)
+    await pipeline_harness.start_tracker()
+    try:
+        yield pipeline
+    finally:
+        await pipeline.aclose()
 
 
 @dataclass
