@@ -16,6 +16,10 @@ from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import (
     VectorParams,
     Distance,
+    FieldCondition,
+    Filter,
+    MatchValue,
+    Modifier,
     SparseVectorParams,
     SparseIndexParams,
     HnswConfigDiff,
@@ -106,6 +110,7 @@ async def create_collection(
         logger.info(
             f"Collection '{collection_name}' already exists, skipping creation"
         )
+        await ensure_sparse_idf(client, collection_name)
         return
 
     async def _create():
@@ -127,14 +132,19 @@ async def create_collection(
                             always_ram=True,    # Quantized INT8 vectors in RAM
                         )
                     ),
-                    # Original float32 vectors stay on disk for rescoring
+                    # The float32 originals are kept as well, for rescoring. They
+                    # are in RAM too: on_disk is not set, so nothing here puts
+                    # them on disk (an earlier comment said it did).
                 ),
             },
             sparse_vectors_config={
                 "sparse": SparseVectorParams(
                     index=SparseIndexParams(
                         on_disk=False,          # Sparse BM25 index in RAM for speed
-                    )
+                    ),
+                    # FastEmbed's Qdrant/bm25 emits only the term-frequency half
+                    # of BM25 and leaves IDF to Qdrant; see ensure_sparse_idf.
+                    modifier=Modifier.IDF,
                 )
             },
             optimizers_config=OptimizersConfigDiff(
@@ -154,6 +164,70 @@ async def create_collection(
             "quantization": "INT8",
         },
     )
+
+
+async def ensure_sparse_idf(
+    client: AsyncQdrantClient,
+    collection_name: str = COLLECTION_NAME,
+    vector_name: str = "sparse",
+) -> bool:
+    """
+    Makes sure the sparse vector is scored with Qdrant's IDF modifier.
+
+    FastEmbed's `Qdrant/bm25` stores only the term-frequency / length-normalised
+    part of BM25 in each vector and expects Qdrant to multiply by IDF at query
+    time ("expected to be used with modifier=idf" — its own docstring). Without
+    the modifier every query term weighs the same, so "the" in a question counts
+    as much as "280G". Collections created before this was set are upgraded in
+    place: IDF is computed from the index at query time, so nothing is re-indexed.
+
+    Best effort. A server that refuses the update leaves sparse search exactly
+    as it was, which is degraded ranking rather than an outage, so the failure
+    is logged and startup continues.
+
+    Args:
+        client: AsyncQdrantClient instance.
+        collection_name: Collection to check.
+        vector_name: Name of the sparse vector.
+
+    Returns:
+        True if the modifier is active after the call.
+    """
+    try:
+        info = await client.get_collection(collection_name)
+        sparse = (info.config.params.sparse_vectors or {}).get(vector_name)
+        if sparse is None:
+            logger.warning(
+                f"Collection '{collection_name}' has no '{vector_name}' sparse vector"
+            )
+            return False
+        if sparse.modifier == Modifier.IDF:
+            return True
+
+        await client.update_collection(
+            collection_name=collection_name,
+            sparse_vectors_config={
+                vector_name: SparseVectorParams(index=sparse.index, modifier=Modifier.IDF)
+            },
+        )
+        info = await client.get_collection(collection_name)
+        active = info.config.params.sparse_vectors[vector_name].modifier == Modifier.IDF
+    except Exception as e:
+        logger.warning(
+            f"Could not enable the IDF modifier on '{collection_name}'; "
+            "sparse search stays un-weighted until the collection is recreated",
+            extra={"error": str(e)},
+        )
+        return False
+
+    if active:
+        logger.info(f"Enabled the IDF modifier on '{collection_name}.{vector_name}'")
+    else:
+        logger.warning(
+            f"Qdrant accepted the update but '{collection_name}.{vector_name}' still has "
+            "no IDF modifier; sparse search stays un-weighted until the collection is recreated"
+        )
+    return active
 
 
 async def create_parent_collection(
@@ -253,6 +327,12 @@ async def create_payload_indexes(
         # field outright, so this is a requirement of that endpoint, not a
         # performance nicety.
         ("source_file",         PayloadSchemaType.KEYWORD),
+        # Which BM25 text normalisation wrote the point's sparse vector; counted
+        # by sparse_index_status to find points that need re-indexing.
+        ("sparse_encoding",     PayloadSchemaType.INTEGER),
+        # Section-table lookup filters on it (sibling_retrieval.fetch_section_tables);
+        # a server in strict mode rejects a filter on an unindexed field.
+        ("section_heading",     PayloadSchemaType.KEYWORD),
     ]
 
     for field_name, field_type in indexes:
@@ -320,4 +400,62 @@ async def setup_collections(
     await create_collection(client, collection_name)
     await create_parent_collection(client, parent_collection_name)
     await create_payload_indexes(client, collection_name, parent_collection_name)
+    try:
+        await sparse_index_status(client, collection_name)
+    except Exception as e:
+        # A diagnostic must not be the reason startup fails.
+        logger.warning("Could not check the sparse index encoding", extra={"error": str(e)})
     logger.info("Qdrant collection setup complete")
+
+
+async def sparse_index_status(
+    client: AsyncQdrantClient | None = None,
+    collection_name: str = COLLECTION_NAME,
+) -> dict:
+    """
+    How many indexed chunks carry sparse vectors from an older BM25 encoding.
+
+    The text normalisation applied before BM25 (hybrid_search.normalize_for_bm25)
+    is applied to queries as well as documents. A point indexed before it — or
+    under an earlier version of it — holds terms a current query no longer
+    produces ("Revenue" was a different term from "revenue"), so the keyword
+    channel quietly misses it while dense search still works. Nothing fails, so
+    it is counted here and logged, and can be shown by a health endpoint.
+
+    The fix for a non-zero count is to re-ingest the affected documents
+    (`python run_demo.py --reindex` for the demo deal).
+
+    Args:
+        client: AsyncQdrantClient instance. If None, uses singleton.
+        collection_name: Child collection to inspect.
+
+    Returns:
+        {"current_encoding": int, "total_points": int, "stale_points": int}
+    """
+    from src.vector_db.hybrid_search import SPARSE_ENCODING_VERSION
+
+    if client is None:
+        client = get_qdrant_client()
+
+    total = (await client.count(collection_name=collection_name, exact=True)).count
+    stale = (await client.count(
+        collection_name=collection_name,
+        count_filter=Filter(must_not=[
+            FieldCondition(key="sparse_encoding", match=MatchValue(value=SPARSE_ENCODING_VERSION)),
+        ]),
+        exact=True,
+    )).count
+
+    status = {
+        "current_encoding": SPARSE_ENCODING_VERSION,
+        "total_points": total,
+        "stale_points": stale,
+    }
+    if stale:
+        logger.warning(
+            f"{stale} of {total} chunks in '{collection_name}' were indexed with an older "
+            "BM25 encoding and are invisible to keyword search for many queries. "
+            "Re-ingest their documents (python run_demo.py --reindex for the demo deal).",
+            extra=status,
+        )
+    return status

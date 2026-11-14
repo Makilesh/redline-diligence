@@ -283,6 +283,90 @@ def percentile(values: Sequence[float], q: float) -> float | None:
     return vals[low] + (vals[high] - vals[low]) * (pos - low)
 
 
+# ==============================================================================
+# Uncertainty. The golden set is a few dozen questions, so a mean moves by
+# several points when one question flips; every reported mean and every
+# before/after difference carries a bootstrap interval so that it can be read
+# against that noise.
+# ==============================================================================
+
+BOOTSTRAP_RESAMPLES = 10_000
+
+
+def _resampled_means(values: Sequence[float], resamples: int, seed: int) -> list[float]:
+    """Sorted means of `resamples` resamples (with replacement) of `values`."""
+    import numpy as np
+
+    data = np.asarray(values, dtype=float)
+    rng = np.random.default_rng(seed)
+    picks = rng.integers(0, len(data), size=(resamples, len(data)))
+    return np.sort(data[picks].mean(axis=1)).tolist()
+
+
+def bootstrap_ci(values: Iterable[float | None], level: float = 0.95,
+                 resamples: int = BOOTSTRAP_RESAMPLES, seed: int = 0) -> tuple[float, float] | None:
+    """
+    Percentile bootstrap interval for the mean of the non-None values.
+
+    Questions are the resampling unit. Deterministic for a given seed.
+
+    Args:
+        values: Per-question metric values (None = undefined for that question).
+        level: Coverage of the interval.
+        resamples: Number of bootstrap resamples.
+        seed: RNG seed.
+
+    Returns:
+        (low, high), or None when there are fewer than two values.
+    """
+    vals = [v for v in values if v is not None]
+    if len(vals) < 2:
+        return None
+    means = _resampled_means(vals, resamples, seed)
+    tail = (1.0 - level) / 2.0
+    return percentile(means, 100 * tail), percentile(means, 100 * (1.0 - tail))
+
+
+def paired_delta(before: Sequence[float | None], after: Sequence[float | None],
+                 level: float = 0.95, resamples: int = BOOTSTRAP_RESAMPLES,
+                 seed: int = 0) -> dict | None:
+    """
+    Mean per-question difference (after - before) with a paired bootstrap interval.
+
+    Pairs are formed by position and a pair is used only when both sides are
+    defined. Resampling whole questions keeps each question's two measurements
+    together, which is what makes a small consistent change visible on a noisy
+    set — and an inconsistent one visible as an interval that spans zero.
+
+    Args:
+        before: Per-question values of the reference run.
+        after: Per-question values of the compared run, same question order.
+        level: Coverage of the interval.
+        resamples: Number of bootstrap resamples.
+        seed: RNG seed.
+
+    Returns:
+        {"mean", "low", "high", "n", "improved", "regressed", "clears_zero"},
+        or None when there are fewer than two usable pairs. clears_zero is True
+        when the interval excludes zero.
+    """
+    diffs = [b - a for a, b in zip(before, after) if a is not None and b is not None]
+    if len(diffs) < 2:
+        return None
+    means = _resampled_means(diffs, resamples, seed)
+    tail = (1.0 - level) / 2.0
+    low, high = percentile(means, 100 * tail), percentile(means, 100 * (1.0 - tail))
+    return {
+        "mean": sum(diffs) / len(diffs),
+        "low": low,
+        "high": high,
+        "n": len(diffs),
+        "improved": sum(1 for d in diffs if d > 1e-9),
+        "regressed": sum(1 for d in diffs if d < -1e-9),
+        "clears_zero": low > 0 or high < 0,
+    }
+
+
 def compare_to_baseline(current: dict, baseline: dict, tolerance: float) -> list[str]:
     """
     Lists gated metrics that dropped by more than the tolerance.
