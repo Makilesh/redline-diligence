@@ -14,6 +14,8 @@ carries meaning here (validated / warning / failed / refused), so it is spent on
 state rather than decoration.
 """
 
+import html
+
 import streamlit as st
 
 # ---------------------------------------------------------------------------
@@ -504,8 +506,9 @@ def pill(text: str, variant: str = "muted") -> str:
 
     Returns:
         HTML string for use inside st.markdown(..., unsafe_allow_html=True).
+        The text is escaped: callers pass labels, never markup.
     """
-    return f'<span class="dd-pill dd-pill-{variant}">{text}</span>'
+    return f'<span class="dd-pill dd-pill-{html.escape(variant)}">{html.escape(str(text))}</span>'
 
 
 def stat_row(items: list[tuple[str, str]]) -> str:
@@ -519,11 +522,14 @@ def stat_row(items: list[tuple[str, str]]) -> str:
         items: (label, value) pairs, rendered left to right.
 
     Returns:
-        HTML string for st.markdown(..., unsafe_allow_html=True).
+        HTML string for st.markdown(..., unsafe_allow_html=True). Labels and
+        values are escaped: one caller passes the deal id straight from the
+        `?deal_id=` query parameter, so an unescaped value was a reflected XSS
+        reachable with a crafted link.
     """
     cells = "".join(
-        f'<div class="dd-stat"><div class="dd-stat-l">{label}</div>'
-        f'<div class="dd-stat-v">{value}</div></div>'
+        f'<div class="dd-stat"><div class="dd-stat-l">{html.escape(str(label))}</div>'
+        f'<div class="dd-stat-v">{html.escape(str(value))}</div></div>'
         for label, value in items
     )
     return f'<div class="dd-stats">{cells}</div>'

@@ -28,7 +28,8 @@ from src.utils.admin_client import admin_headers
 from app.components.deal_manager import render_deal_manager
 from app.components.document_uploader import render_document_uploader
 from app.components.query_interface import render_query_interface
-from app.components.answer_display import render_answer, render_refusal
+from app.components.answer_display import render_answer, render_refusal, render_unavailable
+from app.components.verification import result_outcome
 from app.components.citation_viewer import render_citations
 from app.components.agent_trace_viewer import render_agent_trace
 from app.components.risk_dashboard import render_risk_dashboard
@@ -162,10 +163,57 @@ def run_query(query: str, deal_id: str, include_pii: bool) -> dict | None:
         return None
 
     if resp.status_code != 200:
-        st.error(f"Query failed ({resp.status_code}): {resp.text}")
+        st.error(describe_failure(resp))
         return None
 
-    return resp.json()
+    try:
+        return resp.json()
+    except ValueError:
+        st.error("The API returned a response that is not JSON.")
+        return None
+
+
+def describe_failure(resp) -> str:
+    """
+    A readable message for a failed API call.
+
+    The API's `detail` is written for people ("The engine is restarting.
+    Please retry shortly.", "File exceeds the 25 MB upload limit") and is used
+    as is; a raw body — a proxy's HTML page, a validation error list — is not.
+
+    Args:
+        resp: The failed `requests` response.
+
+    Returns:
+        Plain text, with the request id when the server sent one.
+    """
+    detail = ""
+    try:
+        body = resp.json()
+        raw = body.get("detail") if isinstance(body, dict) else None
+        if isinstance(raw, str):
+            detail = raw
+        elif isinstance(raw, list):
+            detail = "; ".join(
+                str(item.get("msg", "")) for item in raw if isinstance(item, dict) and item.get("msg")
+            )
+    except ValueError:
+        pass
+
+    status = resp.status_code
+    if not detail:
+        detail = {
+            404: "This deal is not available — it may have expired or been removed.",
+            429: "Rate limit reached. Wait a moment and try again.",
+            502: "The API is unreachable behind its proxy — it may be starting up.",
+            503: "The engine is starting up or busy. Try again shortly.",
+            504: "The query took too long and was stopped.",
+        }.get(status, "The request failed.")
+    retry_after = resp.headers.get("Retry-After", "")
+    if retry_after.isdigit() and status in (429, 503):
+        detail += f" (retry after {int(retry_after)}s)"
+    request_id = resp.headers.get("X-Request-ID", "")
+    return f"Query failed ({status}): {detail}" + (f" — request ID {request_id}" if request_id else "")
 
 
 def render_results(result: dict, deal_id: str) -> None:
@@ -190,22 +238,30 @@ def render_results(result: dict, deal_id: str) -> None:
     )
 
     with tab_answer:
-        if result.get("is_refusal"):
+        # Chosen by `outcome`: `is_refusal` is also true when no model
+        # answered, and an outage must not be presented as a refusal.
+        outcome = result_outcome(result)
+        if outcome == "refused":
             # A refusal is a designed outcome, not an error — it gets its own
             # component with the quality score and remediation hints.
             render_refusal(
                 quality_score=result.get("context_quality_score", 0.0),
                 rewrite_count=result.get("rewrite_iterations", 0),
             )
+        elif outcome == "synthesis_failed":
+            render_unavailable(request_id=result.get("request_id", ""))
         else:
             render_answer(
                 answer=result.get("answer", ""),
                 confidence_score=result.get("confidence_score", 0.0),
-                validation_status=result.get("validation_status", "passed"),
+                # No default to "passed": a missing verdict is not a pass.
+                validation_status=result.get("validation_status", ""),
                 hallucination_flags=result.get("hallucination_flags", []),
                 query_type=result.get("query_type", "summary"),
                 latency_ms=result.get("total_latency_ms", 0.0),
                 rewrite_iterations=result.get("rewrite_iterations", 0),
+                claim_checks=result.get("claim_checks", []),
+                outcome=outcome,
             )
 
     with tab_cites:

@@ -2,6 +2,8 @@
 Risk dashboard component — summarizes risk signals detected during ingestion.
 """
 
+import html
+
 import streamlit as st
 
 from app.styles import escape_currency, pill
@@ -89,10 +91,11 @@ def render_risk_dashboard(risk_signals: list[dict]) -> None:
                 page = item.get("page_number")
                 desc = item.get("description", "No description")
 
+                # source is a document file name: escaped, as this is raw HTML.
                 st.markdown(
-                    pill(severity.upper(), SEVERITY_PILL.get(severity, "muted"))
-                    + f"<span class='dd-cite-src'>{source}</span>"
-                    + (f"<span class='dd-cite-meta'> · page {page}</span>" if page else ""),
+                    pill(str(severity).upper(), SEVERITY_PILL.get(severity, "muted"))
+                    + f"<span class='dd-cite-src'>{html.escape(str(source))}</span>"
+                    + (f"<span class='dd-cite-meta'> · page {html.escape(str(page))}</span>" if page else ""),
                     unsafe_allow_html=True,
                 )
                 st.caption(f"{SEVERITY_ICON.get(severity, '⚪')} {escape_currency(desc)}")

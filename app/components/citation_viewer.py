@@ -2,6 +2,7 @@
 Citation viewer component — renders citations with version warnings and computed flags.
 """
 
+import html
 import re
 
 import streamlit as st
@@ -166,10 +167,13 @@ def render_citations(citations: list[dict]) -> None:
         meta = " · ".join(meta_parts) or "—"
 
         css_class = "dd-cite dd-cite-stale" if not is_current else "dd-cite"
+        # File names and section headings come from the documents — counterparty
+        # text — and this markup is rendered with unsafe_allow_html, so both are
+        # escaped. A heading such as `<img src=x onerror=...>` was live HTML here.
         st.markdown(
             f"<div class='{css_class}'>"
-            f"<div class='dd-cite-src'>{i}. {source}</div>"
-            f"<div class='dd-cite-meta'>{meta}</div>"
+            f"<div class='dd-cite-src'>{i}. {html.escape(str(source))}</div>"
+            f"<div class='dd-cite-meta'>{html.escape(meta)}</div>"
             f"<div style='margin-top:0.35rem'>{flags}</div>"
             f"</div>",
             unsafe_allow_html=True,

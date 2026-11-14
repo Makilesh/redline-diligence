@@ -2,9 +2,20 @@
 Answer display component — renders answer with confidence badge and validation status.
 """
 
+import html
+
 import streamlit as st
 
+from app.components.verification import answer_verdict, render_claim_checks
 from app.styles import escape_currency, pill, stat_row
+
+_VERDICT_PILL = {
+    "verified": ("✓", "ok"),
+    "partial": ("⚠", "warn"),
+    "failed": ("✕", "bad"),
+    "no_claims": ("○", "muted"),
+    "unknown": ("?", "warn"),
+}
 
 
 def render_answer(
@@ -15,20 +26,26 @@ def render_answer(
     query_type: str = "",
     latency_ms: float = 0.0,
     rewrite_iterations: int = 0,
+    claim_checks: list[dict] | None = None,
+    outcome: str = "",
 ) -> None:
     """
-    Renders the main answer with confidence badge, validation status,
-    and hallucination warnings.
+    Renders the main answer with confidence badge, validation status, the
+    per-claim verification record and the validator's notes.
 
     Args:
         answer: Generated answer text with citations.
         confidence_score: Answer confidence 0.0–1.0.
-        validation_status: "passed", "warning", or "failed".
-        hallucination_flags: List of unsupported claims.
+        validation_status: "passed", "warning", or "failed" — or anything
+            else, which is shown as not verified rather than as a pass.
+        hallucination_flags: The validator's free-text notes.
         query_type: Detected query type.
         latency_ms: Total pipeline latency.
         rewrite_iterations: Number of query rewrites performed.
+        claim_checks: Per-claim verification results.
+        outcome: The run's outcome (answered | answered_unverified).
     """
+    claim_checks = claim_checks or []
     # Header metrics. A compact strip rather than st.metric cards: these are
     # context for the answer below, not the subject of the page, and four full
     # cards pushed the answer itself below the fold.
@@ -44,26 +61,23 @@ def render_answer(
         unsafe_allow_html=True,
     )
 
-    # Validation status banner — the pipeline's own verdict on its own answer
+    # Verdict banner. Derived from the status AND the claim list: "passed" is
+    # also the server's default for a missing status, and an answer with no
+    # checkable statement passes vacuously — neither may read as verified.
     st.write("")
-    if validation_status == "passed":
-        st.markdown(
-            pill("✓ VALIDATED", "ok")
-            + "<span class='dd-cite-meta'>Every claim traced to a source document</span>",
-            unsafe_allow_html=True,
-        )
-    elif validation_status == "warning":
-        st.markdown(
-            pill("⚠ VALIDATED WITH WARNINGS", "warn")
-            + "<span class='dd-cite-meta'>Some claims need reviewer confirmation</span>",
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            pill("✕ VALIDATION FAILED", "bad")
-            + "<span class='dd-cite-meta'>May contain unsupported claims — verify before relying on it</span>",
-            unsafe_allow_html=True,
-        )
+    key, label, detail = answer_verdict(
+        {
+            "validation_status": validation_status,
+            "claim_checks": claim_checks,
+            "outcome": outcome,
+            "answer": answer,
+        }
+    )
+    icon, variant = _VERDICT_PILL[key]
+    st.markdown(
+        pill(f"{icon} {label}", variant) + f"<span class='dd-cite-meta'>{html.escape(detail)}</span>",
+        unsafe_allow_html=True,
+    )
 
     # Answer body — a bordered container rather than raw HTML, so the model's
     # markdown (lists, tables, emphasis) still renders correctly.
@@ -78,11 +92,40 @@ def render_answer(
         st.markdown("<span class='dd-answer-marker'></span>", unsafe_allow_html=True)
         st.markdown(escape_currency(answer))
 
+    if claim_checks:
+        st.write("")
+        st.markdown(pill("CLAIM CHECKS", "info"), unsafe_allow_html=True)
+        render_claim_checks(claim_checks)
+
     if hallucination_flags:
         st.write("")
-        st.markdown(pill("UNSUPPORTED CLAIMS", "bad"), unsafe_allow_html=True)
-        for flag in hallucination_flags:
-            st.markdown(f"- 🔴 {escape_currency(flag)}")
+        # With per-claim checks above, the notes mostly repeat them.
+        with st.expander(f"Validator notes ({len(hallucination_flags)})", expanded=not claim_checks):
+            for flag in hallucination_flags:
+                st.markdown(f"- {escape_currency(html.escape(flag))}")
+
+
+def render_unavailable(request_id: str = "") -> None:
+    """
+    Renders the synthesis_failed outcome: no model returned a usable answer.
+
+    Not a refusal — a refusal is a judgment that the data room does not support
+    an answer, and this says nothing about the question. The synthesizer's
+    apology text is not shown: it is not an answer and was never verified.
+
+    Args:
+        request_id: Correlation id for the server log.
+    """
+    st.markdown(pill("NO ANSWER — MODELS UNAVAILABLE", "muted"), unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown(
+            "The documents were searched, but every language model the engine tried "
+            "failed to return a usable answer, so nothing was written or verified. "
+            "This is a service problem, not a finding about the question or the data "
+            "room — run it again in a minute."
+        )
+    if request_id:
+        st.caption(f"Request ID: `{request_id}`")
 
 
 def render_refusal(quality_score: float, rewrite_count: int) -> None:

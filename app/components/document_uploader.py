@@ -21,6 +21,47 @@ CATEGORIES = [
 ]
 
 
+_RELATION = {
+    "newer": "a newer version of",
+    "older": "an older version of",
+    "same_document": "the same document as",
+}
+
+
+def _describe_ingest(filename: str, result: dict) -> list[str]:
+    """
+    Markdown lines reporting one ingestion: partial status, the server's notices,
+    and documents this one looks like a version of. The version match is the
+    server's proposal only — nothing was superseded — and is worded that way.
+    """
+    partial = result.get("status") == "partial"
+    lines = [
+        f"{'⚠️' if partial else '✅'} **{filename}**: {result.get('chunks_created', 0)} chunks "
+        f"({result.get('document_category', '')})" + (" — partly indexed" if partial else "")
+    ]
+    lines += [f"  - {n}" for n in result.get("notices") or [] if isinstance(n, str)]
+    for c in result.get("version_candidates") or []:
+        relation = _RELATION.get(c.get("relation", "")) if isinstance(c, dict) else None
+        if relation:
+            lines.append(
+                f"  - Looks like {relation} `{c.get('source_file') or c.get('doc_id')}` "
+                f"(doc_id `{c.get('doc_id', '')}`). Nothing was replaced; to retire the old "
+                "version, upload again with *Supersedes Document ID* set."
+            )
+    return lines
+
+
+def _error_detail(resp) -> str:
+    """The API's `detail` when it sent one, else the status code."""
+    try:
+        detail = resp.json().get("detail")
+    except (ValueError, AttributeError):
+        detail = None
+    if isinstance(detail, str) and detail:
+        return detail
+    return f"upload failed ({resp.status_code})"
+
+
 def render_document_uploader(api_url: str, deal_id: str) -> None:
     """
     Renders document upload widget with category override,
@@ -76,13 +117,9 @@ def render_document_uploader(api_url: str, deal_id: str) -> None:
                     )
 
                     if resp.status_code == 200:
-                        result = resp.json()
-                        results.append(
-                            f"✅ **{file.name}**: {result['chunks_created']} chunks "
-                            f"({result['document_category']})"
-                        )
+                        results.extend(_describe_ingest(file.name, resp.json()))
                     else:
-                        results.append(f"❌ **{file.name}**: {resp.text}")
+                        results.append(f"❌ **{file.name}**: {_error_detail(resp)}")
 
                 except Exception as e:
                     results.append(f"❌ **{file.name}**: {str(e)}")
