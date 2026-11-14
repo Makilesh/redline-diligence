@@ -219,19 +219,23 @@ Run it: `python -m eval.run_retrieval_eval --baseline eval/baseline.json` — ex
 
 ### End-to-end (live, quota-dependent)
 
-`tests/run_end_to_end_validation.py` drives the whole pipeline through the API. The last full run (2026-08-25, **before** the September ingestion and verification rework — rerun pending):
+`tests/run_end_to_end_validation.py` drives the whole pipeline through the API against a freshly re-indexed data room. The latest run (2026-11-15, after the November rework) next to the run previously committed in [`RESULTS.md`](RESULTS.md) (2026-08-25):
 
-| Metric | Result |
-|---|---|
-| Completed without an unhandled exception | 41/41 |
-| Answerable questions answered | 35/35 |
-| Mean fact recall | **86.3%** |
-| Answers containing every expected fact | 26/35 |
-| Citation-source match | 33/35 |
-| Controls where the engine did **not** fabricate | 6/6 |
-| Latency per query | 13–36s |
+| Metric | 2026-08-25 | **2026-11-15** |
+|---|---|---|
+| Completed without an unhandled exception | 41/41 | 41/41 |
+| Answerable questions answered | 35/35 | 35/35 |
+| Mean fact recall | 80.1% | **90.5%** |
+| Answers containing every expected fact | 20/35 | **27/35** |
+| Citation-source match | 31/35 | **33/35** |
+| Controls where the engine did **not** fabricate | 6/6 | 6/6 |
+| Latency p50 / p90 | 27.0 s / 63.6 s | **14.6 s / 33.5 s** |
+| Verification: passed / warning / failed | 36 / 5 / 0 | 8 / 26 / 7 |
+| Synthesis model mix | `3.6-flash` ×33, `3.5-flash` ×4, `3-flash-preview` ×1 | `3-flash-preview` ×46, `2.5-flash` ×5 |
 
-**One caveat matters enough to state up front.** End-to-end recall on this set moves with *which synthesis model served the run*, and that depends on daily quota and provider health rather than on anything in this repository. Runs of identical questions against an identical index have scored 86.6%, 73.9%, 71.0%, 85.9%, 62.1%, 86.3% and 80.1% — the 62.1% run coincided with a Gemini incident that truncated a third of its answers, and the last two are both clean runs with zero answers lost upstream ([Decision 48](DECISIONS_LOG.md)). [`RESULTS.md`](RESULTS.md) therefore records the synthesis model mix and upstream-failure count with every report, and retrieval changes are measured with the deterministic harness above instead.
+Two things to read before comparing. **The November run was served by a lower rung**: during it, `gemini-3.7-flash` timed out and `3.6`/`3.5-flash` returned 503 "high demand"; each was cooled model-wide and synthesis moved down the ladder with no answer lost (the slowest query is one 120 s timeout before that happened). The gains above came despite that, but the runs are not controlled for model. **The verification mix moved because the checker got stricter, not because answers got worse**: the August validator passed 36 of 41 answers while the benchmark later showed it let 41% of wrong claims through. Of the seven November failures, one is a clear catch (mh_06: a computed closing-cash total that appears in no document, 0% recall), one flags a percentage column the model invented, and five are judge-confirmed contradictions where an answer mis-stated or embellished a detail.
+
+**One caveat matters enough to state up front.** End-to-end recall on this set moves with *which synthesis model served the run*, and that depends on daily quota and provider health rather than on anything in this repository. Runs of identical questions against an identical index have scored 86.6%, 73.9%, 71.0%, 85.9%, 62.1%, 86.3% and 80.1% on the earlier pipelines — the 62.1% run coincided with a Gemini incident that truncated a third of its answers, and 86.3% and 80.1% are both clean runs with zero answers lost upstream ([Decision 48](DECISIONS_LOG.md)) — and 90.5% on the November pipeline, with zero answers lost despite three reasoning models being down during the run. [`RESULTS.md`](RESULTS.md) therefore records the synthesis model mix and upstream-failure count with every report, and retrieval changes are measured with the deterministic harness above instead.
 
 The refusal path is a feature, not a fallback: on all 6 controls the engine declined to invent the missing figure — usually by answering the part it *could* support and naming the gap explicitly. The retrieval harness shows where that behaviour comes from: the context-quality gate refuses 2 of the 6 controls outright, sends 1 to the LLM, and admits 3 whose documents are on-topic but lack the asked-for figure — for those, it is synthesis and verification that decline.
 
@@ -364,7 +368,7 @@ A few decisions driven by measurement rather than intuition. The full record —
 ## Limitations
 
 - **The corpus is synthetic and small.** 9 documents (~13K tokens) is enough that retrieval must discriminate between them, but it fits in one prompt. The distractor mode adds thousands of real contract chunks, still on the in-memory client: HNSW, int8 quantization and server-side latency remain unmeasured. Every PDF/XLSX/DOCX claim rests on generated fixtures, not real data-room files, and there is no OCR.
-- **The end-to-end numbers predate the September and November reworks** and move with quota state; the retrieval and verification harnesses are the reliable signal.
+- **End-to-end numbers move with quota state and provider health**, and one run per pipeline is all there is; the retrieval and verification harnesses are the reliable signal. A synthesis call still waits up to 120 s before a timed-out model is skipped, which is what the slowest live query spent.
 - **The local NLI model is now the weak link in verification.** With it in the loop, 9.7% of wrong claims on the benchmark's held-out half still pass — mostly flipped negations and swapped parties (it entails a "termination fee" claim at 0.98 from the sentence giving that figure as the *reverse* fee). Purpose-trained grounding checkers (MiniCheck, FactCG, HHEM) have not been measured. Stricter grounding also sends more claims to the lite-model judge (~65% of claims, up from ~37%).
 - **Arithmetic across documents is model-dependent.** Retrieval supplies the inputs for an implied multiple; whether the model combines them correctly varies by rung. The validator marks such figures as derived or unverified rather than pretending to check them.
 - **PII detection is rule-based.** The decision model did not beat it on the labelled set. Hourly rates in prose are still missed. Risk-signal recall is still modest (0.52), and `regulatory_risk` is rarely caught.
@@ -390,7 +394,8 @@ A few decisions driven by measurement rather than intuition. The full record —
 - [ ] Probe and add `gemini-3.8-flash`; move `gemini-2.5-flash` off the reasoning rungs before it starts routing to a Lite model (1 December 2026)
 - [ ] Recalibrate the quality-gate floors and the answerability threshold per reranker model (the CPU host runs MiniLM)
 - [ ] Qdrant Query API (server-side prefetch + fusion) — evaluated, not adopted: its weighted RRF is a different function, and the candidate stage is ~20 ms of a ~150 ms pass; revisit against a remote cluster
-- [ ] Rerun the end-to-end golden set on the reworked pipeline
+- [x] Rerun the end-to-end golden set on the reworked pipeline
+- [ ] A shorter first timeout on reasoning-model synthesis calls, so a hung model is skipped in seconds rather than 120 s
 - [ ] Make the answerability gate cheap enough for CPU hosting (fewer facet × passage pairs, ONNX / int8)
 - [ ] Fine-tune Laya on due-diligence labels (risk recall) and calibrate it
 - [ ] Evaluate on real documents: LegalBench-RAG / CUAD for contracts, FinanceBench for filings — the synthetic set cannot separate retrieval designs
