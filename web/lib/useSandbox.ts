@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { createDeal, ingestDocument, purgeDeal } from "./api";
-import type { Deal } from "./types";
+import type { Deal, IngestResult } from "./types";
+
+/** The most recent upload's outcome, for the panel to report on. */
+export interface LastUpload {
+  filename: string;
+  result: IngestResult;
+}
 
 /** Where the active sandbox deal id is parked so a reload can still clean it up. */
 const STORAGE_KEY = "redline.sandbox.deal";
@@ -65,6 +71,7 @@ export function useSandbox(
   const [sandboxDeal, setSandboxDeal] = useState<Deal | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpload, setLastUpload] = useState<LastUpload | null>(null);
 
   // Read in the handler rather than closing over state, so the unload path
   // always sees the current deal instead of the one captured at mount.
@@ -99,6 +106,7 @@ export function useSandbox(
     async (file: File) => {
       setUploading(true);
       setError(null);
+      setLastUpload(null);
       try {
         let deal = dealRef.current;
 
@@ -116,7 +124,8 @@ export function useSandbox(
           onDealCreated(deal);
         }
 
-        await ingestDocument(deal.deal_id, file);
+        const result = await ingestDocument(deal.deal_id, file);
+        setLastUpload({ filename: file.name, result });
         // The deal list no longer carries the sandbox, so its server-side
         // document count never arrives; keep the local copy current instead.
         deal = { ...deal, document_count: deal.document_count + 1 };
@@ -140,6 +149,7 @@ export function useSandbox(
     purgeDeal(deal.deal_id);
     sessionStorage.removeItem(STORAGE_KEY);
     setSandboxDeal(null);
+    setLastUpload(null);
     dealRef.current = null;
     // The caller has to re-read the deal list: the purged deal is still in it,
     // and if it was the selected one, every subsequent query would be scoped to
@@ -147,5 +157,5 @@ export function useSandbox(
     onDealDiscarded();
   }, [onDealDiscarded]);
 
-  return { sandboxDeal, uploading, error, upload, discard };
+  return { sandboxDeal, uploading, error, lastUpload, upload, discard };
 }

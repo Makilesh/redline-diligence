@@ -6,17 +6,21 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   BadgeCheck,
+  CircleDashed,
   Clock,
   Gauge,
   Loader2,
   RefreshCw,
   ShieldAlert,
+  ShieldQuestion,
   ShieldX,
 } from "lucide-react";
 
+import ClaimChecks from "./ClaimChecks";
 import CitationPill from "./CitationPill";
 import { parseAnswer, type ParsedCitation } from "@/lib/citations";
 import type { QueryResponse } from "@/lib/types";
+import { answerVerdict, type AnswerVerdict } from "@/lib/verification";
 
 interface AnswerPanelProps {
   /** The validated answer. Null while the answer is still being written. */
@@ -39,27 +43,17 @@ const DRAFT_VERDICT = {
   className: "text-ash-300 bg-ink-850/70 border-line",
 } as const;
 
-/** Visual treatment per validation outcome. */
-const VERDICT = {
-  passed: {
-    icon: BadgeCheck,
-    label: "Validated",
-    detail: "Every claim was matched back to retrieved text",
-    className: "text-ok bg-ok/12 border-ok/30",
-  },
-  warning: {
-    icon: ShieldAlert,
-    label: "Partially grounded",
-    detail: "Some claims could not be matched to a source",
-    className: "text-warn bg-warn/12 border-warn/30",
-  },
-  failed: {
-    icon: ShieldX,
-    label: "Validation failed",
-    detail: "Unsupported claims were detected in this answer",
-    className: "text-bad bg-bad/12 border-bad/30",
-  },
-} as const;
+/**
+ * Visual treatment per verdict. The wording comes from `answerVerdict`, which
+ * never reads a missing or unrecognised status as a pass.
+ */
+const VERDICT_STYLE: Record<AnswerVerdict["key"], { icon: React.ElementType; className: string }> = {
+  verified: { icon: BadgeCheck, className: "text-ok bg-ok/12 border-ok/30" },
+  partial: { icon: ShieldAlert, className: "text-warn bg-warn/12 border-warn/30" },
+  failed: { icon: ShieldX, className: "text-bad bg-bad/12 border-bad/30" },
+  no_claims: { icon: CircleDashed, className: "text-ash-300 bg-ink-850/70 border-line" },
+  unknown: { icon: ShieldQuestion, className: "text-warn bg-warn/12 border-warn/30" },
+};
 
 function Metric({
   icon: Icon,
@@ -118,8 +112,11 @@ export default function AnswerPanel({
   }, [citations]);
 
   const verdict = result
-    ? (VERDICT[result.validation_status] ?? VERDICT.passed)
-    : DRAFT_VERDICT;
+    ? (() => {
+        const v = answerVerdict(result);
+        return { ...VERDICT_STYLE[v.key], key: v.key, label: v.label, detail: v.detail };
+      })()
+    : { ...DRAFT_VERDICT, key: "draft" as const };
   const VerdictIcon = verdict.icon;
 
   const confidence = Math.round((result?.confidence_score ?? 0) * 100);
@@ -175,6 +172,20 @@ export default function AnswerPanel({
         )}
       </div>
 
+      {/* The badge's tooltip is not enough for a failed or partial answer:
+          the reader must see, before reading the text, that it is not all
+          backed by the documents. */}
+      {(verdict.key === "failed" || verdict.key === "partial" || verdict.key === "unknown") && (
+        <p
+          role="note"
+          className={`border-b border-line px-6 py-2.5 text-[0.8rem] leading-snug ${
+            verdict.key === "failed" ? "bg-bad/[0.06] text-bad" : "bg-warn/[0.06] text-warn"
+          }`}
+        >
+          {verdict.detail}
+        </p>
+      )}
+
       <div className={`answer-body px-6 py-6 ${isDraft ? "opacity-80" : ""}`}>
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
@@ -194,12 +205,20 @@ export default function AnswerPanel({
                   );
                 }
               }
+              // The answer is model output built from counterparty documents,
+              // so a link in it is untrusted. react-markdown already blanks
+              // `javascript:` and `data:` URLs; anything that is not plainly
+              // web or mail is rendered as text rather than as a link to "".
+              if (!href || !/^(https?:|mailto:)/i.test(href)) {
+                return <span className="text-ash-300">{children}</span>;
+              }
               return (
                 <a
                   href={href}
+                  title={href}
                   className="text-gold-400 underline underline-offset-2 hover:text-gold-300"
                   target="_blank"
-                  rel="noreferrer noopener"
+                  rel="noreferrer noopener nofollow"
                   {...props}
                 >
                   {children}
@@ -221,14 +240,22 @@ export default function AnswerPanel({
         </ReactMarkdown>
       </div>
 
+      {result && <ClaimChecks checks={result.claim_checks} />}
+
+      {/* The flags are the validator's free-text summary. With per-claim
+          checks above they mostly repeat them, so they fold away; without
+          checks they are the only record and stay open. */}
       {result && result.hallucination_flags.length > 0 && (
-        <div className="border-t border-line bg-bad/[0.05] px-6 py-4">
-          <div className="mb-2.5 flex items-center gap-2 text-[0.72rem] font-semibold uppercase tracking-wider text-bad">
+        <details
+          open={result.claim_checks.length === 0}
+          className="group border-t border-line bg-bad/[0.04] px-6 py-4"
+        >
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-[0.72rem] font-semibold uppercase tracking-wider text-bad">
             <ShieldAlert size={13} />
-            {result.hallucination_flags.length} unsupported claim
-            {result.hallucination_flags.length === 1 ? "" : "s"} flagged
-          </div>
-          <ul className="space-y-1.5">
+            {result.hallucination_flags.length} validator note
+            {result.hallucination_flags.length === 1 ? "" : "s"}
+          </summary>
+          <ul className="mt-2.5 space-y-1.5">
             {result.hallucination_flags.map((flag, i) => (
               <li
                 key={i}
@@ -238,7 +265,7 @@ export default function AnswerPanel({
               </li>
             ))}
           </ul>
-        </div>
+        </details>
       )}
     </motion.div>
   );

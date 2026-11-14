@@ -2,24 +2,83 @@
 
 import { useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Loader2, ShieldCheck, Trash2, Upload } from "lucide-react";
+import { GitCompare, Loader2, ShieldCheck, Trash2, Upload } from "lucide-react";
 
-import type { Deal } from "@/lib/types";
+import type { Deal, VersionCandidate } from "@/lib/types";
+import type { LastUpload } from "@/lib/useSandbox";
 
 interface UploadPanelProps {
   sandboxDeal: Deal | null;
   uploading: boolean;
   error: string | null;
+  lastUpload?: LastUpload | null;
   onUpload: (file: File) => void;
   onDiscard: () => void;
 }
 
 const ACCEPTED = ".pdf,.docx,.xlsx,.pptx,.txt";
 
+const RELATION: Record<VersionCandidate["relation"], string> = {
+  newer: "a newer version of",
+  older: "an older version of",
+  same_document: "the same document as",
+};
+
+/**
+ * What the last upload produced. Version matches are reported as what they
+ * are — the server's guess, with nothing superseded — so a reader does not
+ * assume the older document has dropped out of the answers.
+ */
+function UploadOutcome({ upload }: { upload: LastUpload }) {
+  const { filename, result } = upload;
+  const partial = result.status === "partial";
+
+  return (
+    <div className="space-y-2 border-t border-line px-4 py-3 text-left" role="status">
+      <p className={`text-[0.74rem] leading-snug ${partial ? "text-warn" : "text-ok"}`}>
+        {partial ? "Partly indexed: " : "Indexed: "}
+        <span className="font-medium text-ash-50">{filename}</span> ·{" "}
+        {result.chunks_created} passage{result.chunks_created === 1 ? "" : "s"}
+      </p>
+
+      {result.notices.length > 0 && (
+        <ul className="space-y-1">
+          {result.notices.map((n, i) => (
+            <li key={i} className="text-[0.7rem] leading-snug text-ash-300">
+              {n}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {result.version_candidates.length > 0 && (
+        <div className="rounded-md border border-line bg-ink-850/70 px-2.5 py-2">
+          {result.version_candidates.map((c) => (
+            <p
+              key={`${c.doc_id}-${c.relation}`}
+              className="flex items-start gap-1.5 text-[0.7rem] leading-snug text-ash-300"
+            >
+              <GitCompare size={11} className="mt-0.5 shrink-0 text-info" />
+              <span>
+                This looks like {RELATION[c.relation]}{" "}
+                <span className="font-medium text-ash-50">{c.source_file || c.doc_id}</span>.
+              </span>
+            </p>
+          ))}
+          <p className="mt-1.5 text-[0.66rem] leading-snug text-ash-500">
+            Nothing was replaced — both are searchable and either may be cited.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function UploadPanel({
   sandboxDeal,
   uploading,
   error,
+  lastUpload,
   onUpload,
   onDiscard,
 }: UploadPanelProps) {
@@ -52,6 +111,10 @@ export default function UploadPanel({
           ref={inputRef}
           type="file"
           accept={ACCEPTED}
+          // Opened by the button below; as its own tab stop it was an
+          // unlabelled control that did nothing visible when focused.
+          aria-label="Choose a document to upload"
+          tabIndex={-1}
           className="sr-only"
           onChange={(e) => {
             handleFiles(e.target.files);
@@ -83,7 +146,7 @@ export default function UploadPanel({
             {uploading ? "Indexing…" : "Test it on your own document"}
           </span>
           <span className="max-w-[24ch] text-[0.7rem] leading-snug text-ash-500">
-            PDF, DOCX, XLSX or PPTX. Drop it here or click to browse.
+            PDF, DOCX, XLSX, PPTX or TXT. Drop it here or click to browse.
           </span>
         </button>
 
@@ -109,6 +172,8 @@ export default function UploadPanel({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {lastUpload && !uploading && <UploadOutcome upload={lastUpload} />}
 
       {/* The privacy promise, stated where the decision to upload is made
           rather than buried in a footer. */}

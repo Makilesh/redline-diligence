@@ -1,19 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, MotionConfig, motion } from "framer-motion";
 import { CornerDownLeft, Layers, Sparkles } from "lucide-react";
 
 import AnswerPanel from "@/components/AnswerPanel";
 import AskBar from "@/components/AskBar";
 import DataRoomPanel from "@/components/DataRoomPanel";
+import ErrorPanel from "@/components/ErrorPanel";
 import Masthead from "@/components/Masthead";
 import PipelineTimeline from "@/components/PipelineTimeline";
 import RefusalPanel from "@/components/RefusalPanel";
 import SourcesRail from "@/components/SourcesRail";
+import UnavailablePanel from "@/components/UnavailablePanel";
 import UploadPanel from "@/components/UploadPanel";
 import { BRAND } from "@/lib/brand";
 import {
+  API_BASE,
   getBudget,
   listDeals,
   listDocuments,
@@ -21,58 +24,24 @@ import {
   streamQuery,
 } from "@/lib/api";
 import { parseAnswer } from "@/lib/citations";
+import { ApiError, toApiError } from "@/lib/errors";
+import { applyStage, initialStages, settleStages } from "@/lib/pipeline";
 import { useSandbox } from "@/lib/useSandbox";
+import { answerVerdict, resultView } from "@/lib/verification";
 import type {
   BudgetStatus,
   Deal,
   DocumentRecord,
   PipelineStage,
-  PlannedStage,
   QueryResponse,
   RiskSignal,
 } from "@/lib/types";
 
 type Phase = "idle" | "running" | "done";
 
-/**
- * Folds one streamed stage event into the timeline.
- *
- * Three cases, and the conditional nodes are why this is not a simple index
- * bump. The graph's shape is decided at runtime: the financial verifier only
- * runs for financial queries, and the rewriter re-enters retrieval on a loop,
- * so a stage can arrive that the planned list never mentioned, or arrive twice.
- */
-function applyStage(
-  prev: PipelineStage[],
-  incoming: Omit<PipelineStage, "status">,
-): PipelineStage[] {
-  const next = [...prev];
-
-  // A planned row still waiting for this agent — the ordinary case.
-  const slot = next.findIndex(
-    (s) => s.agent === incoming.agent && s.status !== "done",
-  );
-
-  if (slot !== -1) {
-    next[slot] = { ...next[slot], ...incoming, status: "done" };
-  } else {
-    // Either a conditional node or a second pass through the rewrite loop.
-    // Insert it after the last completed row so the timeline reads in the
-    // order things actually happened.
-    let lastDone = -1;
-    next.forEach((s, i) => {
-      if (s.status === "done") lastDone = i;
-    });
-    next.splice(lastDone + 1, 0, { ...incoming, status: "done" });
-  }
-
-  // Whatever is next in line is now the one running.
-  const upcoming = next.findIndex((s) => s.status !== "done");
-  if (upcoming !== -1) {
-    next[upcoming] = { ...next[upcoming], status: "running" };
-  }
-
-  return next;
+interface AskedQuery {
+  query: string;
+  includePii: boolean;
 }
 
 export default function Home() {
@@ -86,7 +55,10 @@ export default function Home() {
   const [question, setQuestion] = useState("");
   const [stages, setStages] = useState<PipelineStage[]>([]);
   const [result, setResult] = useState<QueryResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
+  // Why the deal list could not be loaded; without a deal nothing can be asked,
+  // and an unreachable engine must not look like an empty data room.
+  const [dealsError, setDealsError] = useState<ApiError | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [highlighted, setHighlighted] = useState<number | null>(null);
   // Answer text streamed while synthesis runs — an unverified draft, dropped
@@ -94,9 +66,19 @@ export default function Home() {
   const [draft, setDraft] = useState("");
 
   const abortRef = useRef<AbortController | null>(null);
+  const lastAskedRef = useRef<AskedQuery | null>(null);
 
   const refreshDeals = useCallback(async (preferDealId?: string) => {
-    const fetched = await listDeals();
+    let fetched: Deal[];
+    try {
+      fetched = await listDeals();
+      setDealsError(null);
+    } catch (e) {
+      setDealsError(toApiError(e, API_BASE));
+      // A sandbox the visitor just created is still usable without the list.
+      if (preferDealId) setActiveDealId(preferDealId);
+      return;
+    }
     setDeals(fetched);
     setActiveDealId((current) => {
       if (preferDealId) return preferDealId;
@@ -126,10 +108,17 @@ export default function Home() {
     }, [refreshDeals]),
   );
 
+  // A failed budget read keeps the last known figures rather than blanking them.
+  const refreshBudget = useCallback(() => {
+    void getBudget().then((b) => {
+      if (b) setBudget(b);
+    });
+  }, []);
+
   useEffect(() => {
     void refreshDeals();
-    void getBudget().then(setBudget);
-  }, [refreshDeals]);
+    refreshBudget();
+  }, [refreshDeals, refreshBudget]);
 
   // Deal-scoped panels. Refetched whenever the deal changes, and after an
   // upload lands (the sandbox hook bumps `deals`, which changes the id).
@@ -139,8 +128,14 @@ export default function Home() {
       setRisks([]);
       return;
     }
-    void listDocuments(activeDealId).then(setDocuments);
-    void listRiskSignals(activeDealId).then(setRisks);
+    // Responses for a deal the visitor has already switched away from are
+    // dropped, so a slow request cannot paint another deal's documents.
+    let current = true;
+    void listDocuments(activeDealId).then((d) => current && setDocuments(d ?? []));
+    void listRiskSignals(activeDealId).then((r) => current && setRisks(r ?? []));
+    return () => {
+      current = false;
+    };
   }, [activeDealId, sandbox.uploading]);
 
   // Wall clock for the running query. Driven by an interval rather than the
@@ -159,6 +154,7 @@ export default function Home() {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
+      lastAskedRef.current = { query, includePii };
 
       setQuestion(query);
       setPhase("running");
@@ -177,25 +173,9 @@ export default function Home() {
           signal: controller.signal,
           onEvent: (evt) => {
             if (evt.event === "start") {
-              const planned = evt.data.planned_stages as PlannedStage[];
-              setStages(
-                planned.map((p, i) => ({
-                  ...p,
-                  seq: 0,
-                  summary: "",
-                  detail: {},
-                  duration_ms: 0,
-                  elapsed_ms: 0,
-                  // The first agent is already running by the time this frame
-                  // arrives — the server emits `start` immediately before
-                  // invoking the graph.
-                  status: i === 0 ? "running" : "pending",
-                })),
-              );
+              setStages(initialStages(evt.data.planned_stages));
             } else if (evt.event === "stage") {
-              setStages((prev) =>
-                applyStage(prev, evt.data as unknown as Omit<PipelineStage, "status">),
-              );
+              setStages((prev) => applyStage(prev, evt.data));
             } else if (evt.event === "token") {
               setDraft((prev) => prev + evt.data.text);
             } else if (evt.event === "answer_reset") {
@@ -203,38 +183,38 @@ export default function Home() {
             } else if (evt.event === "result") {
               setDraft("");
               setResult(evt.data);
-              setStages((prev) =>
-                prev.map((s) =>
-                  s.status === "done" ? s : { ...s, status: "done" },
-                ),
-              );
-              setPhase("done");
-            } else if (evt.event === "error") {
-              setError(evt.data.detail);
+              setStages((prev) => settleStages(prev, "result"));
               setPhase("done");
             }
           },
         });
       } catch (e) {
-        // An abort is the user pressing stop, not a failure worth reporting.
+        // An abort is the user pressing stop (or asking something else), not
+        // a failure worth reporting; whoever aborted owns the screen now.
         if (controller.signal.aborted) return;
-        setError(
-          e instanceof Error
-            ? e.message
-            : "Could not reach the engine. Is the API running?",
-        );
+        // The draft never reached verification. Leaving it on screen under an
+        // error would let an unchecked answer pass for the answer, so it goes.
+        setDraft("");
+        setError(toApiError(e, API_BASE));
+        setStages((prev) => settleStages(prev, "failed"));
         setPhase("done");
       } finally {
-        void getBudget().then(setBudget);
+        if (!controller.signal.aborted) refreshBudget();
       }
     },
-    [activeDealId],
+    [activeDealId, refreshBudget],
   );
+
+  const handleRetry = useCallback(() => {
+    const last = lastAskedRef.current;
+    if (last) void handleSubmit(last.query, last.includePii);
+  }, [handleSubmit]);
 
   const handleCancel = useCallback(() => {
     abortRef.current?.abort();
     setPhase("idle");
     setStages([]);
+    setDraft("");
   }, []);
 
   const handleSelectCitation = useCallback((index: number) => {
@@ -254,14 +234,37 @@ export default function Home() {
   );
 
   const isLanding = phase === "idle" && !result;
+  const view = result ? resultView(result) : null;
   // The public deal list no longer includes sandboxes, so this tab's own
   // sandbox has to be matched separately or its landing hint never shows.
   const activeDeal =
     deals.find((d) => d.deal_id === activeDealId) ??
     (sandbox.sandboxDeal?.deal_id === activeDealId ? sandbox.sandboxDeal : null);
 
+  // One polite sentence for assistive technology: which step is running, then
+  // how the run ended. Errors announce themselves (role="alert"); the token
+  // draft is deliberately not announced — it is unverified and would be read
+  // out a fragment at a time.
+  const runningStage = stages.find((s) => s.status === "running");
+  const announcement =
+    phase === "running"
+      ? runningStage
+        ? `Working: ${runningStage.label}.`
+        : "Working."
+      : result
+        ? view === "answer"
+          ? `Answer ready. ${answerVerdict(result).label}.`
+          : view === "refusal"
+            ? "The engine declined: the data room does not support an answer."
+            : "No answer: the language models did not respond."
+        : "";
+
   return (
+    <MotionConfig reducedMotion="user">
     <div className="min-h-screen">
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </p>
       <Masthead
         deals={deals}
         activeDealId={activeDealId}
@@ -306,6 +309,22 @@ export default function Home() {
                 disabled={!activeDealId}
               />
 
+              {dealsError && !activeDealId && (
+                <div
+                  role="alert"
+                  className="mx-auto mt-6 flex max-w-xl flex-wrap items-center justify-center gap-x-4 gap-y-2 text-center text-[0.8rem] leading-relaxed text-ash-300"
+                >
+                  <span>{dealsError.message}</span>
+                  <button
+                    type="button"
+                    onClick={() => void refreshDeals()}
+                    className="font-medium text-gold-400 underline-offset-2 hover:underline"
+                  >
+                    Try again
+                  </button>
+                </div>
+              )}
+
               {activeDeal && (
                 <motion.div
                   initial={{ opacity: 0 }}
@@ -346,30 +365,23 @@ export default function Home() {
 
               <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
                 <div className="min-w-0 space-y-5">
-                  {error && (
-                    <div className="panel border-bad/30 px-5 py-4">
-                      <div className="text-[0.78rem] font-semibold uppercase tracking-widest text-bad">
-                        Request failed
-                      </div>
-                      <p className="mt-1.5 text-[0.86rem] leading-relaxed text-ash-300">
-                        {error}
-                      </p>
-                    </div>
-                  )}
+                  {error && <ErrorPanel error={error} onRetry={handleRetry} />}
 
+                  {/* The draft exists only while the run is live. Every way a
+                      run ends — result, error, cancel — leaves this phase. */}
                   {!result && draft && phase === "running" && (
                     <AnswerPanel result={null} draft={draft} />
                   )}
 
-                  {result &&
-                    (result.is_refusal ? (
-                      <RefusalPanel result={result} />
-                    ) : (
-                      <AnswerPanel
-                        result={result}
-                        onSelectCitation={handleSelectCitation}
-                      />
-                    ))}
+                  {/* Chosen by `outcome`. `is_refusal` is also true when no
+                      model answered, which is an outage, not a refusal. */}
+                  {view === "refusal" && result && <RefusalPanel result={result} />}
+                  {view === "unavailable" && result && (
+                    <UnavailablePanel result={result} onRetry={handleRetry} />
+                  )}
+                  {view === "answer" && result && (
+                    <AnswerPanel result={result} onSelectCitation={handleSelectCitation} />
+                  )}
 
                   {/* While running, the timeline is the main event and belongs
                       in the primary column. Once the answer lands it moves to
@@ -384,7 +396,7 @@ export default function Home() {
                 </div>
 
                 <aside className="space-y-4 lg:sticky lg:top-20 lg:self-start">
-                  {result && !result.is_refusal && (
+                  {view === "answer" && (
                     <SourcesRail
                       citations={parsedCitations}
                       highlighted={highlighted}
@@ -438,6 +450,7 @@ export default function Home() {
               sandboxDeal={sandbox.sandboxDeal}
               uploading={sandbox.uploading}
               error={sandbox.error}
+              lastUpload={sandbox.lastUpload}
               onUpload={sandbox.upload}
               onDiscard={sandbox.discard}
             />
@@ -445,5 +458,6 @@ export default function Home() {
         </div>
       )}
     </div>
+    </MotionConfig>
   );
 }

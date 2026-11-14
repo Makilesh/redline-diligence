@@ -7,12 +7,15 @@ import {
   Check,
   ChevronDown,
   Calculator,
+  CloudOff,
   FileSearch,
   Gauge,
   Hand,
+  Minus,
   PenLine,
   RefreshCw,
   ShieldCheck,
+  X,
 } from "lucide-react";
 
 import type { PipelineStage } from "@/lib/types";
@@ -27,7 +30,17 @@ const AGENT_ICONS: Record<string, React.ElementType> = {
   retry_synthesis: PenLine,
   hallucination_validator: ShieldCheck,
   insufficient_context: Hand,
+  synthesis_unavailable: CloudOff,
 };
+
+/** "12 supported, 2 unverified" from the validator's status counts. */
+function countsLine(value: unknown): string {
+  if (!value || typeof value !== "object") return "";
+  return Object.entries(value as Record<string, unknown>)
+    .filter(([, n]) => typeof n === "number" && n > 0)
+    .map(([k, n]) => `${n} ${k}`)
+    .join(", ");
+}
 
 /** Renders the structured `detail` bag a stage carries, when it has anything worth showing. */
 function StageDetail({ stage }: { stage: PipelineStage }) {
@@ -53,6 +66,20 @@ function StageDetail({ stage }: { stage: PipelineStage }) {
     rows.push(["Confidence", `${Math.round(d.confidence_score * 100)}%`]);
   if (typeof d.rewritten_query === "string" && d.rewritten_query)
     rows.push(["Rewritten as", d.rewritten_query]);
+  const claims = countsLine(d.status_counts);
+  if (claims) rows.push(["Statements", claims]);
+  const methods = countsLine(d.method_counts);
+  if (methods) rows.push(["Decided by", methods]);
+
+  // The node's own measurement, when the server sent one.
+  const perf = stage.perf;
+  if (perf && perf.llm_calls > 0) {
+    rows.push(["LLM calls", String(perf.llm_calls)]);
+    const tokens = perf.prompt_tokens + perf.completion_tokens;
+    if (tokens > 0) rows.push(["Tokens", tokens.toLocaleString()]);
+    if (perf.models.length && !rows.some(([k]) => k === "Model"))
+      rows.push(["Model", perf.models.join(", ")]);
+  }
 
   const hasLists =
     (subQuestions?.length ?? 0) > 0 ||
@@ -147,6 +174,10 @@ function StageRow({ stage, isLast }: { stage: PipelineStage; isLast: boolean }) 
 
   const done = stage.status === "done";
   const running = stage.status === "running";
+  // A stage the run never reached, or the one in flight when it broke. Neither
+  // gets a check mark: a check means the stage ran.
+  const skipped = stage.status === "skipped";
+  const interrupted = stage.status === "interrupted";
 
   return (
     <li className="relative">
@@ -172,10 +203,21 @@ function StageRow({ stage, isLast }: { stage: PipelineStage; isLast: boolean }) 
               ? "border-gold-600/45 bg-gold-500/12 text-gold-400"
               : running
                 ? "pulse-ring border-gold-500 bg-gold-500/18 text-gold-300"
-                : "border-line bg-ink-850 text-ash-600"
+                : interrupted
+                  ? "border-bad/45 bg-bad/10 text-bad"
+                  : "border-line bg-ink-850 text-ash-600"
           }`}
+          aria-label={skipped ? "Not reached" : interrupted ? "Interrupted" : undefined}
         >
-          {done ? <Check size={14} /> : <Icon size={14} />}
+          {done ? (
+            <Check size={14} />
+          ) : interrupted ? (
+            <X size={14} />
+          ) : skipped ? (
+            <Minus size={14} />
+          ) : (
+            <Icon size={14} />
+          )}
         </div>
 
         <div className="min-w-0 flex-1 pt-0.5">
@@ -199,7 +241,13 @@ function StageRow({ stage, isLast }: { stage: PipelineStage; isLast: boolean }) 
               done ? "text-ash-300" : "text-ash-600"
             }`}
           >
-            {done ? stage.summary : stage.description}
+            {done
+              ? stage.summary
+              : skipped
+                ? "Not reached — the run ended before this step"
+                : interrupted
+                  ? "Interrupted — the run stopped during this step"
+                  : stage.description}
           </p>
 
           {done && (

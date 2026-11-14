@@ -152,16 +152,18 @@ export default function DataRoomPanel({ documents, risks }: DataRoomPanelProps) 
 
   return (
     <div className="panel overflow-hidden">
-      <div className="flex border-b border-line p-1">
+      <div className="flex border-b border-line p-1" role="tablist" aria-label="Data room">
         {tabs.map((t) => {
           const Icon = t.icon;
           const active = tab === t.id;
           return (
             <button
               key={t.id}
+              id={`dataroom-tab-${t.id}`}
               type="button"
               onClick={() => setTab(t.id)}
               aria-selected={active}
+              aria-controls="dataroom-panel"
               role="tab"
               className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[0.75rem] font-medium transition-colors ${
                 active ? "text-gold-400" : "text-ash-500 hover:text-ash-300"
@@ -196,6 +198,9 @@ export default function DataRoomPanel({ documents, risks }: DataRoomPanelProps) 
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.13 }}
+          id="dataroom-panel"
+          role="tabpanel"
+          aria-labelledby={`dataroom-tab-${tab}`}
           className="max-h-[22rem] overflow-y-auto"
         >
           {tab === "documents" ? (
