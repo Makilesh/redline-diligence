@@ -10,6 +10,7 @@ through exactly the same code.
 import os
 import shutil
 import tempfile
+import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -21,6 +22,7 @@ from api.security import (
     ClientContext,
     acquire_pipeline_slot,
     ingest_rate_limit,
+    max_upload_bytes,
     public_error_detail,
     require_sandbox_deal,
 )
@@ -31,6 +33,7 @@ from src.data_processing.ingest_pipeline import (
     mark_superseded,
     sanitize_filename,
 )
+from src.utils import metrics
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -42,7 +45,58 @@ _READ_CHUNK_BYTES = 1024 * 1024
 
 def _max_upload_bytes() -> int:
     """Upload size cap in bytes (env MAX_UPLOAD_MB, default 25)."""
-    return int(os.getenv("MAX_UPLOAD_MB", "25")) * 1024 * 1024
+    return max_upload_bytes()
+
+
+# Office formats are zip archives, and a zip's size on the wire says nothing
+# about its size once opened: a few hundred KB of repeated bytes expands to
+# gigabytes. The upload cap bounds what is received; this bounds what the
+# parsers are then asked to inflate into memory on a host with no room for it.
+_ZIP_EXTENSIONS = {".docx", ".xlsx", ".pptx"}
+_MAX_ARCHIVE_MEMBERS = 5000
+
+
+def _max_expanded_bytes() -> int:
+    """Ceiling on an office file's total uncompressed size (env MAX_EXPANDED_MB, default 300)."""
+    try:
+        return max(1, int(os.getenv("MAX_EXPANDED_MB", "300"))) * 1024 * 1024
+    except ValueError:
+        return 300 * 1024 * 1024
+
+
+def _reject_archive_bomb(path: str, extension: str) -> None:
+    """
+    Refuses an office document whose declared uncompressed size is implausible.
+
+    Reads only the archive's central directory — no member is decompressed.
+
+    Args:
+        path: The saved upload.
+        extension: Its lower-cased extension.
+
+    Raises:
+        HTTPException: 400 for a file that is not a valid archive, 413 for one
+            that would expand past the limit or holds too many members.
+    """
+    if extension not in _ZIP_EXTENSIONS:
+        return
+    try:
+        with zipfile.ZipFile(path) as archive:
+            members = archive.infolist()
+    except zipfile.BadZipFile:
+        raise HTTPException(
+            status_code=400, detail=f"The file is not a valid {extension} document."
+        ) from None
+    expanded = sum(member.file_size for member in members)
+    if len(members) > _MAX_ARCHIVE_MEMBERS or expanded > _max_expanded_bytes():
+        logger.warning(
+            "Rejected archive bomb",
+            extra={"members": len(members), "expanded_bytes": expanded},
+        )
+        raise HTTPException(
+            status_code=413,
+            detail="The document expands to more data than this service will process.",
+        )
 
 
 async def _save_upload(file: UploadFile, dest_path: str, max_bytes: int) -> int:
@@ -155,6 +209,7 @@ async def ingest_document(
     slot = acquire_pipeline_slot(client, count_toward_daily_cap=False)
     try:
         await _save_upload(file, temp_path, _max_upload_bytes())
+        _reject_archive_bomb(temp_path, extension)
         result = await index_document(
             temp_path,
             filename,
@@ -164,14 +219,17 @@ async def ingest_document(
             supersedes_doc_id=supersedes_doc_id,
         )
     except HTTPException:
+        metrics.INGESTS.inc(outcome="rejected")
         raise
     except IngestionError as e:
+        metrics.INGESTS.inc(outcome="rejected")
         logger.warning(
             "Document rejected",
             extra={"deal_id": deal_id, "file_name": filename, "reason": str(e)},
         )
         raise HTTPException(status_code=e.status_code, detail=str(e)) from None
     except Exception as e:
+        metrics.INGESTS.inc(outcome="error")
         # Internal detail (paths, Qdrant errors) stays in the log.
         logger.error(
             "Document ingestion failed",
@@ -191,6 +249,7 @@ async def ingest_document(
         slot.release()
         shutil.rmtree(temp_dir, ignore_errors=True)
 
+    metrics.INGESTS.inc(outcome="partial" if result["warnings"] else "indexed")
     doc_id = result["doc_id"]
 
     # Retire the superseded document's chunks so retrieval's is_current_version=1

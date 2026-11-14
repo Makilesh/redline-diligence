@@ -426,6 +426,75 @@ def test_stream_error_event_does_not_leak_exception_text(client, monkeypatch):
     assert security._gate.in_flight == 0
 
 
+class _RaisingGraph:
+    """A compiled-graph stand-in whose stream fails the way a real node does."""
+
+    checkpointer = None
+
+    async def astream(self, *args, **kwargs):
+        yield "updates", {"query_intelligence": {"agent_trace": [{"agent": "query_intelligence"}]}}
+        raise RuntimeError(SECRET_ERROR)
+
+    async def ainvoke(self, *args, **kwargs):
+        raise RuntimeError(SECRET_ERROR)
+
+
+def test_real_stream_path_does_not_leak_exception_text(client, monkeypatch):
+    # The test above stubs stream_query with a generator that raises, which the
+    # real one never does: it catches the pipeline's exception itself and
+    # yields an `error` event. That event used to carry str(e) and the route
+    # forwarded it verbatim, so the leak shipped under a green test. This drives
+    # the real stream_query over a graph that raises.
+    monkeypatch.setattr(api_main, "_app_graph", _RaisingGraph())
+    response = client.post("/api/v1/query/stream", json={"query": "q", "deal_id": DEMO_DEAL})
+
+    assert "event: error" in response.text
+    assert "10.0.0.7" not in response.text and "sk-live" not in response.text
+    error_frame = response.text.split("event: error\ndata: ", 1)[1].split("\n", 1)[0]
+    error = json.loads(error_frame)
+    assert error["code"] == "pipeline_error"
+    assert error["request_id"] == response.headers[security.REQUEST_ID_HEADER]
+    assert error["request_id"] in error["detail"]
+    assert security._gate.in_flight == 0
+
+    # Same graph through the blocking route: 500, generic, with the request id.
+    blocking = _ask(client)
+    assert blocking.status_code == 500
+    assert "10.0.0.7" not in blocking.text and "sk-live" not in blocking.text
+
+
+def test_recovered_errors_in_a_200_are_redacted_for_public_callers(client, monkeypatch):
+    # Agents record failures they recovered from in the trace and the flags;
+    # those fields are returned as-is, so exception text reached the browser
+    # inside a successful response.
+    async def run_with_recovered_failure(**kwargs):
+        return {
+            "generated_answer": "Revenue was $452.8 million; validation unavailable for one line.",
+            "status": "completed",
+            "hallucination_flags": [f"validation unavailable: RuntimeError: {SECRET_ERROR}"],
+            "claim_checks": [
+                {"claim": "Revenue was $452.8 million.", "reason": f"LLM judge failed ({SECRET_ERROR})"}
+            ],
+            "agent_trace": [{"agent": "hallucination_validator", "error": SECRET_ERROR}],
+        }
+
+    monkeypatch.setattr(query_routes, "run_query", run_with_recovered_failure)
+    monkeypatch.setenv("ADMIN_API_KEY", ADMIN_KEY)
+
+    public = _ask(client)
+    assert public.status_code == 200
+    assert "10.0.0.7" not in public.text and "sk-live" not in public.text
+    body = public.json()
+    assert body["hallucination_flags"] == ["validation unavailable"]
+    assert body["claim_checks"][0]["reason"] == "LLM judge failed"
+    assert body["claim_checks"][0]["claim"] == "Revenue was $452.8 million."
+    # Document-derived text is never rewritten, even when it contains the phrase.
+    assert body["answer"].endswith("validation unavailable for one line.")
+
+    admin = _ask(client, headers={security.ADMIN_HEADER: ADMIN_KEY}).json()
+    assert admin["agent_trace"][0]["error"] == SECRET_ERROR
+
+
 def test_purge_errors_do_not_leak_exception_text(client, fake_qdrant):
     sandbox = _sandbox_id(datetime.now(timezone.utc))
     fake_qdrant.fail_delete = True
@@ -491,16 +560,25 @@ def test_get_deal_resolves_indexed_deals_not_in_memory(client, fake_qdrant):
 
 
 def test_health_is_static(client, monkeypatch):
+    # Liveness: 200 with the two original keys even when nothing is initialised
+    # and Qdrant is unreachable. The extra keys are in-process state only; what
+    # they report is covered in tests/test_platform_health.py.
     monkeypatch.setattr(api_main, "_app_graph", None)
+    monkeypatch.setattr(qdrant_module, "get_qdrant_client", lambda: 1 / 0)
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "healthy", "service": "manda-rag"}
+    body = response.json()
+    assert body["status"] == "healthy" and body["service"] == "manda-rag"
 
 
 def test_ready_reports_graph_and_qdrant(client, fake_qdrant, monkeypatch):
     ready = client.get("/ready")
     assert ready.status_code == 200
-    assert ready.json()["checks"] == {"graph_compiled": True, "qdrant_reachable": True}
+    assert ready.json()["checks"] == {
+        "graph_compiled": True,
+        "qdrant_reachable": True,
+        "accepting_queries": True,
+    }
 
     fake_qdrant.reachable = False
     assert client.get("/ready").status_code == 503

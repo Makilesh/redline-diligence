@@ -40,6 +40,17 @@ class QueryResponse(BaseModel):
     context_quality_score: float = Field(
         0.0, description="Best context quality score achieved across retrieval attempts"
     )
+    node_timings: list[dict] = Field(
+        default_factory=list,
+        description=(
+            "One row per node execution, in order: agent, duration_ms, llm_calls, "
+            "prompt_tokens, completion_tokens, models"
+        ),
+    )
+    llm_calls: int = Field(0, description="Completed LLM calls this query made, all nodes")
+    request_id: str = Field(
+        "", description="Correlation id of the request, also sent as X-Request-ID"
+    )
 
 
 class IngestResponse(BaseModel):
