@@ -20,9 +20,14 @@ Payload fields written per child chunk (see _child_payload):
     table_representation (converter tables only), parent_chunk_id (prose only),
     chunk_index, token_count, is_current_version, contains_pii, risk_signals,
     risk_decisions, pii_source, pii_confidence, supersedes_doc_id,
-    superseded_by, is_redline, plus format extras (sheet_name, currency,
-    scale_factor, scale_label, slide_number, page_range, metrics,
+    superseded_by, is_redline, context_header, plus format extras (sheet_name,
+    currency, scale_factor, scale_label, slide_number, page_range, metrics,
     redline_base_doc_id).
+
+`text` is always the exact source text. `context_header` ("Document: ... /
+Section: ...", see chunk_context.py; written only when CHUNK_CONTEXT_HEADERS
+is on) is joined to it only to compute the dense and BM25 vectors, so nothing
+downstream can quote or ground a figure on words the document did not contain.
 
 risk_signals stays a list of type strings (what filters and the dashboard
 read). risk_decisions records how each was decided — {type: {"source":
@@ -45,12 +50,25 @@ from typing import Any, Awaitable, Callable
 
 import numpy as np
 
+from src.data_processing.chunk_context import (
+    build_context_header,
+    context_headers_enabled,
+    document_title,
+    embedding_text,
+)
 from src.data_processing.document_classifier import DocumentClassifier
+from src.data_processing.errors import (  # noqa: F401  (re-exported)
+    DocumentExtractionError,
+    IngestionError,
+    NoExtractableContentError,
+    UnsafeDocumentError,
+    UnsupportedFileTypeError,
+)
 from src.data_processing.excel_normalizer import ExcelNormalizer
 from src.data_processing.financial_table_converter import (
     FinancialTableConverter,
-    frame_from_rows,
     representation_content_type,
+    table_from_rows,
 )
 from src.data_processing.pii_detector import PIIDetector
 from src.data_processing.risk_signal_extractor import RiskSignalExtractor
@@ -100,45 +118,19 @@ _PASSTHROUGH_KEYS = (
     "table_representation",
     "metrics",
     "redline_base_doc_id",
+    # Row-by-row table chunks only: the machine-readable rows the Financial
+    # Verifier's registry reads (shape in financial_table_converter.
+    # structured_rows). They were built and then dropped here, so the
+    # cross-source check saw no figure from any PDF/DOCX/PPTX/XLSX table.
+    "structured_rows",
+    "table_row_range",
+    "table_row_count",
+    # "hidden" / "veryHidden" for a chunk from a hidden worksheet.
+    "sheet_state",
 )
 
 EmbedFn = Callable[[list[str]], Awaitable[Any]]
 SparseFn = Callable[[list[str]], list]
-
-
-# ==============================================================================
-# Errors — messages are safe to return to an API client
-# ==============================================================================
-
-
-class IngestionError(Exception):
-    """An ingestion failure whose message is safe to show a client."""
-
-    status_code = 422
-
-
-class UnsupportedFileTypeError(IngestionError):
-    """The file extension is not one the pipeline can process."""
-
-    status_code = 400
-
-
-class UnsafeDocumentError(IngestionError):
-    """The file exceeds a safety limit (e.g. a decompression bomb)."""
-
-    status_code = 413
-
-
-class DocumentExtractionError(IngestionError):
-    """The file could not be parsed as the format its extension claims."""
-
-    status_code = 422
-
-
-class NoExtractableContentError(IngestionError):
-    """Parsing succeeded but produced nothing to index."""
-
-    status_code = 422
 
 
 # ==============================================================================
@@ -351,6 +343,8 @@ def _table_sections(
     page_number: int | None,
     table_id: str,
     extra: dict | None = None,
+    caption: str = "",
+    notes: list[str] | None = None,
 ) -> list[dict]:
     """
     Turns one table into sections sharing a table_id.
@@ -367,6 +361,10 @@ def _table_sections(
         page_number: Page (or slide) number, None when the format has none.
         table_id: Identifier shared by every representation.
         extra: Additional section keys (slide_number, page_range, ...).
+        caption: Text printed next to the table but outside its grid — a
+            statement's "(in thousands, except per share data)" line. Read for
+            the unit and kept at the top of every representation.
+        notes: Footnotes belonging to the table, kept under the grid.
 
     Returns:
         List of section dicts.
@@ -380,20 +378,23 @@ def _table_sections(
         "table_id": table_id,
         **extra,
     }
+    prefix = "\n".join(part for part in (heading, caption) if part)
+    prefix = f"{prefix}\n" if prefix else ""
 
-    table_df = frame_from_rows(rows[0], rows[1:]) if rows and len(rows) >= 2 else None
-    if table_df is None:
+    table = table_from_rows(rows[0], rows[1:]) if rows and len(rows) >= 2 else None
+    if table is None:
         if not fallback_text.strip():
             return []
-        return [{**base, "text": fallback_text, "content_type": "table_text"}]
+        text = fallback_text if not caption or caption in fallback_text else f"{caption}\n{fallback_text}"
+        return [{**base, "text": text, "content_type": "table_text"}]
 
-    meta = ExcelNormalizer().detect_scale([str(c) for c in rows[0]] + [heading])
+    table.notes = list(notes or [])
+    meta = ExcelNormalizer().detect_scale([str(c) for c in rows[0]] + [heading, caption])
     representations = FinancialTableConverter().generate_all_representations(
-        df=table_df, meta=meta, table_id=table_id, source_metadata={},
+        df=table, meta=meta, table_id=table_id, source_metadata={},
     )
 
     sections = []
-    prefix = f"{heading}\n" if heading else ""
     for rep in representations:
         rep_type = rep["table_representation"]
         if rep_type == "metrics_summary" and not rep.get("metrics"):
@@ -406,9 +407,12 @@ def _table_sections(
             "currency": meta.currency,
             "scale_factor": meta.scale_factor,
             "scale_label": meta.scale_label,
+            "table_row_range": rep["table_row_range"],
+            "table_row_count": rep["table_row_count"],
         }
-        if rep.get("metrics"):
-            section["metrics"] = rep["metrics"]
+        for key in ("metrics", "structured_rows"):
+            if rep.get(key):
+                section[key] = rep[key]
         sections.append(section)
     return sections
 
@@ -524,6 +528,7 @@ def extract_sections(
             f"Sheet '{f['sheet_name']}' could not be processed"
             for f in processor.failed_sheets
         )
+        warnings.extend(processor.warnings)
 
     elif extension == ".txt":
         with open(file_path, "r", encoding="utf-8-sig", errors="replace") as f:
@@ -536,6 +541,7 @@ def extract_sections(
                     heading=s["section_heading"],
                     page_number=None,
                     table_id=next_table_id(),
+                    extra={"heading_path": s["heading_path"]},
                 ))
             else:
                 sections.append(s)
@@ -559,6 +565,7 @@ def _child_payload(
     risk_decisions: dict[str, dict] | None = None,
     pii_source: str = "regex",
     pii_confidence: float | None = None,
+    title: str = "",
 ) -> dict:
     """
     Builds the Qdrant payload for one child chunk.
@@ -576,6 +583,7 @@ def _child_payload(
         risk_decisions: How each risk signal was decided (see module docstring).
         pii_source: "regex" or "regex+laya".
         pii_confidence: Laya's P(PII) when it was consulted.
+        title: Document title for the context header.
 
     Returns:
         Payload dict.
@@ -613,6 +621,17 @@ def _child_payload(
     for key in _PASSTHROUGH_KEYS:
         if meta.get(key) is not None:
             payload[key] = meta[key]
+    if context_headers_enabled():
+        slide = meta.get("slide_number")
+        locator = f"Slide {slide}" if slide else ""
+        if meta.get("sheet_state"):
+            locator = "hidden sheet"
+        payload["context_header"] = build_context_header(
+            doc.filename,
+            title=title,
+            heading_path=meta.get("heading_path") or [chunk.section_heading or ""],
+            locator=locator,
+        )
     return payload
 
 
@@ -759,6 +778,7 @@ def extract_and_chunk(
     if not sections:
         raise NoExtractableContentError("No text could be extracted from the document")
 
+    title = document_title(sections)
     structural_chunks = StructuralChunker().chunk(sections)
     children, parents = SemanticChunker().chunk_with_parents(
         structural_chunks, parent_target_tokens=DEFAULT_PARENT_TARGET_TOKENS
@@ -846,6 +866,7 @@ def extract_and_chunk(
             risk_decisions=risk_decisions,
             pii_source=pii.source,
             pii_confidence=pii.laya_probability,
+            title=title,
         ))
 
     for j, parent in enumerate(parents):
@@ -991,7 +1012,9 @@ async def index_document(
         supersedes_doc_id=supersedes_doc_id,
     )
 
-    texts = [c["text"] for c in doc.chunks]
+    # Vectors are computed over header + text (see chunk_context.py); the
+    # payload keeps the source text alone.
+    texts = [embedding_text(c) for c in doc.chunks]
     dense = np.asarray(await embed_fn(texts), dtype=np.float32)
     sparse = await asyncio.to_thread(sparse_fn, texts)
 

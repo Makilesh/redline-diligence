@@ -217,6 +217,15 @@ class NumericalRegistry:
                 period = _PERIOD.search(str(col))
                 raw_str = repr(raw)
                 decimals = len(raw_str.split(".")[1]) if "." in raw_str and not raw_str.endswith(".0") else 0
+                # Converter rows state the printed precision and whether the
+                # cell is a percentage or a multiple; without the kind a "61.5%"
+                # row would be compared with a text table's as a currency amount.
+                if isinstance(cell.get("decimals"), int):
+                    decimals = cell["decimals"]
+                kind = cell.get("kind") if cell.get("kind") in ("percent", "multiple") else "currency"
+                # The converter also names the period: "FY2023 Budget" must not
+                # be read as FY2023 and reported as contradicting the actuals.
+                stated_period = cell.get("period") if isinstance(cell.get("period"), str) else ""
                 self.register(NumericalEntry(
                     metric_name=label,
                     raw_value=raw,
@@ -225,10 +234,18 @@ class NumericalRegistry:
                     scale_factor=float(cell.get("scale_factor", 1.0) or 1.0),
                     source_file=source,
                     page_number=page,
-                    fiscal_year=normalize_period(period.group(0)) if period else "",
+                    fiscal_year=stated_period or (
+                        normalize_period(period.group(0)) if period else ""
+                    ),
+                    kind=kind,
                     decimals=decimals,
                     scale_known=True,
-                    raw_text=f"{label} {col}={raw}",
+                    # Two spaces before the value: find_inconsistencies reports
+                    # what follows them as the figure "as printed".
+                    raw_text=(
+                        f"{label}  {cell['raw']}" if isinstance(cell.get("raw"), str)
+                        else f"{label} {col}={raw}"
+                    ),
                 ))
 
         if chunk.get("metric_name") and chunk.get("normalized_value") is not None:

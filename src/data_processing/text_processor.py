@@ -125,7 +125,9 @@ def parse_text_sections(text: str) -> list[dict]:
         text: Full document text.
 
     Returns:
-        List of section dicts with text, section_heading, section_type
+        List of section dicts with text, section_heading (the most specific
+        heading), heading_path (outermost first, e.g. ["ARTICLE VIII —
+        INDEMNIFICATION", "Section 8.2 — Indemnification Cap"]), section_type
         ("text" | "table"), is_table and page_number=None.
     """
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
@@ -142,6 +144,9 @@ def parse_text_sections(text: str) -> list[dict]:
     def current_heading() -> str:
         return level2 or level1
 
+    def heading_path() -> list[str]:
+        return [h for h in (level1, level2) if h]
+
     def flush_body() -> None:
         nonlocal body_lines, pending_heading_lines
         body = "\n".join(body_lines).strip()
@@ -150,6 +155,7 @@ def parse_text_sections(text: str) -> list[dict]:
             sections.append({
                 "text": "\n".join(text_parts).strip(),
                 "section_heading": current_heading(),
+                "heading_path": heading_path(),
                 "section_type": "text",
                 "is_table": False,
                 "page_number": None,
@@ -172,6 +178,7 @@ def parse_text_sections(text: str) -> list[dict]:
             sections.append({
                 "text": prefix + table_text,
                 "section_heading": heading,
+                "heading_path": heading_path(),
                 "section_type": "table",
                 "is_table": True,
                 "page_number": None,
@@ -267,6 +274,7 @@ def parse_text_sections(text: str) -> list[dict]:
         sections.append({
             "text": "\n".join(pending_heading_lines),
             "section_heading": current_heading(),
+            "heading_path": heading_path(),
             "section_type": "text",
             "is_table": False,
             "page_number": None,

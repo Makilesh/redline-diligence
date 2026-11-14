@@ -23,11 +23,34 @@ from src.utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 # ─── Scale detection patterns (from p4.md spec) ──────────────────────────────
+# Checked in this order, first match wins. Abbreviations are anchored to a
+# currency sign or code: a bare "MM\b" also matched the end of "Telecomm" and
+# "m"/"k" alone would match almost any header.
+_CCY = r"(?:\$|€|£|¥|₹|\b(?:usd|eur|gbp|cad|aud|chf|jpy|inr|cny))"
 SCALE_PATTERNS: dict[str, float] = {
-    r'in\s+thousands?|\$000s?|×\s*1[,.]?000(?!\s*,?000)': 1_000.0,
-    r'in\s+millions?|\$M\b|MM\b|×\s*1[,.]?000[,.]?000': 1_000_000.0,
-    r'in\s+billions?|\$B\b|×\s*1[,.]?000[,.]?000[,.]?000': 1_000_000_000.0,
+    rf"in\s+thousands?|\(\s*thousands\s*\)|{_CCY}\s*0{{3}}s?\b|\b0{{3}}s\b|\(\s*0{{3}}'?s?\s*\)"
+    rf"|{_CCY}\s*(?:k|thousands?)\b|×\s*1[,.]?000(?!\s*[,.]?000)": 1_000.0,
+    rf"in\s+millions?|\(\s*millions\s*\)|{_CCY}\s*(?:mm?|mn|millions?)\b|\bmm\b"
+    rf"|×\s*1[,.]?000[,.]?000(?!\s*[,.]?000)": 1_000_000.0,
+    rf"in\s+billions?|\(\s*billions\s*\)|{_CCY}\s*(?:bn?|billions?)\b"
+    rf"|×\s*1[,.]?000[,.]?000[,.]?000": 1_000_000_000.0,
 }
+
+# Currency markers, most specific first. Codes are matched as whole words:
+# a substring test read "Audited" as AUD, "Europe" as EUR and "Cadence" as CAD.
+_CURRENCY_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"c\$|\bcad\b", "CAD"),
+    (r"a\$|\baud\b", "AUD"),
+    (r"hk\$|\bhkd\b", "HKD"),
+    (r"s\$|\bsgd\b", "SGD"),
+    (r"\$|\busd\b|\bus dollars?\b", "USD"),
+    (r"€|\beur\b|\beuros?\b", "EUR"),
+    (r"£|\bgbp\b|\bsterling\b", "GBP"),
+    (r"¥|\bjpy\b|\byen\b", "JPY"),
+    (r"\bchf\b", "CHF"),
+    (r"₹|\binr\b", "INR"),
+    (r"\bcny\b|\brmb\b|元", "CNY"),
+)
 
 
 @dataclass
@@ -77,8 +100,19 @@ class ExcelNormalizer:
 
         combined = " ".join(str(c) for c in header_cells if c is not None).lower()
 
+        # The scale stated FIRST is the table's. Apple's 10-K caption reads "(In
+        # millions, except number of shares, which are reflected in thousands,
+        # and per-share amounts)": taking patterns in dictionary order found
+        # "in thousands" and made every amount a thousand times too small.
+        found = [
+            (match.start(), pattern)
+            for pattern in SCALE_PATTERNS
+            if (match := re.search(pattern, combined, re.IGNORECASE))
+        ]
+        first = min(found)[1] if found else None
+
         for pattern, factor in SCALE_PATTERNS.items():
-            if re.search(pattern, combined, re.IGNORECASE):
+            if pattern == first:
                 label = {
                     1_000.0: "thousands",
                     1_000_000.0: "millions",
@@ -126,24 +160,10 @@ class ExcelNormalizer:
         Returns:
             ISO 4217 currency code string.
         """
-        if "$" in text or "usd" in text.lower():
-            return "USD"
-        if "€" in text or "eur" in text.lower():
-            return "EUR"
-        if "£" in text or "gbp" in text.lower():
-            return "GBP"
-        if "cad" in text.lower() or "c$" in text:
-            return "CAD"
-        if "aud" in text.lower() or "a$" in text:
-            return "AUD"
-        if "¥" in text or "jpy" in text.lower():
-            return "JPY"
-        if "chf" in text.lower():
-            return "CHF"
-        if "₹" in text or "inr" in text.lower():
-            return "INR"
-        if "cny" in text.lower() or "rmb" in text.lower() or "元" in text:
-            return "CNY"
+        lowered = text.lower()
+        for pattern, code in _CURRENCY_PATTERNS:
+            if re.search(pattern, lowered):
+                return code
         # Return UNKNOWN instead of silently assuming USD.
         # The Financial Verifier will flag UNKNOWN currencies for analyst review
         # rather than producing silent misclassification in cross-border deals.

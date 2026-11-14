@@ -15,7 +15,8 @@ Strategy:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
 import pdfplumber
@@ -41,6 +42,8 @@ class ExtractedTable:
     page_number: int
     col_count: int
     has_header: bool = True
+    # (x0, top, x1, bottom) in PDF points from the page's top-left corner.
+    bbox: tuple[float, float, float, float] | None = None
 
 
 @dataclass
@@ -50,6 +53,9 @@ class StitchedTable:
     headers: list[str]
     page_range: list[int]
     sheet_name_equivalent: str = ""
+    # One (page_number, bbox) per page fragment, so the caller can tell which
+    # text on a page is already inside this table.
+    regions: list[tuple[int, tuple[float, float, float, float]]] = field(default_factory=list)
 
 
 class MultiPageTableStitcher:
@@ -111,6 +117,7 @@ class MultiPageTableStitcher:
                 "headers": table.headers,
                 "page_range": table.page_range,
                 "sheet_name_equivalent": table.sheet_name_equivalent,
+                "regions": table.regions,
             }
             for table in stitched
         ]
@@ -141,17 +148,18 @@ class MultiPageTableStitcher:
             with pdfplumber.open(pdf_path) as pdf:
                 for page_idx, page in enumerate(pdf.pages):
                     page_number = page_idx + 1
-                    tables = page.extract_tables()
+                    # find_tables() rather than extract_tables(): the same
+                    # tables, plus where each one sits on the page.
+                    found = sorted(page.find_tables(), key=lambda t: (t.bbox[1], t.bbox[0]))
 
-                    if not tables:
-                        continue
-
-                    for table_data in tables:
+                    for table in found:
+                        table_data = table.extract()
                         if not table_data or len(table_data) < 1:
                             continue
 
                         extracted = self._parse_raw_table(table_data, page_number)
                         if extracted is not None:
+                            extracted.bbox = tuple(table.bbox)
                             all_tables.append(extracted)
 
         except FileNotFoundError:
@@ -191,9 +199,10 @@ class MultiPageTableStitcher:
         if len(raw_table) < 2:
             return None
 
-        # Clean cells: replace None with empty strings for comparison
+        # Clean cells: None -> "", and a cell wrapped over several lines
+        # ("Year Ended\nDecember 31, 2023") back onto one.
         cleaned = [
-            [cell.strip() if cell else "" for cell in row]
+            [" ".join(cell.split()) if cell else "" for cell in row]
             for row in raw_table
         ]
 
@@ -204,6 +213,21 @@ class MultiPageTableStitcher:
         if has_header:
             headers = first_row
             data_rows = cleaned[1:]
+            # A second header row — the years under "Year Ended December 31,",
+            # or "Actual | Budget" under a spanning "FY2023" — has no row label
+            # and no amount. Fold it into the first so each column keeps both.
+            if len(data_rows) >= 2 and not data_rows[0][0] and self._is_header_row(data_rows[0]) \
+                    and sum(1 for c in data_rows[0] if c) >= 2:
+                top, sub = list(headers), data_rows[0]
+                for c in range(2, min(len(top), len(sub))):
+                    if not top[c] and sub[c]:
+                        top[c] = top[c - 1]  # a spanning cell is reported once
+                headers = [
+                    " ".join(part for part in (top[c], sub[c] if c < len(sub) else "") if part)
+                    if c else top[0]
+                    for c in range(len(top))
+                ]
+                data_rows = data_rows[1:]
         else:
             headers = []
             data_rows = cleaned
@@ -218,10 +242,23 @@ class MultiPageTableStitcher:
             has_header=has_header,
         )
 
+    # A cell that is a value: an amount (with sign, currency, parentheses or
+    # thousands separators), a percentage or a multiple. A bare year is NOT
+    # one — "2023 | 2022 | 2021" is the commonest header a statement has.
+    _VALUE_CELL = re.compile(r"^[\s$€£¥₹(\-−–+]*\d[\d,]*\.?\d*\s*[%xX×]?\s*\)?$")
+    _YEAR_CELL = re.compile(r"^(?:FY\s?)?(?:19|20)\d{2}[AEFP]?$", re.IGNORECASE)
+
     def _is_header_row(self, row: list[str]) -> bool:
         """
-        Heuristic: a row is a header if most cells are non-empty and
-        predominantly non-numeric text.
+        Heuristic: a row is a header when it has text and none of its cells is
+        a value. A data row carries at least one amount; a header carries
+        labels and periods.
+
+        The old test ("fewer than half the cells are numeric") failed both
+        ways: a "2023 | 2022" header counted as numeric and was dropped, and a
+        continuation row "Other | (2.6) | (1.9)" did not — parentheses were not
+        numeric — so a page-two fragment starting with it became a new table
+        with a data row for a header.
 
         Args:
             row: List of cell values.
@@ -229,22 +266,13 @@ class MultiPageTableStitcher:
         Returns:
             True if the row appears to be a header row.
         """
-        if not row:
-            return False
-
-        non_empty = [cell for cell in row if cell.strip()]
+        non_empty = [cell.strip() for cell in row if cell and cell.strip()]
         if not non_empty:
             return False
-
-        # Count cells that are purely numeric (possibly with commas, decimals, $)
-        numeric_pattern = r'^[\s$€£¥₹]*[-+]?[\d,]+\.?\d*%?\s*$'
-        numeric_count = sum(
-            1 for cell in non_empty
-            if __import__("re").match(numeric_pattern, cell)
+        return not any(
+            self._VALUE_CELL.match(cell) and not self._YEAR_CELL.match(cell)
+            for cell in non_empty
         )
-
-        # If less than half are numeric, it's likely a header
-        return numeric_count < len(non_empty) / 2
 
     def _stitch_tables(self, tables: list[ExtractedTable]) -> list[StitchedTable]:
         """
@@ -270,6 +298,7 @@ class MultiPageTableStitcher:
                     headers=list(table.headers),
                     page_range=[table.page_number, table.page_number],
                     sheet_name_equivalent=self._infer_table_name(table.headers),
+                    regions=[(table.page_number, table.bbox)] if table.bbox else [],
                 )
                 continue
 
@@ -278,6 +307,8 @@ class MultiPageTableStitcher:
                 # Stitch: append rows and extend page range
                 current.rows.extend(table.rows)
                 current.page_range[1] = table.page_number
+                if table.bbox:
+                    current.regions.append((table.page_number, table.bbox))
                 logger.debug(
                     "Stitched continuation table",
                     extra={
@@ -293,6 +324,7 @@ class MultiPageTableStitcher:
                     headers=list(table.headers),
                     page_range=[table.page_number, table.page_number],
                     sheet_name_equivalent=self._infer_table_name(table.headers),
+                    regions=[(table.page_number, table.bbox)] if table.bbox else [],
                 )
 
         # Don't forget the last one
