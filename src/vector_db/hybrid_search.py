@@ -10,7 +10,9 @@ There is NO third "metadata retrieval channel" via scroll.
 """
 
 import asyncio
+import re
 import time
+import unicodedata
 
 from fastembed import SparseTextEmbedding
 from qdrant_client import AsyncQdrantClient
@@ -54,9 +56,67 @@ def _get_bm25_model() -> SparseTextEmbedding:
     return _bm25_model
 
 
+# Version of the text normalisation applied before BM25 encoding. Stored on
+# every child point as `sparse_encoding` so that vectors written by an older
+# encoding can be found: a query encoded one way does not match a document
+# encoded another, and nothing else would say so.
+#   1 (or absent)  raw text through FastEmbed 0.3 — case-sensitive
+#   2              normalize_for_bm25
+SPARSE_ENCODING_VERSION = 2
+
+_THOUSANDS_SEPARATOR = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
+# A number keeps its decimal / section dots ("452.8", "8.1"); a word is a run of
+# letters and digits that starts with a letter ("fy2023", "q3"). Everything else
+# separates tokens.
+_BM25_TOKEN = re.compile(r"\d+(?:\.\d+)*|[^\W\d_][^\W_]*")
+
+
+def normalize_for_bm25(text: str) -> str:
+    """
+    Normalises text into the tokens BM25 should match on, for documents and
+    queries alike.
+
+    FastEmbed 0.3 (the pinned range) feeds text to an NLTK-style word tokenizer
+    and never lower-cases it, so on its own:
+      - "Revenue" and "revenue" are different terms, and "What"/"The" survive
+        the (lower-case) stopword list — "What is the Revenue and EBITDA?" shares
+        no term with "revenue and ebitda were strong";
+      - a sentence-final period stays on the word unless it ends the whole text
+        ("FY2023.", "months."), because the tokenizer expects one sentence;
+      - "$452.8M", "7.5x", "EV/EBITDA" and "change-of-control" are single terms,
+        so "452.8", "EBITDA" or "change of control" in a question miss them.
+    Figures and defined terms are what a diligence question keys on, so the
+    text is reduced to plain tokens here, independently of the FastEmbed version
+    (0.4+ lower-cases by itself; lower-casing twice changes nothing).
+
+    Measured on the retrieval eval, sparse channel alone (35 questions): fact
+    coverage@10 73.1% -> 94.3% (paired bootstrap 95% CI +10.1 to +34.0 points,
+    10 questions improved, none regressed), recall@10 46.6% -> 77.3%. All of
+    that comes from lower-casing. The punctuation and unit handling cannot be
+    told apart from lower-casing alone on that set (every interval includes
+    zero); it is here for the term mismatches listed above, which are
+    deterministic and each pinned by a test.
+
+    Lower-cases (after NFKC), drops thousands separators, and splits on
+    everything that is not a letter or digit, except dots between digits. A
+    number is split from a unit glued to it ("452.8m" -> "452.8 m", "280g" ->
+    "280 g"). Stopwords and stemming are still FastEmbed's.
+
+    Args:
+        text: Chunk text or query.
+
+    Returns:
+        Space-separated tokens (may be empty if the text has no letters or digits).
+    """
+    text = unicodedata.normalize("NFKC", text).lower()
+    text = _THOUSANDS_SEPARATOR.sub("", text)
+    return " ".join(_BM25_TOKEN.findall(text))
+
+
 def compute_sparse_bm25(text: str) -> SparseVector:
     """
-    Computes BM25 sparse vector for a text string.
+    Computes BM25 sparse vector for a text string (document or query), after
+    normalize_for_bm25.
     FastEmbed returns embeddings as objects with .indices and .values arrays.
     These must be converted to lists before passing to Qdrant.
 
@@ -76,7 +136,7 @@ def compute_sparse_bm25(text: str) -> SparseVector:
         raise ValueError("Cannot compute BM25 for empty text")
 
     model = _get_bm25_model()
-    embeddings = list(model.embed([text]))
+    embeddings = list(model.embed([normalize_for_bm25(text)]))
     return SparseVector(
         indices=embeddings[0].indices.tolist(),
         values=embeddings[0].values.tolist(),
@@ -111,7 +171,7 @@ def compute_sparse_bm25_batch(texts: list[str], batch_size: int = 64) -> list[Sp
     model = _get_bm25_model()
     return [
         SparseVector(indices=e.indices.tolist(), values=e.values.tolist())
-        for e in model.embed(texts, batch_size=batch_size)
+        for e in model.embed([normalize_for_bm25(t) for t in texts], batch_size=batch_size)
     ]
 
 
@@ -125,14 +185,16 @@ VALID_DOCUMENT_CATEGORIES = frozenset({
 })
 
 # Payload fields a query may narrow on. Everything else in metadata_filters is
-# dropped: the dict is largely LLM-authored (Agent 1 / Agent 6), and a key that
-# is not on the payload (fiscal_year, currency) would silently match nothing.
-ALLOWED_FILTER_KEYS = frozenset({
-    "document_category",
-    "is_table",
-    "content_type",
-    "doc_id",
-})
+# dropped: the dict is LLM-authored (Agent 1 / Agent 6), and a key that is not
+# on the payload (fiscal_year, currency) would silently match nothing.
+#
+# Only document_category. doc_id, content_type and is_table used to be accepted
+# as well, but nothing except model output ever supplied them, and each is a
+# hard filter: a model that echoed a doc_id or "is_table": 1 confined every
+# search of the request to it, and the rewrite loop cannot remove a key it is
+# not allowed to set. A trusted caller that needs to scope a search to one
+# document should get its own argument, as include_superseded did.
+ALLOWED_FILTER_KEYS = frozenset({"document_category"})
 
 
 def _valid_filter_value(key: str, value) -> bool:
@@ -150,10 +212,8 @@ def _valid_filter_value(key: str, value) -> bool:
     if not values:
         return False
     if key == "document_category":
-        return all(v in VALID_DOCUMENT_CATEGORIES for v in values)
-    if key == "is_table":
-        return all(v in (0, 1) and not isinstance(v, float) for v in values)
-    return all(isinstance(v, str) and v for v in values)
+        return all(isinstance(v, str) and v in VALID_DOCUMENT_CATEGORIES for v in values)
+    return False
 
 
 def _build_filter(
@@ -197,7 +257,8 @@ def _build_filter(
     # NOTE: Use .get() on a shallow copy — NOT .pop() on the original dict.
     # _build_filter() is called once per query expansion via asyncio.gather().
     # .pop() on the shared dict would consume include_pii on the first call.
-    local_filters = dict(metadata_filters)  # shallow copy — never mutate caller's dict
+    # A model can return null or a list where the filters object belongs.
+    local_filters = dict(metadata_filters) if isinstance(metadata_filters, dict) else {}
     include_pii = local_filters.pop("include_pii", False)
     if not include_pii:
         conditions.append(
@@ -211,9 +272,6 @@ def _build_filter(
         if key not in ALLOWED_FILTER_KEYS or not _valid_filter_value(key, value):
             dropped.append(key)
             continue
-        if key == "is_table":
-            # Stored as integer 0/1; a JSON `true` would never match it.
-            value = [int(v) for v in value] if isinstance(value, list) else int(value)
         if isinstance(value, list):
             conditions.append(
                 FieldCondition(key=key, match=MatchAny(any=value))
