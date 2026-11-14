@@ -137,14 +137,24 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f api cadd
 ```
 
 The first build downloads CPU PyTorch and bakes the embedding, reranker and NLI
-weights into the image — 20–30 minutes on 2 ARM cores. The API then needs a few
-more minutes to load the models; Caddy waits for its health check. When it is
-up:
+weights into the image — 20–30 minutes on 2 ARM cores. On ARM it also compiles
+one small C extension (PyStemmer, which has no aarch64 wheel for the pinned
+FastEmbed); that step has its own timeouts and prints "building from source".
+A build that stops making progress for more than a few minutes is a fault, not
+patience — the network fetches in the Dockerfile are all bounded. The model
+layers come before the code, so a later `git pull && up -d --build` that only
+changes Python files rebuilds in seconds instead of re-downloading ~5GB.
+
+The API then needs a few more minutes to load the models; Caddy waits for its
+health check. When it is up:
 
 ```bash
 curl https://<name>.duckdns.org/health
-curl https://<name>.duckdns.org/ready    # 200 once Qdrant and the graph are ready
+curl -H "X-Admin-Key: $ADMIN_API_KEY" https://<name>.duckdns.org/ready
 ```
+
+`/ready` is 200 once Qdrant and the graph are ready; check that its
+`degraded` list is empty and `checkpointer.durable` is true.
 
 ## 7 · Seed the demo data room
 
@@ -283,10 +293,70 @@ multiply capacity and rotation drains one key per model before stepping down a
 rung, the way to push that ceiling out is more keys in `GEMINI_API_KEYS`, not a
 different host.
 
+**One key per Google Cloud project.** Gemini's free-tier quota belongs to the
+project, not to the key: two keys created in the same project share one
+quota, and listing both only makes the engine believe it has twice the
+capacity it has. Create each key in its own project. A key that answers 401
+(revoked, or created in a project without the API enabled) is retired for the
+process; remove it from `GEMINI_API_KEYS` rather than leaving it to be retried
+on every restart.
+
+---
+
+## Operating the service
+
+**One worker, by design.** Rate limits, the concurrency gate, the daily query
+cap, the sandbox registry and the model-routing state (cooldowns, failure
+classification, token-per-minute metering) all live in the API process. A
+second worker would double every limit and load a second copy of every model.
+`run_api.py` and the app's startup refuse a worker count above one
+(`WEB_CONCURRENCY`, `--workers`) unless `ALLOW_MULTIPLE_WORKERS=1` is set, in
+which case `/health` reports it as degraded. Scale with `MAX_CONCURRENT_PIPELINES`
+and a bigger host, not with processes.
+
+**Health, readiness, metrics.**
+
+| Endpoint | What it says | Fails when |
+|---|---|---|
+| `GET /health` | Liveness, plus `phase`, `checkpointer` and every active `degraded` mode | Never, while the process serves |
+| `GET /ready` | Graph compiled, Qdrant answering, not draining — plus the Qdrant backend, stale-BM25 count, checkpointer durability and each model's load state | Any hard check is false (503) |
+| `GET /metrics` | Prometheus text (`?format=json` for JSON with p50/p95): query outcomes, per-node latency, LLM calls and tokens per node, in-flight pipelines | Admin key required unless `METRICS_PUBLIC=1` |
+
+A degraded mode is a fallback the process is running on — in-memory
+checkpoints, a model whose warmup failed, chunks indexed under an old BM25
+encoding, more than one worker, a wildcard CORS origin. Each is logged once at
+ERROR as `DEGRADED_MODE` and listed by reason in `/health` and, with an
+explanation, in `/ready`. In production `REQUIRE_DURABLE_CHECKPOINTS=1` turns
+the most common one — Postgres unreachable — into a failed start instead.
+
+**Per-query timings.** Every response carries `node_timings` (one row per
+node: `duration_ms`, `llm_calls`, tokens, models) and `llm_calls`; each node
+also logs a `Node completed` line. To compare two builds, run the same
+questions against each and diff `GET /metrics?format=json` →
+`redline_node_duration_seconds`.
+
+**Lifecycle.** A query whose client disconnects is cancelled (no further LLM
+calls are made for it). A query that runs past `QUERY_TIMEOUT_SECONDS`
+(default 900; longer when `SYNTHESIS_MODEL_PIN` is set) ends with 504, or an
+SSE `error` event with `code: "timeout"`. On SIGTERM the process stops
+accepting new queries (503, `/ready` 503) and gives in-flight ones
+`SHUTDOWN_GRACE_SECONDS` (25) to finish.
+
+**Checkpoints.** A run's checkpoints are deleted when it completes; those of
+failed or timed-out runs are kept for `CHECKPOINT_TTL_SECONDS` (24h) for
+diagnosis, and a deal's are deleted with the deal.
+
+**Who can read what.** Anonymous callers may query and browse only the deals
+in `PUBLIC_DEAL_IDS` (default `aurora_vertex_2024`) and their own sandbox
+deals; any other deal answers 404 without the admin key.
+
 ## Not yet verified
 
-- **The image has not been built on ARM.** Every dependency publishes aarch64
-  wheels (PyTorch CPU, PyMuPDF, onnxruntime for FastEmbed, psycopg2-binary), but
-  `Dockerfile.hf` has not yet been built on an ARM host. The merged compose file
-  and the Caddyfile were validated (`docker compose config`, `caddy validate`).
+- **The image has not been built on ARM.** The dependency set was checked
+  statically for `linux/aarch64` (`uv pip compile --python-platform
+  aarch64-manylinux_2_28 --only-binary :all:`): every package has an aarch64
+  wheel except PyStemmer, which fastembed 0.3.x requires and which
+  `Dockerfile.hf` therefore builds from source in a bounded, checksummed step.
+  That step was exercised on x86-64 Linux only. The merged compose file and
+  the Caddyfile were validated (`docker compose config`, `caddy validate`).
 - **Quality Assessor floor recalibration** for the MiniLM reranker — see step 9.

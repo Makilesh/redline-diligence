@@ -66,6 +66,13 @@ _ANNOTATION = re.compile(
     re.IGNORECASE,
 )
 _SCALES = (1.0, 1e3, 1e6, 1e9)
+# Rows a caption's "except ..." clause typically excludes from its scale.
+_PER_ROW_UNIT = re.compile(
+    # Not "shares": share counts are usually stated in the caption's unit.
+    r"\b(?:per\s+(?:share|unit|employee)|eps|headcount|employees|ratio|leverage|"
+    r"coverage|days|months)\b",
+    re.IGNORECASE,
+)
 
 
 def normalize_metric_label(label: str) -> str:
@@ -195,8 +202,14 @@ class NumericalRegistry:
         """
         key = (normalize_metric_label(entry.metric_name), entry.fiscal_year)
         bucket = self._entries.setdefault(key, [])
-        for existing in bucket:
+        for i, existing in enumerate(bucket):
             if existing.source_file == entry.source_file and _values_agree(existing, entry):
+                # The same figure is often seen twice: read from a table's text
+                # (scale unknown) and from its structured rows (scale stated).
+                # Chunk order decides which arrives first, so keep the one that
+                # knows its scale rather than whichever came first.
+                if entry.scale_known and not existing.scale_known:
+                    bucket[i] = entry
                 return
         bucket.append(entry)
 
@@ -242,6 +255,15 @@ class NumericalRegistry:
                 period = _PERIOD.search(str(col))
                 raw_str = repr(raw)
                 decimals = len(raw_str.split(".")[1]) if "." in raw_str and not raw_str.endswith(".0") else 0
+                # Converter rows state the printed precision and whether the
+                # cell is a percentage or a multiple; without the kind a "61.5%"
+                # row would be compared with a text table's as a currency amount.
+                if isinstance(cell.get("decimals"), int):
+                    decimals = cell["decimals"]
+                kind = cell.get("kind") if cell.get("kind") in ("percent", "multiple") else "currency"
+                # The converter also names the period: "FY2023 Budget" must not
+                # be read as FY2023 and reported as contradicting the actuals.
+                stated_period = cell.get("period") if isinstance(cell.get("period"), str) else ""
                 self.register(NumericalEntry(
                     metric_name=label,
                     raw_value=raw,
@@ -250,10 +272,18 @@ class NumericalRegistry:
                     scale_factor=float(cell.get("scale_factor", 1.0) or 1.0),
                     source_file=source,
                     page_number=page,
-                    fiscal_year=normalize_period(period.group(0)) if period else "",
+                    fiscal_year=stated_period or (
+                        normalize_period(period.group(0)) if period else ""
+                    ),
+                    kind=kind,
                     decimals=decimals,
                     scale_known=True,
-                    raw_text=f"{label} {col}={raw}",
+                    # Two spaces before the value: find_inconsistencies reports
+                    # what follows them as the figure "as printed".
+                    raw_text=(
+                        f"{label}  {cell['raw']}" if isinstance(cell.get("raw"), str)
+                        else f"{label} {col}={raw}"
+                    ),
                 ))
 
         if chunk.get("metric_name") and chunk.get("normalized_value") is not None:
@@ -293,6 +323,16 @@ class NumericalRegistry:
                 chunk_scale = float(chunk["scale_factor"])
             except (TypeError, ValueError):
                 chunk_scale = None
+        # A table's caption scale does not apply to every row: "($ in millions,
+        # except per share)" leaves EPS, headcount and ratios as printed, and a
+        # text line does not say which rows are excepted. A converter table's
+        # typed values come from its structured_rows (read above, per row), so
+        # its text forms are registered scale-unknown — they still agree with
+        # the structured figures at any power of 1,000, and can no longer
+        # stamp EPS 2.74 as $2,740,000 (audit I1, here on the reading side).
+        if chunk.get("table_id"):
+            chunk_scale = None
+        excepted = bool(re.search(r"\bexcept\b", text[:400], re.IGNORECASE))
 
         periods: list[str] = []
         for line in text.splitlines():
@@ -321,10 +361,13 @@ class NumericalRegistry:
             if tail or not _is_line_item_label(label):
                 continue
 
+            # Under a caption with an "except ..." clause, a per-share or count
+            # row keeps its printed value; its scale is not the caption's.
+            row_scale = None if (excepted and _PER_ROW_UNIT.search(label)) else chunk_scale
             for period, num in zip(periods, numbers):
                 unit_scaled = num.kind in ("percent", "pp", "bps", "multiple")
-                scale_known = num.explicit_scale or unit_scaled or chunk_scale is not None
-                scale = 1.0 if (num.explicit_scale or unit_scaled) else (chunk_scale or 1.0)
+                scale_known = num.explicit_scale or unit_scaled or row_scale is not None
+                scale = 1.0 if (num.explicit_scale or unit_scaled) else (row_scale or 1.0)
                 self.register(NumericalEntry(
                     metric_name=label,
                     raw_value=num.value / (num.scale or 1.0),

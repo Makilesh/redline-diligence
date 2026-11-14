@@ -38,6 +38,49 @@ _SINGLE_DASH_RULE = re.compile(r"^\s*-{2,}\s*$")
 
 MAX_HEADING_CHARS = 100
 
+# Share of control characters above which a decoded file is treated as binary.
+_MAX_CONTROL_SHARE = 0.02
+
+
+def decode_text_file(data: bytes) -> tuple[str, str]:
+    """
+    Decodes the bytes of an uploaded .txt file.
+
+    Reading every file as UTF-8 with errors="replace" turned a Windows-1252
+    disclosure schedule's "£25.0 million (€29.1 million)" into "�25.0 million
+    (�29.1 million)" — the currency of both figures gone — and a UTF-16 file
+    (what Notepad and many exports write) into one letter per line separated
+    by NULs, which was then indexed. Order: a byte-order mark if present, then
+    strict UTF-8, then Windows-1252 (a superset of Latin-1 for printable text,
+    and what a Western-locale Office export uses).
+
+    Args:
+        data: File bytes.
+
+    Returns:
+        (text, encoding name).
+
+    Raises:
+        ValueError: The bytes are not text in any of these encodings (a binary
+            file with a .txt extension).
+    """
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        text, encoding = data.decode("utf-16"), "utf-16"
+    elif data.startswith(b"\xef\xbb\xbf"):
+        text, encoding = data.decode("utf-8-sig"), "utf-8-sig"
+    else:
+        try:
+            text, encoding = data.decode("utf-8"), "utf-8"
+        except UnicodeDecodeError:
+            try:
+                text, encoding = data.decode("cp1252"), "cp1252"
+            except UnicodeDecodeError as e:
+                raise ValueError("not text") from e
+    controls = sum(1 for ch in text if ord(ch) < 32 and ch not in "\n\r\t\f")
+    if text and controls / len(text) > _MAX_CONTROL_SHARE:
+        raise ValueError("not text")
+    return text, encoding
+
 
 def _is_table_line(line: str) -> bool:
     """
@@ -125,7 +168,9 @@ def parse_text_sections(text: str) -> list[dict]:
         text: Full document text.
 
     Returns:
-        List of section dicts with text, section_heading, section_type
+        List of section dicts with text, section_heading (the most specific
+        heading), heading_path (outermost first, e.g. ["ARTICLE VIII —
+        INDEMNIFICATION", "Section 8.2 — Indemnification Cap"]), section_type
         ("text" | "table"), is_table and page_number=None.
     """
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
@@ -142,6 +187,9 @@ def parse_text_sections(text: str) -> list[dict]:
     def current_heading() -> str:
         return level2 or level1
 
+    def heading_path() -> list[str]:
+        return [h for h in (level1, level2) if h]
+
     def flush_body() -> None:
         nonlocal body_lines, pending_heading_lines
         body = "\n".join(body_lines).strip()
@@ -150,6 +198,7 @@ def parse_text_sections(text: str) -> list[dict]:
             sections.append({
                 "text": "\n".join(text_parts).strip(),
                 "section_heading": current_heading(),
+                "heading_path": heading_path(),
                 "section_type": "text",
                 "is_table": False,
                 "page_number": None,
@@ -172,6 +221,7 @@ def parse_text_sections(text: str) -> list[dict]:
             sections.append({
                 "text": prefix + table_text,
                 "section_heading": heading,
+                "heading_path": heading_path(),
                 "section_type": "table",
                 "is_table": True,
                 "page_number": None,
@@ -250,7 +300,19 @@ def parse_text_sections(text: str) -> list[dict]:
         prev_was_heading = False
 
         if _is_table_line(line):
+            # A column header without digits ("Name   Title   Base Salary")
+            # is not a table line on its own, so it was collected as prose and
+            # flushed into a separate section — the rows were indexed with no
+            # column names. A multi-cell line directly above the table's first
+            # line is its header.
+            header = None
+            if body_lines and body_lines[-1].strip() and len(
+                re.split(r"\s{2,}", body_lines[-1].strip())
+            ) >= 3:
+                header = body_lines.pop()
             flush_body()
+            if header is not None:
+                table_lines.append(header)
             table_lines.append(line)
             prev_line = line
             continue
@@ -267,6 +329,7 @@ def parse_text_sections(text: str) -> list[dict]:
         sections.append({
             "text": "\n".join(pending_heading_lines),
             "section_heading": current_heading(),
+            "heading_path": heading_path(),
             "section_type": "text",
             "is_table": False,
             "page_number": None,

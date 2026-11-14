@@ -55,13 +55,18 @@ services:
 
   # ==================== FastAPI Application ====================
   api:
+    # One backend image for every deployment. The previous local Dockerfile
+    # installed the CUDA build of torch (~2.5GB of wheels no container here
+    # could use), ran as root, baked no models and started uvicorn without the
+    # single-worker and graceful-shutdown handling in run_api.py.
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.hf
     container_name: manda-api
     ports:
       - "8000:8000"
     environment:
+      - API_PORT=8000
       - QDRANT_URL=http://qdrant:6333
       - POSTGRES_URL=postgresql://manda_user:${POSTGRES_PASSWORD:-password}@postgres:5432/manda_rag
       # Multi-key rotation is the primary path — the budget tracker spreads load
@@ -85,6 +90,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+      # /health answers only after the lifespan has warmed the models, which
+      # takes minutes on CPU; without this the UI gave up waiting on the API.
+      start_period: 600s
 
   # ==================== Streamlit UI ====================
   streamlit:

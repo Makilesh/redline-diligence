@@ -40,6 +40,25 @@ class QueryResponse(BaseModel):
     context_quality_score: float = Field(
         0.0, description="Best context quality score achieved across retrieval attempts"
     )
+    outcome: str = Field(
+        "answered",
+        description=(
+            "How the run ended: answered | answered_unverified (failed validation "
+            "after the retry; shipped with flags) | refused (no usable context) | "
+            "synthesis_failed (no model returned a usable answer)"
+        ),
+    )
+    node_timings: list[dict] = Field(
+        default_factory=list,
+        description=(
+            "One row per node execution, in order: agent, duration_ms, llm_calls, "
+            "prompt_tokens, completion_tokens, models"
+        ),
+    )
+    llm_calls: int = Field(0, description="Completed LLM calls this query made, all nodes")
+    request_id: str = Field(
+        "", description="Correlation id of the request, also sent as X-Request-ID"
+    )
 
 
 class IngestResponse(BaseModel):
@@ -49,6 +68,18 @@ class IngestResponse(BaseModel):
     document_category: str = Field(..., description="Detected/assigned category")
     chunks_created: int = Field(..., description="Number of chunks indexed")
     status: str = Field("success", description="Ingestion status")
+    notices: list[str] = Field(
+        default_factory=list,
+        description="Why a 'partial' ingestion was partial, when the cause is known",
+    )
+    version_candidates: list[dict] = Field(
+        default_factory=list,
+        description=(
+            "Indexed documents this upload looks related to: [{doc_id, source_file, "
+            "relation: newer|older|same_document}]. A proposal only — nothing was "
+            "superseded; send supersedes_doc_id to act on it."
+        ),
+    )
 
 
 class DealResponse(BaseModel):

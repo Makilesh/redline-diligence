@@ -4,10 +4,9 @@
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 #
 # What it changes, and why:
-#   * api is built from Dockerfile.hf — CPU-only torch, non-root user, and the
-#     embedding / reranker / NLI weights baked into the image. The local
-#     Dockerfile pulls the CUDA build of torch, ~2.5GB of wheels a CPU VM
-#     cannot use.
+#   * api uses the same image as the base file (Dockerfile.hf: CPU-only torch,
+#     non-root user, model weights baked in), with durable checkpoints
+#     required, a memory ceiling and a shutdown grace period.
 #   * Nothing but Caddy publishes a port. Postgres and Qdrant are reachable only
 #     on the compose network. Docker's published ports bypass the host's
 #     iptables INPUT chain, so "the firewall blocks it" is not a defence.
@@ -46,10 +45,13 @@ services:
       context: .
       dockerfile: Dockerfile.hf
     ports: !reset []
-    volumes: !reset []
+    # Replaces the base file's ./data bind mount: only the audit trail persists.
+    volumes: !override
+      - audit_logs:/home/user/audit
     env_file: .env
     environment:
       - QDRANT_URL=http://qdrant:6333
+      - AUDIT_LOG_DIR=/home/user/audit
       - POSTGRES_URL=postgresql://manda_user:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/manda_rag
       - ENVIRONMENT=production
       - ADMIN_API_KEY=${ADMIN_API_KEY:?set ADMIN_API_KEY in .env}
@@ -62,6 +64,18 @@ services:
       # up to ~30 s added per query. Off here by default; set LAYA_GATE=1 in .env
       # on a host with a GPU or more cores. The query guard (~1.3 s) stays on.
       - LAYA_GATE=${LAYA_GATE:-0}
+      # Postgres runs next to the API here, so failing to reach it is a fault,
+      # not a reason to fall back to in-memory checkpoints and carry on.
+      - REQUIRE_DURABLE_CHECKPOINTS=1
+      # The deal the public demo serves; everything else needs the admin key.
+      - PUBLIC_DEAL_IDS=${PUBLIC_DEAL_IDS:-aurora_vertex_2024}
+      # SIGTERM → in-flight queries get this long before they are cancelled.
+      # Kept under stop_grace_period so Docker never has to SIGKILL.
+      - SHUTDOWN_GRACE_SECONDS=25
+    stop_grace_period: 40s
+    # 2 OCPU / 12GB, shared with Qdrant and Postgres: the models need ~6GB.
+    # A ceiling keeps a runaway parse from taking the database down with it.
+    mem_limit: 9g
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:7860/health"]
       interval: 30s
@@ -97,3 +111,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  audit_logs:

@@ -9,11 +9,20 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from api.models.request_models import DealCreateRequest, DealIdPath
 from api.models.response_models import DealResponse, DocumentRecord, RiskSignal
-from api.security import get_request_id, is_admin, public_error_detail
+from api.security import (
+    ClientContext,
+    can_read_deal,
+    deal_rate_limit,
+    get_request_id,
+    is_admin,
+    public_error_detail,
+    read_rate_limit,
+    require_readable_deal,
+)
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -47,8 +56,48 @@ _RISK_SEVERITY: dict[str, str] = {
 }
 
 
+def _max_registered_deals() -> int:
+    """Ceiling on in-memory deal records (env MAX_REGISTERED_DEALS, default 2000)."""
+    try:
+        return max(1, int(os.getenv("MAX_REGISTERED_DEALS", "2000")))
+    except ValueError:
+        return 2000
+
+
+def _enforce_registry_cap() -> None:
+    """
+    Keeps the in-memory deal registry bounded.
+
+    The per-client limit on creation stops one address; this stops many. Each
+    record holds up to 1,200 characters of caller-supplied text until its
+    sandbox expires, so an unbounded registry is a slow memory leak under any
+    distributed scan. Expired sandboxes are dropped first — they are only
+    waiting for the sweeper — and only then is creation refused.
+
+    Raises:
+        HTTPException: 503 when the registry is full of live deals.
+    """
+    cap = _max_registered_deals()
+    if len(_deals) < cap:
+        return
+    for deal_id in [d for d in _deals if sandbox_is_expired(d)]:
+        _deals.pop(deal_id, None)
+        _documents.pop(deal_id, None)
+    if len(_deals) >= cap:
+        logger.warning("Deal registry is full; refusing new deals", extra={"cap": cap})
+        raise HTTPException(
+            status_code=503,
+            detail="Too many temporary workspaces are open right now. Please retry later.",
+            headers={"Retry-After": "300"},
+        )
+
+
 @router.post("/deals", response_model=DealResponse)
-async def create_deal(request: DealCreateRequest, http_request: Request):
+async def create_deal(
+    request: DealCreateRequest,
+    http_request: Request,
+    client: ClientContext = Depends(deal_rate_limit),
+):
     """
     Creates a new deal.
 
@@ -58,14 +107,17 @@ async def create_deal(request: DealCreateRequest, http_request: Request):
     Args:
         request: Deal name, description and sandbox flag.
         http_request: Raw request, for the admin check.
+        client: Caller context; resolving it enforces the creation rate limit.
 
     Returns:
         The created deal.
     """
-    if not request.is_sandbox and not is_admin(http_request):
+    if not request.is_sandbox and not client.is_admin:
         raise HTTPException(
             status_code=403, detail="Only sandbox deals can be created without the admin key."
         )
+    if not client.is_admin:
+        _enforce_registry_cap()
 
     now = datetime.now(timezone.utc)
     deal_id = new_sandbox_id(now) if request.is_sandbox else str(uuid.uuid4())
@@ -92,15 +144,21 @@ async def create_deal(request: DealCreateRequest, http_request: Request):
     return DealResponse(**_deals[deal_id])
 
 
-async def _facet_deal_ids() -> list[str]:
+async def _facet_deal_ids(include_parents: bool = False) -> list[str]:
     """
     Lists every deal_id present in the vector store.
 
+    Args:
+        include_parents: Also look in the parent-section collection. The
+            sweeper needs this: a deal whose child points were deleted but
+            whose parent sections were not is invisible to a child-only facet,
+            and would never be retried.
+
     Returns:
-        Deal ids. Empty on any failure.
+        Deal ids. Empty on any failure of the main collection.
     """
     from src.vector_db.qdrant_client import get_qdrant_client
-    from src.vector_db.constants import COLLECTION_NAME
+    from src.vector_db.constants import COLLECTION_NAME, PARENT_COLLECTION_NAME
 
     client = get_qdrant_client()
     try:
@@ -110,7 +168,24 @@ async def _facet_deal_ids() -> list[str]:
     except Exception as e:
         logger.warning(f"Could not enumerate deals from the vector store: {e}")
         return []
-    return [str(hit.value) for hit in deal_facet.hits]
+    deal_ids = [str(hit.value) for hit in deal_facet.hits]
+
+    if include_parents:
+        try:
+            parent_facet = await client.facet(
+                collection_name=PARENT_COLLECTION_NAME, key="deal_id", limit=1000
+            )
+            known = set(deal_ids)
+            deal_ids.extend(
+                str(hit.value) for hit in parent_facet.hits if str(hit.value) not in known
+            )
+        except Exception as e:
+            # The parent collection may not exist, or may not index deal_id.
+            logger.debug(
+                "Could not enumerate deals from the parent collection",
+                extra={"error_type": type(e).__name__},
+            )
+    return deal_ids
 
 
 async def _indexed_document_count(deal_id: str) -> int:
@@ -190,7 +265,7 @@ def _discovered_deal_record(deal_id: str, doc_count: int) -> dict:
 
 
 @router.get("/deals", response_model=list[DealResponse])
-async def list_deals(http_request: Request):
+async def list_deals(client: ClientContext = Depends(read_rate_limit)):
     """
     Lists every deal that is queryable — registered in this process or indexed.
 
@@ -203,7 +278,7 @@ async def list_deals(http_request: Request):
     id is already known to its browser, which is the only place it is needed.
     Admin callers see everything, which is how orphaned sandboxes are found.
     """
-    include_sandboxes = is_admin(http_request)
+    include_sandboxes = client.is_admin
     deals = {
         d["deal_id"]: dict(d)
         for d in _deals.values()
@@ -221,11 +296,17 @@ async def list_deals(http_request: Request):
             continue
         deals[deal_id] = _discovered_deal_record(deal_id, doc_count)
 
-    return [DealResponse(**d) for d in deals.values()]
+    # Permanent deals are listed to public callers only when named in
+    # PUBLIC_DEAL_IDS; a listing is how a private deal's id would be found.
+    return [
+        DealResponse(**d)
+        for d in deals.values()
+        if client.is_admin or can_read_deal(d["deal_id"], admin=False)
+    ]
 
 
 @router.get("/deals/{deal_id}", response_model=DealResponse)
-async def get_deal(deal_id: DealIdPath):
+async def get_deal(deal_id: DealIdPath, client: ClientContext = Depends(read_rate_limit)):
     """
     Gets a specific deal by ID.
 
@@ -237,8 +318,9 @@ async def get_deal(deal_id: DealIdPath):
         deal_id: Deal to fetch.
 
     Returns:
-        The deal.
+        The deal. 404 also for a deal the caller may not read.
     """
+    require_readable_deal(deal_id, client.is_admin)
     if deal_id in _deals:
         return DealResponse(**_deals[deal_id])
 
@@ -452,13 +534,16 @@ async def _deal_documents(deal_id: str) -> list[dict]:
 
 
 @router.get("/deals/{deal_id}/documents", response_model=list[DocumentRecord])
-async def list_deal_documents(deal_id: DealIdPath):
+async def list_deal_documents(
+    deal_id: DealIdPath, client: ClientContext = Depends(read_rate_limit)
+):
     """
     Lists ingested documents for a deal, newest first.
 
     Feeds the version browser: each record carries its position in the version
     chain (supersedes_doc_id / superseded_by / is_current_version).
     """
+    require_readable_deal(deal_id, client.is_admin)
     records = await _deal_documents(deal_id)
     # Reconstructed records carry no upload_date, so fall back to filename for a
     # stable order rather than letting an empty string shuffle the list.
@@ -483,7 +568,9 @@ async def list_deal_documents(deal_id: DealIdPath):
 
 
 @router.get("/deals/{deal_id}/risk-signals", response_model=list[RiskSignal])
-async def list_deal_risk_signals(deal_id: DealIdPath):
+async def list_deal_risk_signals(
+    deal_id: DealIdPath, client: ClientContext = Depends(read_rate_limit)
+):
     """
     Returns risk signals detected across all documents in a deal.
 
@@ -491,6 +578,7 @@ async def list_deal_risk_signals(deal_id: DealIdPath):
     assigned here from _RISK_SEVERITY. Sorted high → low so the dashboard's
     most important categories expand first.
     """
+    require_readable_deal(deal_id, client.is_admin)
     signals: list[RiskSignal] = []
 
     for record in await _deal_documents(deal_id):
@@ -653,20 +741,35 @@ async def _delete_deal_vectors(deal_id: str) -> None:
         )
     )
 
-    for collection in (COLLECTION_NAME, PARENT_COLLECTION_NAME):
+    # Parents first. The sweeper finds its candidates by faceting, and the
+    # child collection is where it has always looked; if the children went
+    # first and the parent delete then failed, nothing would list the deal
+    # again and the parent sections — ~2,000-token slices of the upload — would
+    # stay for good. Deleting parents first means a failure leaves the deal
+    # fully discoverable for the next pass.
+    for collection in (PARENT_COLLECTION_NAME, COLLECTION_NAME):
         try:
             await client.delete(collection_name=collection, points_selector=selector)
         except Exception as e:
-            # The parent collection is not written by the current ingest path, so
-            # it is frequently absent. Missing it must not abort the delete of
-            # the main collection, which is the one that actually holds content.
-            if collection == PARENT_COLLECTION_NAME:
+            # A parent collection that does not exist holds nothing to delete.
+            # Any other failure there is a failed purge, exactly as it is for
+            # the main collection: it used to be logged at DEBUG and skipped,
+            # under a comment saying ingestion does not write parents. It does.
+            if collection == PARENT_COLLECTION_NAME and _is_missing_collection(e):
                 logger.debug(
-                    "Parent collection purge skipped",
-                    extra={"deal_id": deal_id, "error": str(e)},
+                    "Parent collection purge skipped: collection absent",
+                    extra={"deal_id": deal_id},
                 )
                 continue
             raise
+
+
+def _is_missing_collection(error: Exception) -> bool:
+    """True when a Qdrant error says the collection itself does not exist."""
+    if getattr(error, "status_code", None) == 404:
+        return True
+    text = str(error).lower()
+    return "not found" in text or "doesn't exist" in text or "does not exist" in text
 
 
 async def purge_deal(deal_id: str) -> dict:
@@ -681,12 +784,24 @@ async def purge_deal(deal_id: str) -> dict:
     """
     await _delete_deal_vectors(deal_id)
 
+    # Checkpoints hold the retrieved chunk text of every interrupted run on
+    # this deal — a second copy of the upload, outside Qdrant. Best-effort: the
+    # checkpoint TTL sweep removes whatever this misses.
+    from api.main import get_graph
+    from src.workflow.orchestrator import purge_deal_checkpoints
+
+    threads_dropped = await purge_deal_checkpoints(get_graph(), deal_id)
+
     documents_dropped = len(_documents.pop(deal_id, []))
     _deals.pop(deal_id, None)
 
     logger.info(
         "Deal purged",
-        extra={"deal_id": deal_id, "documents_dropped": documents_dropped},
+        extra={
+            "deal_id": deal_id,
+            "documents_dropped": documents_dropped,
+            "checkpoint_threads_dropped": threads_dropped,
+        },
     )
     return {"deal_id": deal_id, "documents_dropped": documents_dropped, "status": "purged"}
 
@@ -716,7 +831,7 @@ def _authorize_purge(deal_id: str, http_request: Request) -> None:
     )
 
 
-@router.delete("/deals/{deal_id}")
+@router.delete("/deals/{deal_id}", dependencies=[Depends(read_rate_limit)])
 async def delete_deal(deal_id: DealIdPath, http_request: Request):
     """
     Deletes a deal and everything indexed under it.
@@ -740,7 +855,7 @@ async def delete_deal(deal_id: DealIdPath, http_request: Request):
         raise HTTPException(status_code=500, detail=public_error_detail("Purge", request_id))
 
 
-@router.post("/deals/{deal_id}/purge")
+@router.post("/deals/{deal_id}/purge", dependencies=[Depends(read_rate_limit)])
 async def purge_deal_endpoint(deal_id: DealIdPath, http_request: Request):
     """
     POST-shaped alias of DELETE, for `navigator.sendBeacon`.
@@ -789,7 +904,9 @@ async def _sweep_expired_sandboxes() -> int:
     # Materialise the candidate list before awaiting anything: `purge_deal`
     # mutates `_deals`, and mutating a dict while iterating it raises.
     candidates = {deal_id for deal_id, deal in list(_deals.items()) if deal.get("is_sandbox")}
-    candidates.update(d for d in await _facet_deal_ids() if is_sandbox_id(d))
+    candidates.update(
+        d for d in await _facet_deal_ids(include_parents=True) if is_sandbox_id(d)
+    )
     expired = sorted(d for d in candidates if sandbox_is_expired(d, now))
 
     purged = 0

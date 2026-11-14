@@ -1,9 +1,21 @@
 """
-Immutable audit log — records all queries and ingestion events.
+Append-only audit trail for queries and ingestions.
 
-Uses structured JSON logging to a dedicated audit log file.
-The audit log is append-only (immutable) and should be backed up regularly.
-In production, pipe to a dedicated audit log sink (e.g., BigQuery, S3).
+Every completed query and every ingested document is recorded twice:
+
+  * as an `AUDIT_LOG` line in the structured application log (stdout), which
+    is what a container log driver or a log shipper collects; and
+  * when AUDIT_LOG_DIR is set, as one JSON line in `audit_<UTC date>.jsonl`
+    under that directory, opened in append mode and never rewritten.
+
+The file half existed before as a module nothing imported, while the routes
+wrote the log line themselves — so the "immutable audit log" the routes
+promised was a stdout line, kept only as long as the container's log rotation
+allowed (30MB in the production compose file). AUDIT_LOG_DIR was documented in
+`.env.example` and read by nothing.
+
+Writing is best-effort by design: a full disk must not turn every query into a
+500. A failed write is logged at ERROR, so it is visible rather than silent.
 """
 
 import json
@@ -15,101 +27,33 @@ from src.utils.logger import setup_logger
 
 logger = setup_logger("audit_log")
 
-# Audit log file path
-AUDIT_LOG_DIR = os.getenv("AUDIT_LOG_DIR", "data/audit_logs")
-Path(AUDIT_LOG_DIR).mkdir(parents=True, exist_ok=True)
+
+def _audit_dir() -> Path | None:
+    raw = os.getenv("AUDIT_LOG_DIR", "").strip()
+    return Path(raw) if raw else None
 
 
-def log_query_event(
-    deal_id: str,
-    session_id: str,
-    query: str,
-    query_type: str,
-    confidence_score: float,
-    validation_status: str,
-    latency_ms: float,
-    citations_count: int,
-    rewrite_iterations: int,
-) -> None:
+def record(event: str, **fields) -> None:
     """
-    Records a query event to the immutable audit log.
+    Records one audit event.
 
     Args:
-        deal_id: Deal identifier.
-        session_id: Session identifier.
-        query: The user's query text.
-        query_type: Detected query type.
-        confidence_score: Answer confidence score.
-        validation_status: Validation result.
-        latency_ms: Total pipeline latency.
-        citations_count: Number of citations in answer.
-        rewrite_iterations: Number of query rewrites.
+        event: Event name, e.g. "query_completed" or "document_ingested".
+        **fields: JSON-serialisable event fields.
     """
-    event = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "event_type": "query",
-        "deal_id": deal_id,
-        "session_id": session_id,
-        "query": query,
-        "query_type": query_type,
-        "confidence_score": confidence_score,
-        "validation_status": validation_status,
-        "latency_ms": latency_ms,
-        "citations_count": citations_count,
-        "rewrite_iterations": rewrite_iterations,
-    }
+    entry = {"timestamp": datetime.now(timezone.utc).isoformat(), "event": event, **fields}
+    logger.info("AUDIT_LOG", extra=entry)
 
-    _append_to_log(event)
-
-
-def log_ingestion_event(
-    deal_id: str,
-    doc_id: str,
-    filename: str,
-    document_category: str,
-    chunks_created: int,
-    status: str,
-) -> None:
-    """
-    Records a document ingestion event to the immutable audit log.
-
-    Args:
-        deal_id: Deal identifier.
-        doc_id: Document identifier.
-        filename: Original filename.
-        document_category: Document category.
-        chunks_created: Number of chunks created.
-        status: Ingestion status.
-    """
-    event = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "event_type": "ingestion",
-        "deal_id": deal_id,
-        "doc_id": doc_id,
-        "file_name": filename,
-        "document_category": document_category,
-        "chunks_created": chunks_created,
-        "status": status,
-    }
-
-    _append_to_log(event)
-
-
-def _append_to_log(event: dict) -> None:
-    """
-    Appends an event to the audit log file. Append-only (immutable).
-
-    Args:
-        event: Event dict to log.
-    """
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    log_file = Path(AUDIT_LOG_DIR) / f"audit_{today}.jsonl"
-
+    directory = _audit_dir()
+    if directory is None:
+        return
+    path = directory / f"audit_{entry['timestamp'][:10]}.jsonl"
     try:
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(event, default=str) + "\n")
-    except Exception as e:
-        logger.error(f"Failed to write audit log: {e}")
-
-    # Also log to structured logger for real-time monitoring
-    logger.info("AUDIT_EVENT", extra=event)
+        directory.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, default=str) + "\n")
+    except OSError as e:
+        logger.error(
+            "Audit file write failed",
+            extra={"path": str(path), "error_type": type(e).__name__, "event": event},
+        )

@@ -25,18 +25,23 @@ class TestQueryPipelineIntegration:
             "hallucination_validator",
             "insufficient_context",
             "retry_synthesis",
+            "synthesis_unavailable",
         }
         # Unconditional edges; the routing decisions are conditional edges
-        # covered by the conditional_edges tests in test_agents.py.
+        # covered by the conditional_edges tests in test_agents.py. Synthesis →
+        # validation became conditional: a synthesis that failed on every model
+        # goes to synthesis_unavailable instead of being verified (audit V7).
         assert {
             ("__start__", "query_intelligence"),
             ("query_intelligence", "retrieval_executor"),
             ("financial_verifier", "quality_assessor"),
             ("query_rewriter", "retrieval_executor"),
-            ("answer_synthesizer", "hallucination_validator"),
-            ("retry_synthesis", "hallucination_validator"),
             ("insufficient_context", "__end__"),
+            ("synthesis_unavailable", "__end__"),
         } <= set(graph.edges)
+        assert set(graph.branches["answer_synthesizer"]) and set(
+            graph.branches["retry_synthesis"]
+        )
         # Compiling validates that every edge targets a registered node.
         graph.compile()
 
