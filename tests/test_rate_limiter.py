@@ -736,7 +736,7 @@ class TestServiceUnavailableHandling:
         model = next(m for m in SYNTHESIS_LADDER if not is_local(m))
         assert model not in t._models_in_cooldown()
 
-        t.skip_model_for_request(model)
+        t.report_model_unavailable(model)
         assert model in t._models_in_cooldown()
 
     def test_cooldown_expires(self, monkeypatch):
@@ -751,7 +751,7 @@ class TestServiceUnavailableHandling:
         t._mock_budgets = {}
 
         model = next(m for m in SYNTHESIS_LADDER if not is_local(m))
-        t.skip_model_for_request(model)
+        t.report_model_unavailable(model)
         assert model in t._models_in_cooldown()
 
         # Jump past the cooldown window rather than sleeping through it.
@@ -772,7 +772,7 @@ class TestServiceUnavailableHandling:
         t._mock_budgets = {}
 
         model = next(m for m in SYNTHESIS_LADDER if not is_local(m))
-        t.skip_model_for_request(model)
+        t.report_model_unavailable(model)
 
         assert t._mock_budgets == {}, (
             "skipping an unavailable model must not touch budget accounting"
@@ -789,7 +789,7 @@ class TestServiceUnavailableHandling:
         t._is_mock = True
         t._mock_budgets = {}
 
-        t.skip_model_for_request(LOCAL_MODEL)
+        t.report_model_unavailable(LOCAL_MODEL)
         assert LOCAL_MODEL not in t._models_in_cooldown()
 
 
@@ -1272,7 +1272,7 @@ class TestEscalatingModelCooldown:
 
         seen = []
         for _ in range(4):
-            t.skip_model_for_request(model)
+            t.report_model_unavailable(model)
             seen.append(round(t._model_cooldowns[model] - time.monotonic()))
 
         base = SERVICE_COOLDOWN_SECONDS
@@ -1288,7 +1288,7 @@ class TestEscalatingModelCooldown:
         t = self._tracker()
         model = "gemini/gemini-3.7-flash"
         for _ in range(20):
-            t.skip_model_for_request(model)
+            t.report_model_unavailable(model)
 
         remaining = t._model_cooldowns[model] - time.monotonic()
         assert remaining <= MAX_SERVICE_COOLDOWN_SECONDS + 1, (
@@ -1304,14 +1304,14 @@ class TestEscalatingModelCooldown:
         t = self._tracker()
         model = "gemini/gemini-3.7-flash"
         for _ in range(5):
-            t.skip_model_for_request(model)
+            t.report_model_unavailable(model)
         assert model in t._models_in_cooldown()
 
         t.note_model_healthy(model)
         assert model not in t._models_in_cooldown()
 
         # And the next failure starts from the base delay, not the escalated one.
-        t.skip_model_for_request(model)
+        t.report_model_unavailable(model)
         assert round(t._model_cooldowns[model] - time.monotonic()) == round(
             SERVICE_COOLDOWN_SECONDS
         )
@@ -1326,8 +1326,8 @@ class TestEscalatingModelCooldown:
         sick, healthy = "gemini/gemini-3.7-flash", "gemini/gemini-3.6-flash"
 
         for _ in range(4):
-            t.skip_model_for_request(sick)
-        t.skip_model_for_request(healthy)
+            t.report_model_unavailable(sick)
+        t.report_model_unavailable(healthy)
 
         assert round(t._model_cooldowns[healthy] - time.monotonic()) == round(
             SERVICE_COOLDOWN_SECONDS

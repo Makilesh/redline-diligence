@@ -21,6 +21,7 @@ RATE LIMITERS:
 """
 
 import asyncio
+import contextvars
 import os
 import time
 from dataclasses import dataclass
@@ -59,9 +60,9 @@ SERVICE_COOLDOWN_SECONDS = 90.0
 MAX_SERVICE_COOLDOWN_SECONDS = 1800.0
 
 # How long a pinned synthesis run will wait for its model to come back before
-# giving up. Sized against the cooldown ladder: a model that has failed enough
-# times to sit at the 720s maximum gets two chances to recover within this
-# window before the run is abandoned.
+# giving up. Sized against the cooldown ladder: it equals the longest single
+# cooldown (MAX_SERVICE_COOLDOWN_SECONDS), so a model at the cap is waited out
+# once before the run is abandoned.
 PIN_MAX_WAIT_SECONDS = float(os.getenv("SYNTHESIS_PIN_MAX_WAIT_SECONDS", "1800"))
 
 # How long a (key, model) slot sits out after a per-MINUTE 429 when the provider
@@ -72,6 +73,35 @@ RATE_LIMIT_COOLDOWN_SECONDS = 60.0
 # neither spin the selector nor park a slot for hours.
 MIN_RATE_LIMIT_COOLDOWN_SECONDS = 1.0
 MAX_RATE_LIMIT_COOLDOWN_SECONDS = 300.0
+
+# Models the current request has asked not to be offered again, as
+# {model: monotonic time of the skip}. Held in a ContextVar so it belongs to one
+# request: LangGraph runs each node in a task whose context is a copy of the
+# request's, and the orchestrator opens a fresh scope per query.
+_request_skips: contextvars.ContextVar[dict[str, float] | None] = contextvars.ContextVar(
+    "llm_request_skipped_models", default=None
+)
+
+# Longest a request-scoped skip is honoured. A request is over well inside this
+# (the API's own budget is 300s); the bound exists so that a skip recorded by a
+# long-lived task that never opens a new scope — a script looping over queries —
+# cannot quietly steer every later query away from a model.
+REQUEST_SKIP_TTL_SECONDS = 300.0
+
+
+def begin_request_scope() -> None:
+    """Starts a query with no request-scoped model skips. Call once per query."""
+    _request_skips.set({})
+
+
+def _models_skipped_for_request() -> frozenset[str]:
+    """Models the current request has skipped (see skip_model_for_request)."""
+    skips = _request_skips.get()
+    if not skips:
+        return frozenset()
+    horizon = time.monotonic() - REQUEST_SKIP_TTL_SECONDS
+    return frozenset(m for m, at in skips.items() if at >= horizon)
+
 
 # A note about which quota a 429 tripped is only trusted for this long. It is
 # written by the call wrapper at the moment of failure and read by
@@ -582,6 +612,43 @@ class BudgetTracker:
 
     def skip_model_for_request(self, model: str) -> None:
         """
+        Keeps the CURRENT request off a model. Nothing else.
+
+        This is what a caller says when a model's answer was no use to it — an
+        uncited synthesis, a draft that failed a content check — or when it has
+        already watched the model fail and wants the next selection to go
+        elsewhere. It is a statement about one request, so it is stored in that
+        request's context and no other request can see it.
+
+        It used to write the process-wide cooldown below, despite the name.
+        Measured: every synthesis model returned the same correct, cited,
+        101-character answer, each was rejected as too short, and one query
+        left all six models in an escalating 90-second cooldown — so the next
+        user's question was answered by a lite model. A content rejection is
+        not evidence about the provider, and provider health is now reported
+        only by the code that observes the provider (report_model_unavailable).
+
+        Ignored outside a running task: with no request there is nothing to
+        scope the skip to, and writing it into a long-lived context would turn
+        it back into the global side effect this method exists to avoid.
+
+        Args:
+            model: Upstream model this request should not be offered again.
+        """
+        if is_local(model):
+            return
+        try:
+            asyncio.current_task()
+        except RuntimeError:
+            return
+        skips = _request_skips.get()
+        if skips is None:
+            skips = {}
+            _request_skips.set(skips)
+        skips[model] = time.monotonic()
+
+    def report_model_unavailable(self, model: str) -> None:
+        """
         Marks a model as provider-side unavailable for a short cooldown.
 
         Distinct from `mark_slot_exhausted`, and the distinction matters. A 429
@@ -594,11 +661,12 @@ class BudgetTracker:
         The cooldown is in-memory and per-process by design: it is a hint about
         the last few seconds of provider behaviour, not durable accounting.
 
+        Called by the call wrapper when it sees the provider fail (503, timeout,
+        5xx, a dropped stream) — never for a response a caller merely disliked.
+
         Args:
             model: Upstream model the provider reported as unavailable.
         """
-        import time
-
         if is_local(model):
             return
         if not hasattr(self, "_model_cooldowns"):
@@ -639,8 +707,6 @@ class BudgetTracker:
 
     def _models_in_cooldown(self) -> set[str]:
         """Models currently skipped after a provider-side unavailability."""
-        import time
-
         cooldowns = getattr(self, "_model_cooldowns", None)
         if not cooldowns:
             return set()
@@ -689,6 +755,11 @@ class BudgetTracker:
             ModelChoice naming the model and the key to bill it to.
         """
         cooled = self._models_in_cooldown()
+        # A request-scoped skip means "offer me a different rung". On a ladder
+        # of one — a pinned run — there is no different rung, and honouring the
+        # skip would silently substitute the local model for the pin.
+        if len(ladder) > 1:
+            exclude = frozenset(exclude) | _models_skipped_for_request()
 
         # Pass 1 — immediate capacity anywhere.
         for model in ladder:
@@ -801,7 +872,7 @@ class BudgetTracker:
 
         # Two reasons the pin can be unavailable, and they need opposite
         # responses. A 503 puts the model in an escalating, process-wide
-        # cooldown (90s doubling to 720s) — measured against this provider, the
+        # cooldown (90s doubling to 1800s) — measured against this provider, the
         # reasoning rungs 503 several times an hour, so a pinned 41-question run
         # would almost certainly meet one. That is transient and worth waiting
         # out. Daily quota exhaustion is not: it clears at the UTC reset, and no
