@@ -33,21 +33,61 @@ from src.verification.numeric_grounding import extract_numbers, strip_citations
 CITATION_MARKER = re.compile(r"\[([^\[\]]*\|[^\[\]]*)\]")
 PAGE_IN_MARKER = re.compile(r"(?:p\.|pg\.|page\s*)(\d+)", re.IGNORECASE)
 
-# Wording that declines rather than asserts. A superset of the synthesizer's
-# usable-answer guard (_DECLINES_TO_ANSWER there), extended with the gap
-# statements answers put in their "missing information" sections. Kept separate
-# so widening what the verifier skips never loosens what synthesis accepts.
+# Wording that declines rather than asserts: a statement about what the
+# EVIDENCE does not say, which an entailment check against that evidence cannot
+# confirm and which is the designed way to decline. Kept separate from the
+# synthesizer's usable-answer guard (_DECLINES_TO_ANSWER there) so that what
+# the verifier skips never loosens what synthesis accepts.
+#
+# Every alternative is anchored on the evidence or on information being
+# available — "the documents do not state", "is not disclosed", "cannot be
+# calculated", "is missing from the data room". The earlier pattern matched
+# bare keywords, so assertions about the deal were exempt from verification
+# altogether: "There is no evidence of any pending litigation against the
+# Company", "The buyer will be required to pay a reverse termination fee",
+# "Management considers the insurance coverage insufficient" and "The key
+# customer consent is missing from the executed agreement" each produced no
+# claim, and a fabricated one passed unchecked.
+_EVIDENCE_NOUN = (
+    r"(?:data\s+room|documents?|context|materials?|sources?|excerpts?|passages?"
+    r"|disclosures?|information\s+provided|provided\s+information)"
+)
+_INFO_VERB = (
+    r"(?:contain|include|state|specify|disclose|provide|mention|address|give|identify"
+    r"|quantify|break\s+out|itemi[sz]e|report|indicate|show)"
+)
 DECLINES_TO_ANSWER = re.compile(
-    r"do(?:es)? not contain|not contain(?:ed)?"
-    r"|insufficient|not sufficient|unable to (?:find|determine|calculate|compute)"
-    r"|cannot be (?:calculated|computed|determined|established)"
-    r"|no (?:information|evidence|mention|disclosure|reference|record|data)"
-    r"|not (?:disclosed|provided|available|specified|present|stated|included)"
-    r"|not found in the data room"
-    r"|is absent|are absent"
-    # Gap statements from the "missing information" sections answers carry.
-    r"|\bmissing\b|undisclosed|not (?:quantified|identified|itemi[sz]ed|broken out|detailed)"
-    r"|(?:would|will) (?:need|be needed|be required)|(?:is|are) required to (?:confirm|determine|quantify)",
+    # The evidence does not contain / state / disclose …
+    rf"\b{_EVIDENCE_NOUN}\b[^.;]{{0,120}}\b(?:do(?:es)?|did)\s+not\s+{_INFO_VERB}"
+    # Neither X nor Y is included in the provided context.
+    rf"|\b(?:neither|none|no)\b[^.;]{{0,160}}\b(?:included|contained|found|provided|present"
+    rf"|available|disclosed|stated)\s+in\s+(?:the|any|all)\s+(?:provided\s+|retrieved\s+"
+    rf"|available\s+)?{_EVIDENCE_NOUN}\b"
+    # "Context missing", "Retention pool at closing: Undisclosed".
+    rf"|\b{_EVIDENCE_NOUN}\s+(?:is\s+|are\s+)?(?:missing|absent|unavailable|insufficient)\b"
+    r"|:\s*undisclosed\b"
+    # … is not disclosed / stated / available: information availability.
+    r"|\b(?:is|are|was|were)\s+not\s+(?:disclosed|provided|available|specified|stated|given"
+    r"|quantified|itemi[sz]ed|broken\s+out|reported|identified|detailed)\b"
+    r"|\bnot\s+(?:disclosed|provided|stated|specified|available|found|present|included"
+    r"|contained|mentioned)\s+in\s+the\b"
+    r"|\b(?:cannot|can\s+not|could\s+not)\s+be\s+(?:calculated|computed|determined"
+    r"|established|verified|confirmed|derived|quantified)\b"
+    r"|\bunable\s+to\s+(?:find|determine|calculate|compute|confirm|verify|locate)\b"
+    r"|\bno\s+(?:information|mention|disclosure|reference|record|data|details?|breakdown)"
+    r"\s+(?:on|of|about|regarding|for|is|are|was|were|has|have)\b"
+    r"|\b(?:insufficient|not\s+sufficient)\s+(?:information|data|context|evidence|detail)s?\b"
+    rf"|\bno\s+evidence\b[^.;]{{0,40}}\bin\s+the\s+(?:provided\s+|retrieved\s+|available\s+)?"
+    rf"{_EVIDENCE_NOUN}\b"
+    # "… is missing" / "is missing from the data room" — but not "is missing
+    # from the executed agreement", which is a finding about the agreement.
+    rf"|\b(?:is|are|remains?)\s+(?:missing|absent)(?:\s+from\s+(?:the|any|all)\s+(?:provided\s+"
+    rf"|retrieved\s+|available\s+)?{_EVIDENCE_NOUN}\b|(?!\s+from\b))"
+    r"|\bmissing\s+(?:information|data|details?|documents?|context|figures?)\b"
+    r"|\b(?:would|will)\s+(?:need|be\s+needed|be\s+required)\s+to\s+(?:answer|confirm|determine"
+    r"|quantify|calculate|compute|verify|assess|establish)\b"
+    r"|\b(?:is|are)\s+(?:needed|required)\s+to\s+(?:answer|confirm|determine|quantify|calculate"
+    r"|compute|verify)\b",
     re.IGNORECASE,
 )
 
@@ -172,26 +212,43 @@ def _is_checkable(text: str, raw: str) -> bool:
     Returns:
         False for fragments, lead-ins and statements of absence.
     """
+    return _sentence_role(text) == "claim"
+
+
+def _sentence_role(text: str) -> str:
+    """
+    What a cleaned line is to the verifier.
+
+    Args:
+        text: Cleaned claim text.
+
+    Returns:
+        "claim" — asserts something checkable; "decline" — states what the
+        evidence does not say (not checked, but counted); "skip" — a fragment
+        or lead-in that asserts nothing.
+    """
     if not text or not _WORD.search(text):
-        return False
-    has_numbers = bool(extract_numbers(text))
-    if has_numbers:
-        return True
+        return "skip"
+    if extract_numbers(text):
+        return "claim"
     if len(text.split()) < _MIN_WORDS:
-        return False
+        return "skip"
     if text.endswith(":"):
-        return False
+        return "skip"
     if DECLINES_TO_ANSWER.search(text):
-        return False
-    return True
+        return "decline"
+    return "claim"
 
 
-def split_claims(answer: str) -> list[Claim]:
+def split_claims(answer: str, declined: list[str] | None = None) -> list[Claim]:
     """
     Splits an answer into atomic claims.
 
     Args:
         answer: Generated answer text (markdown, with inline citation markers).
+        declined: If given, the statements of absence that were set aside are
+            appended to it — they are not verified, and a reader of the result
+            should be able to see how many sentences that was.
 
     Returns:
         Checkable claims in answer order. Empty for an empty answer or one that
@@ -199,6 +256,12 @@ def split_claims(answer: str) -> list[Claim]:
     """
     if not answer:
         return []
+
+    def checkable(text: str) -> bool:
+        role = _sentence_role(text)
+        if role == "decline" and declined is not None:
+            declined.append(text)
+        return role == "claim"
 
     claims: list[Claim] = []
     lines = answer.splitlines()
@@ -232,7 +295,7 @@ def split_claims(answer: str) -> list[Claim]:
                 head = table_header[ci] if table_header and ci < len(table_header) else ""
                 parts.append(f"{head} {cell}".strip())
             text = f"{label}: " + "; ".join(parts) if parts else label
-            if _is_checkable(text, stripped):
+            if checkable(text):
                 claims.append(Claim(
                     index=len(claims),
                     text=text,
@@ -254,7 +317,7 @@ def split_claims(answer: str) -> list[Claim]:
         line_markers = CITATION_MARKER.findall(stripped)
         for sentence in _split_sentences(stripped):
             text = _clean(sentence)
-            if not _is_checkable(text, sentence):
+            if not checkable(text):
                 continue
             markers = CITATION_MARKER.findall(sentence)
             if not markers and line_markers:

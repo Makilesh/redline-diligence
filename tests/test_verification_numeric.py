@@ -185,8 +185,18 @@ class TestGrounding:
         assert checks[1][0].status == "unsupported"
 
     def test_unreproducible_calculation_is_flagged_not_failed(self, index):
-        checks = ground_texts(["Implied EV/EBITDA of approximately 7.50x."], index)[0]
-        assert checks[0].status == "derived_unverified"
+        # A calculation is flagged rather than failed when the claim states what
+        # it was calculated from. This test used to assert the same for a lone
+        # "Implied EV/EBITDA of approximately 7.50x" — which meant the word
+        # "approximately" excused any fabricated figure (audit V3; see
+        # tests/test_verification_audit.py for the rule's other half).
+        checks = ground_texts(
+            ["EBIT of $68.0 million on revenue of $452.8 million implies a margin of roughly 14.1%."],
+            index,
+        )[0]
+        assert {c.raw: c.status for c in checks}["14.1%"] == "derived_unverified"
+        alone = ground_texts(["Implied EV/EBITDA of approximately 7.50x."], index)[0]
+        assert alone[0].status == "unsupported"
 
 
 class TestSampleDataRoom:

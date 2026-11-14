@@ -409,3 +409,265 @@ class TestPathologicalLinesAreLinear:
         index = ContextIndex([{"source_file": "x.txt", "text": f"Revenue was $452.8 million.\n{line}\n"}])
         ground_texts(["Revenue was $452.8 million in FY2023."], index)
         assert time.perf_counter() - started < 5.0
+
+    def test_a_schedule_repeating_one_figure_does_not_multiply_the_work(self):
+        """
+        Binding looked for a rival row once per candidate figure, so a schedule
+        that repeats a figure on every row cost candidates x rows: 4.2 s for a
+        40-claim answer against 1,000 rows, fourfold per doubling (about a
+        minute at these 4,000). The rows carry a row number, so their columns
+        are not "alike" and every candidate reaches the rival check.
+        """
+        rows = "\n".join(
+            f"Revenue line {k} gross profit        $452.8      $271.7" for k in range(4_000)
+        )
+        index = ContextIndex([{
+            "source_file": "schedule.txt",
+            "text": "SCHEDULE (in millions of USD)\n" + rows,
+        }])
+        claim = "Revenue was $452.8 million in FY2023 and gross profit was $271.7 million."
+
+        started = time.perf_counter()
+        results = ground_texts([claim] * 40, index)
+        assert time.perf_counter() - started < 5.0
+        # ... and the answer is what the slow version gave: both figures bound.
+        assert {(c.status, c.binding) for c in results[0]} == {("grounded", "bound")}
+
+
+# ─── V3: wording alone does not turn a fabricated figure into a calculation ───
+
+
+class TestV3CueWordsDoNotExcuseAFigure:
+    CONTEXT = TestV1UnitsAreNotInvented.AUDIT_CONTEXT
+    DEAL = [
+        _chunk("The aggregate Merger Consideration is approximately $696 million.",
+               source="merger_agreement_v2_final.txt"),
+        _chunk(KEY_METRICS),
+    ]
+
+    def test_a_verb_of_change_does_not_downgrade_a_fabricated_figure(self):
+        # The audit's pair: "was" failed, "increased to" only warned.
+        for verb in ("was", "increased to", "rose to approximately"):
+            assert _status(f"Total revenue {verb} $999.9 million in FY2023.", self.CONTEXT) == [
+                ("$999.9 million", "unsupported")
+            ], verb
+
+    @pytest.mark.asyncio
+    async def test_the_answer_fails_either_way(self):
+        report = await verify_answer(
+            f"Total revenue increased to $999.9 million in FY2023 [📄 {FIN} | IS].",
+            self.CONTEXT, "q", use_nli=False,
+        )
+        assert report.validation_status == "failed"
+        assert report.confidence == 0.0
+
+    def test_a_calculation_with_its_inputs_beside_it_is_flagged_not_failed(self):
+        chunks = [_chunk(INCOME_STATEMENT)]
+        text = "Revenue rose from $387.1 million to $452.8 million, an increase of roughly $99.9 million."
+        assert _status(text, chunks)[-1] == ("$99.9 million", "derived_unverified")
+
+    def test_inputs_stated_elsewhere_in_the_answer_count_if_they_reproduce_it(self):
+        claims = [
+            "The aggregate Merger Consideration is approximately $696 million.",
+            "EBITDA was $92.8 million.",
+            "Implied EV/EBITDA: 7.50x",
+        ]
+        index = ContextIndex(self.DEAL)
+        assert ground_texts(claims, index)[2][0].status == "derived_unverified"
+        # The same wording around a multiple nothing reproduces is a fabrication.
+        claims[2] = "Implied EV/EBITDA: 9.90x"
+        assert ground_texts(claims, index)[2][0].status == "unsupported"
+        # ... and so is a "calculated" figure in an answer that states no inputs.
+        alone = ground_texts(["Implied EV/EBITDA of approximately 7.50x."], index)
+        assert alone[0][0].status == "unsupported"
+
+    @pytest.mark.asyncio
+    async def test_an_unreproducible_calculation_earns_no_confidence(self):
+        answer = (
+            "Revenue rose from $387.1 million in FY2022 to $452.8 million in FY2023, an increase "
+            f"of roughly $99.9 million [📄 {FIN} | IS]."
+        )
+        report = await verify_answer(answer, [_chunk(INCOME_STATEMENT)], "q", use_nli=False)
+        assert report.validation_status == "warning"
+        # 2 of 3 figures confirmed, the claim itself unverified: (0.5 + 2/3) / 2.
+        assert report.confidence == pytest.approx(0.583, abs=0.001)
+
+
+# ─── V4: the claim cap does not exempt figures ────────────────────────────────
+
+
+class TestV4EveryClaimsFiguresAreGrounded:
+    CONTEXT = TestV1UnitsAreNotInvented.AUDIT_CONTEXT
+    FORTY = "\n".join(
+        f"- Total revenue for FY2023 was $452.8 million [📄 {FIN} | r{i}]." for i in range(40)
+    )
+
+    @pytest.mark.asyncio
+    async def test_a_fabricated_figure_in_claim_41_fails_the_answer(self):
+        answer = self.FORTY + f"\n- Adjusted EBITDA for FY2023 was $777.7 million [📄 {FIN} | x]."
+        report = await verify_answer(answer, self.CONTEXT, "q", use_nli=False)
+        assert len(report.claim_checks) == 41
+        assert report.validation_status == "failed"
+        assert report.numeric_counts["unsupported"] == 1
+
+    @pytest.mark.asyncio
+    async def test_a_confirmed_figure_past_the_cap_still_passes(self):
+        answer = self.FORTY + f"\n- Net income for FY2023 was $31.2 million [📄 {FIN} | x]."
+        report = await verify_answer(answer, self.CONTEXT, "q", use_nli=False)
+        assert report.validation_status == "passed"
+        assert report.claim_checks[40]["method"] == "numeric"
+
+    @pytest.mark.asyncio
+    async def test_an_unchecked_statement_past_the_cap_is_a_warning_and_is_said(self):
+        async def judge(query, claims, documents):
+            raise AssertionError("claims past the cap are not sent to the judge")
+
+        answer = self.FORTY + f"\n- The Company intends to vigorously defend the claim [📄 {FIN} | x]."
+        report = await verify_answer(
+            answer, self.CONTEXT, "q", scorer=_scorer(entail=0.99), judge=judge, use_nli=True,
+        )
+        assert report.validation_status == "warning"
+        assert report.claim_checks[40]["status"] == "unverified"
+        assert any("beyond the first 40" in flag for flag in report.flags)
+        assert report.confidence < 1.0
+
+
+# ─── V5: durations and counts are figures too ─────────────────────────────────
+
+
+class TestV5QuantitiesAreChecked:
+    SOURCE = "merger_agreement_v2_final.txt"
+    CONTEXT = [_chunk(
+        "The representations shall survive the Closing for a period of eighteen (18) months. "
+        "Notice must be given within 30 days. Severance of $2,160,000 is payable if the "
+        "executive is terminated within 24 months after the change of control. "
+        "The Company had 700 employees.",
+        source=SOURCE,
+    )]
+
+    def test_a_bare_number_with_what_it_counts_is_extracted(self):
+        def got(text):
+            return [(m.raw, m.kind, m.unit) for m in extract_numbers(text)]
+
+        assert got("The survival period is 24 months.") == [("24 months", "quantity", "month")]
+        assert got("Notice must be given within 45 days.") == [("45 days", "quantity", "day")]
+        assert got("The Company had 950 employees.") == [("950 employees", "quantity", "employee")]
+        assert got("a 60-day exclusivity period") == [("60 day", "quantity", "day")]
+        assert got("for eighteen (18) months") == [("18 months", "quantity", "month")]
+        assert got("within 30 calendar days") == [("30 days", "quantity", "day")]
+        assert got("between 6 and 10 months") == [
+            ("6", "quantity", "month"), ("10 months", "quantity", "month"),
+        ]
+        # A bare number that counts nothing named is still not a claim.
+        assert got("There are 12 of them, see item 5.") == []
+
+    def test_a_quantity_is_grounded_by_the_same_count_of_the_same_thing(self):
+        assert _status("The survival period is 18 months.", self.CONTEXT) == [("18 months", "grounded")]
+        assert _status("The survival period is 24 days.", self.CONTEXT) == [("24 days", "unsupported")]
+        assert _status("The survival period is 36 months.", self.CONTEXT) == [("36 months", "unsupported")]
+
+    def test_a_quantity_grounds_nothing_but_a_quantity(self):
+        assert _status("A $30 million escrow applies.", self.CONTEXT) == [("$30 million", "unsupported")]
+        assert _status("The fee is 30%.", self.CONTEXT) == [("30%", "unsupported")]
+
+    @pytest.mark.asyncio
+    async def test_a_quantity_the_documents_do_not_state_is_not_passed_on_entailment(self):
+        asked = []
+
+        async def judge(query, claims, documents):
+            asked.extend(claims)
+            return {c["id"]: {"status": "contradicted", "document": 1} for c in claims}, "judge"
+
+        answer = f"The representations survive the Closing for 36 months [📄 {self.SOURCE} | 8.1]."
+        report = await verify_answer(
+            answer, self.CONTEXT, "q", scorer=_scorer(entail=0.99), judge=judge, use_nli=True,
+        )
+        assert len(asked) == 1 and report.validation_status == "failed"
+
+        report = await verify_answer(answer, self.CONTEXT, "q", scorer=_scorer(entail=0.99), use_nli=True)
+        assert report.validation_status == "warning"
+        assert "36 months" in report.claim_checks[0]["reason"]
+
+    @pytest.mark.asyncio
+    async def test_a_quantity_that_is_present_does_not_settle_the_claim_by_itself(self):
+        # "18 months" is in the context; whether it is the NON-COMPETE period is
+        # a question for the entailment model or the judge, as it was before.
+        answer = f"The non-compete lasts 18 months [📄 {self.SOURCE} | 8.1]."
+        report = await verify_answer(answer, self.CONTEXT, "q", use_nli=False)
+        assert report.claim_checks[0]["status"] == "unverified"
+
+    @pytest.mark.asyncio
+    async def test_a_missing_quantity_blocks_an_otherwise_confirmed_claim(self):
+        cite = f"[📄 {self.SOURCE} | 2]"
+        good = await verify_answer(
+            f"Severance of $2,160,000 is payable if the executive is terminated within 24 months {cite}.",
+            self.CONTEXT, "q", use_nli=False,
+        )
+        assert good.validation_status == "passed"
+        bad = await verify_answer(
+            f"Severance of $2,160,000 is payable if the executive is terminated within 36 months {cite}.",
+            self.CONTEXT, "q", use_nli=False,
+        )
+        assert bad.validation_status == "warning"
+
+
+# ─── V6: only statements about the evidence are exempt from verification ──────
+
+
+class TestV6OnlyStatementsOfAbsenceAreSkipped:
+    ASSERTIONS = [
+        "There is no evidence of any pending litigation against the Company.",
+        "The buyer will be required to pay a reverse termination fee to the Company on any failure to close.",
+        "Management considers the insurance coverage insufficient for the cyber incident.",
+        "The key customer consent is missing from the executed agreement.",
+    ]
+    DECLINES = [
+        "The data room does not disclose the FY2024 capital expenditure budget.",
+        "The transaction value is not stated in the provided context.",
+        "The implied multiple cannot be calculated from the documents.",
+        "Enterprise Value (EV) / Transaction Value is absent from all context chunks.",
+        "Executive Severance at Closing: Undisclosed / Context missing",
+        "Neither quarterly financial reports nor quarterly breakdowns are included in the provided context.",
+        "Management projections would be needed to answer this question.",
+        "No information on the escrow arrangements is available.",
+    ]
+
+    @pytest.mark.parametrize("sentence", ASSERTIONS)
+    def test_an_assertion_containing_a_decline_keyword_is_a_claim(self, sentence):
+        from src.verification.claims import split_claims
+
+        assert [c.text for c in split_claims(sentence)] == [sentence]
+
+    @pytest.mark.parametrize("sentence", DECLINES)
+    def test_a_statement_about_what_the_evidence_lacks_is_not(self, sentence):
+        from src.verification.claims import split_claims
+
+        declined = []
+        assert split_claims(sentence, declined) == []
+        assert len(declined) == 1
+
+    @pytest.mark.asyncio
+    async def test_skipped_statements_are_counted(self):
+        answer = (
+            f"Total revenue for FY2023 was $452.8 million [📄 {FIN} | IS]. "
+            "The FY2024 budget is not disclosed. The data room does not state the capex plan."
+        )
+        report = await verify_answer(answer, TestV1UnitsAreNotInvented.AUDIT_CONTEXT, "q", use_nli=False)
+        assert len(report.claim_checks) == 1
+        assert report.claims_skipped == 2
+        assert any("2 statement(s) of absence" in note for note in report.notes)
+
+    @pytest.mark.asyncio
+    async def test_a_fabricated_no_litigation_statement_reaches_the_judge(self):
+        asked = []
+
+        async def judge(query, claims, documents):
+            asked.extend(c["claim"] for c in claims)
+            return {c["id"]: {"status": "contradicted", "document": 1} for c in claims}, "judge"
+
+        chunks = [_chunk("The Company is a defendant in DataFlow Systems Inc. v. Aurora Technologies Inc.")]
+        report = await verify_answer(
+            self.ASSERTIONS[0] + f" [📄 {FIN} | Litigation]", chunks, "q", use_nli=False, judge=judge,
+        )
+        assert asked == [self.ASSERTIONS[0]]
+        assert report.validation_status == "failed"

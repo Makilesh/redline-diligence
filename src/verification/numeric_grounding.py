@@ -5,24 +5,33 @@ Every figure an answer states is extracted, normalised to a plain magnitude
 (`$452.8 million` -> 452_800_000) and looked up among the figures present in
 the retrieved context, normalised the same way. A figure is:
 
-- grounded            — the same value appears in the context (within rounding);
+- grounded            — the same value appears in the context (within rounding),
+                        at a unit the document states;
 - derived             — not verbatim, but reproducible by one arithmetic step
                         (difference, sum, ratio, percentage change) from two
-                        figures the answer itself states AND that are grounded;
+                        figures the answer itself states AND that are grounded,
+                        or the same rate in the other notation (225 bps = 2.25%);
 - derived_unverified  — not reproducible, but the sentence presents it as a
-                        computation ("an increase of", "combined", "approximately"),
-                        so it is reported as a warning rather than a fabrication;
+                        computation ("an increase of", "combined", "approximately")
+                        AND states figures it could have been computed from, so
+                        it is reported as a warning rather than a fabrication;
 - unsupported         — none of the above.
+
+A grounded figure also carries a binding — is the matching context figure the
+one the claim means, or just the same number somewhere else? See
+ContextIndex.bind. Only a bound figure confirms a claim by itself.
 
 Why deterministic: the previous validator asked a lite model whether a stronger
 model's numbers were right. That check cost an LLM call per query and was
 unreliable in exactly the place it matters — a lite model will wave through a
 transposed digit. String-level grounding cannot be talked out of a mismatch.
 
-Why scale-agnostic matching: data-room tables state their unit once in a header
-("(in millions of USD)") and print bare figures ("$452.8"), while answers write
-"$452.8 million" or "$452,800,000". When one side of a comparison carries no
-explicit unit, the other is allowed to differ by a power of 1,000.
+Why units are read from the document: data-room tables state their unit once in
+a header ("(in millions of USD)") and print bare figures ("$452.8"), while
+answers write "$452.8 million" or "$452,800,000". So an unscaled context amount
+is also read at the unit its document declares — and at no other. An earlier
+version let either side differ by any power of 1,000 and let any bare number
+stand in for any kind of figure; see ContextIndex for what that cost.
 """
 
 from __future__ import annotations
@@ -105,7 +114,9 @@ class NumericMention:
         raw: The matched text, e.g. "$452.8 million".
         value: Magnitude with any explicit scale applied (sign dropped — answers
             say "declined by $1.8M" where tables print "($1.8)").
-        kind: currency | percent | pp | bps | multiple | count | plain.
+        kind: currency | percent | pp | bps | multiple | count | quantity | plain.
+            A quantity is a bare number with the thing it counts: "18 months",
+            "30 days", "700 employees".
         explicit_scale: True when the text itself stated the unit (M, million).
         scale: The explicit scale factor (1.0 when none).
         decimals: Digits after the decimal point as printed — drives the
@@ -113,6 +124,7 @@ class NumericMention:
         start: Offset in the source text.
         end: End offset in the source text.
         currency: "USD", "EUR" or "GBP" when the text names one, else "".
+        unit: For a quantity, what is counted, singular: "month", "employee".
     """
 
     raw: str
@@ -124,6 +136,7 @@ class NumericMention:
     start: int
     end: int
     currency: str = ""
+    unit: str = ""
 
     @property
     def half_unit(self) -> float:
@@ -136,9 +149,12 @@ class NumericMention:
         True for figures an answer asserts as a quantity.
 
         Plain integers without separators or units ("284", "5", "12") are
-        excluded: in prose they are overwhelmingly list numbers, clause numbers,
-        day counts and headcounts, and treating them as financial claims
-        produces noise that trains reviewers to ignore the check.
+        excluded: in prose they are overwhelmingly list numbers and clause
+        numbers, and treating them as financial claims produces noise that
+        trains reviewers to ignore the check. A bare number followed by what it
+        counts ("24 months", "45 days") IS a claim — survival, notice and
+        non-compete periods are among the most consequential numbers in a
+        contract — but a weaker one: see the quantity rules in claim_checker.
         """
         return self.kind != "plain"
 
@@ -234,8 +250,14 @@ def extract_numbers(text: str, claims_only: bool = True) -> list[NumericMention]
         else:
             kind = "plain"
 
+        raw = m.group(0).strip()
+        counted = _QUANTITY_UNIT_RE.match(scrubbed, m.end()) if kind == "plain" else None
+        if counted:
+            kind = "quantity"
+            raw = f"{raw} {counted.group('noun')}{counted.group('plural')}"
+
         mentions.append(NumericMention(
-            raw=m.group(0).strip(),
+            raw=raw,
             value=abs(mantissa) * scale,
             kind=kind,
             explicit_scale=scale_token is not None,
@@ -244,6 +266,7 @@ def extract_numbers(text: str, claims_only: bool = True) -> list[NumericMention]
             start=m.start(),
             end=m.end(),
             currency=_CURRENCY_CODES.get(cur.upper(), "") if cur else "",
+            unit=counted.group("noun").lower() if counted else "",
         ))
 
     mentions = _share_range_units(scrubbed, mentions)
@@ -253,6 +276,15 @@ def extract_numbers(text: str, claims_only: bool = True) -> list[NumericMention]
 
 
 _CURRENCY_CODES = {"$": "USD", "US$": "USD", "USD": "USD", "€": "EUR", "EUR": "EUR", "£": "GBP", "GBP": "GBP"}
+
+# What a bare number counts, directly after it: "18 months", "(36) months",
+# "60-day", "30 calendar days", "700 employees".
+_QUANTITY_UNIT_RE = re.compile(
+    r"\)?[ -]?(?:(?:calendar|business|working|consecutive|full)\s)?"
+    r"(?P<noun>day|week|month|quarter|year|hour|employee|customer|patent|share|director"
+    r"|executive|officer|contractor)(?P<plural>s?)\b",
+    re.IGNORECASE,
+)
 
 # What may stand between the two ends of a range: "225 to 175 basis points",
 # "$3.5 – $8.0 million", "between 10 and 15%".
@@ -282,8 +314,10 @@ def _share_range_units(text: str, mentions: list[NumericMention]) -> list[Numeri
             text[first.end: second.start]
         ):
             continue
-        ratio = second.kind in ("percent", "pp", "bps", "multiple")
-        if first.kind == "plain" and (ratio or (second.kind == "count" and second.explicit_scale)):
+        stated_once = second.kind in ("percent", "pp", "bps", "multiple", "quantity")
+        if first.kind == "plain" and (
+            stated_once or (second.kind == "count" and second.explicit_scale)
+        ):
             kind, scale, explicit = second.kind, second.scale, second.explicit_scale
         elif (
             first.kind == second.kind == "currency"
@@ -303,6 +337,7 @@ def _share_range_units(text: str, mentions: list[NumericMention]) -> list[Numeri
             start=first.start,
             end=first.end,
             currency=first.currency,
+            unit=second.unit,
         )
     return out
 
@@ -496,6 +531,8 @@ def _is_comparison(text: str, start: int, end: int) -> bool:
 
 # Ratios state their own unit and are never "in millions"; amounts may be.
 _RATIO_KINDS = {"percent", "pp", "bps", "multiple"}
+# Kinds that are never read at an assumed magnitude.
+_UNSCALED_KINDS = _RATIO_KINDS | {"quantity"}
 _SCALES = (1.0, 1e3, 1e6, 1e9)
 # What an unscaled "$452.8" may mean when no unit header was retrieved:
 # financial statements are printed in thousands or millions.
@@ -524,6 +561,13 @@ def _kinds_compatible(claim_kind: str, ctx_kind: str, ctx_cell: bool = False) ->
     Returns:
         Whether the two may be the same figure.
     """
+    # A quantity is grounded by the same count of the same thing, or by a bare
+    # number ("12 of the Company's 47 issued U.S. patents" for "12 patents"),
+    # and grounds nothing else: "30 days" is not "$30 million" or "30%".
+    if claim_kind == "quantity":
+        return ctx_kind in ("quantity", "plain")
+    if ctx_kind == "quantity":
+        return False
     if claim_kind == ctx_kind:
         return True
     if {claim_kind, ctx_kind} <= {"percent", "pp"}:
@@ -603,6 +647,7 @@ class _Unit:
     tokens: frozenset
     figures: list[int]
     tabular: bool
+    kinds: frozenset = frozenset()
 
 
 @dataclass
@@ -650,6 +695,7 @@ class ContextIndex:
     def __init__(self, chunks: Iterable[dict]):
         self.figures: list[ContextFigure] = []
         self.units: list[_Unit] = []
+        self._units_by_token: dict[str, list[int]] = {}
         # (value at one magnitude, figure id, True when that magnitude is assumed)
         keyed: list[tuple[float, int, bool]] = []
 
@@ -710,7 +756,14 @@ class ContextIndex:
                 ) if tabular else frozenset()
 
                 unit_id = len(self.units)
-                self.units.append(_Unit(tokens=tokens, figures=[], tabular=tabular))
+                self.units.append(_Unit(
+                    tokens=tokens,
+                    figures=[],
+                    tabular=tabular,
+                    kinds=frozenset(m.kind for m in in_unit),
+                ))
+                for token in tokens:
+                    self._units_by_token.setdefault(token, []).append(unit_id)
 
                 # A column header applies to a row of like figures of the same
                 # count: "Revenue  $452.8  $387.1" under "FY2023  FY2022", not
@@ -779,7 +832,7 @@ class ContextIndex:
         Returns:
             Matching ContextFigures, de-duplicated, in context order.
         """
-        if mention.explicit_scale or mention.kind in _RATIO_KINDS:
+        if mention.explicit_scale or mention.kind in _UNSCALED_KINDS:
             scales: tuple[float, ...] = (1.0,)
         else:
             scales = _SCALES
@@ -787,11 +840,15 @@ class ContextIndex:
         for s in scales:
             target = mention.value * s
             tol = max(mention.half_unit * s, _REL_TOLERANCE * target, 1e-9)
+            if mention.kind == "quantity":
+                tol = 1e-9  # "24 months" is not "24.3 months" rounded
             for k in self._within(target, tol):
                 if s != 1.0 and self._assumed[k]:
                     continue
                 fig = self.figures[self._ids[k]]
                 if not _kinds_compatible(mention.kind, fig.mention.kind, fig.cell):
+                    continue
+                if mention.unit and fig.mention.unit and mention.unit != fig.mention.unit:
                     continue
                 if mention.currency and fig.mention.currency and mention.currency != fig.mention.currency:
                     continue
@@ -830,6 +887,7 @@ class ContextIndex:
         claim_period: str,
         claim_kind: str,
         explained_units: set[int],
+        overlaps: dict[int, int] | None = None,
     ) -> Binding:
         """
         Decides whether any matching context figure is the figure the claim means.
@@ -873,6 +931,8 @@ class ContextIndex:
             claim_period: Year the claim states for this figure, "*" or "".
             claim_kind: Kind of the claimed figure.
             explained_units: Rows and sentences matched by a figure of the claim.
+            overlaps: unit_overlaps(claim_tokens), when the caller binds several
+                figures of one claim and has computed it already.
 
         Returns:
             The Binding for the figure.
@@ -881,6 +941,12 @@ class ContextIndex:
         conflict: Binding | None = None
         undated: ContextFigure | None = None
         ambiguous: ContextFigure | None = None
+        # The claim's strongest rival is the same for every candidate, so it is
+        # found once, and only if a candidate gets that far. Looking for it per
+        # candidate made binding candidates x units: 4.2 s for a 40-claim answer
+        # against a 1,000-row schedule that repeats one figure, fourfold per
+        # doubling — on a document a counterparty supplies.
+        rival: tuple[int, str] | None = None
 
         for fig in candidates:
             if not fig.named_by(claim_tokens):
@@ -894,11 +960,17 @@ class ContextIndex:
                     figure=fig,
                 )
                 continue
-            rival = self._rival_unit(fig, claim_tokens, claim_kind, shared, explained_units)
-            if rival:
+            if rival is None:
+                rival = self._strongest_rival(
+                    self.unit_overlaps(claim_tokens) if overlaps is None else overlaps,
+                    claim_tokens,
+                    claim_kind,
+                    explained_units | {f.unit for f in candidates},
+                )
+            if rival[0] > shared:
                 conflict = conflict or Binding(
                     "conflict",
-                    note=f"the statement names another item ({rival}) whose figure is different",
+                    note=f"the statement names another item ({rival[1]}) whose figure is different",
                     figure=fig,
                 )
                 continue
@@ -922,41 +994,71 @@ class ContextIndex:
             )
         return Binding("unbound")
 
-    def _rival_unit(
+    def unit_overlaps(self, claim_tokens: set[str]) -> dict[int, int]:
+        """
+        How many of a claim's words each row or sentence shares with it.
+
+        Read off an inverted index, so the cost is the number of (word, unit)
+        pairs that actually match — not a scan of every unit per figure.
+
+        Args:
+            claim_tokens: binding_tokens of the claim.
+
+        Returns:
+            {unit index: shared word count} for units sharing at least one word.
+        """
+        counts: dict[int, int] = {}
+        for token in claim_tokens:
+            for ui in self._units_by_token.get(token, ()):
+                counts[ui] = counts.get(ui, 0) + 1
+        return counts
+
+    def _strongest_rival(
         self,
-        fig: ContextFigure,
+        overlaps: dict[int, int],
         claim_tokens: set[str],
         claim_kind: str,
-        shared: int,
-        explained_units: set[int],
-    ) -> str:
+        excluded_units: set[int],
+    ) -> tuple[int, str]:
         """
-        Words of a row or sentence the claim names more fully than fig's own.
+        The row or sentence, other than those the claim's figures match, that
+        the claim names most fully.
 
         "Professional Services revenue was $452.8 million" matches the Revenue
         row on one word and the Professional Services row on two; "Gross
         revenue retention was 118%" matches the net-retention sentence on two
         words and the gross-retention sentence on three. A row or sentence that
         one of the claim's figures does match is not a rival — the claim simply
-        states both ("revenue of $452.8M and gross profit of $271.7M").
+        states both ("revenue of $452.8M and gross profit of $271.7M"). A
+        candidate is in conflict when the rival shares more words with the
+        claim than the candidate's own row or sentence does.
+
+        Args:
+            overlaps: unit_overlaps(claim_tokens).
+            claim_tokens: binding_tokens of the claim.
+            claim_kind: Kind of the claimed figure; a rival must hold a figure
+                that could be mistaken for it.
+            excluded_units: Units matched by a figure of the claim.
+
+        Returns:
+            (shared word count, the shared words) of the strongest rival, or
+            (0, "") when there is none.
         """
-        for ui, unit in enumerate(self.units):
-            if ui == fig.unit or ui in explained_units or not unit.tokens:
+        best_overlap, best_unit = 0, -1
+        for ui, overlap in overlaps.items():
+            if overlap <= best_overlap or ui in excluded_units:
                 continue
-            overlap = len(unit.tokens & claim_tokens)
-            if overlap <= shared:
-                continue
+            unit = self.units[ui]
             if unit.tabular:
                 if overlap / len(unit.tokens) < LABEL_COVERAGE:
                     continue
             elif overlap / len(claim_tokens) < SENTENCE_COVERAGE:
                 continue
-            if any(
-                _kinds_compatible(claim_kind, self.figures[i].mention.kind, True)
-                for i in unit.figures
-            ):
-                return " ".join(sorted(unit.tokens & claim_tokens))
-        return ""
+            if any(_kinds_compatible(claim_kind, kind, True) for kind in unit.kinds):
+                best_overlap, best_unit = overlap, ui
+        if best_unit < 0:
+            return 0, ""
+        return best_overlap, " ".join(sorted(self.units[best_unit].tokens & claim_tokens))
 
 
 def _assumed_scales(
@@ -979,7 +1081,7 @@ def _assumed_scales(
     Returns:
         Scale factors (never including 1.0).
     """
-    if mention.explicit_scale or mention.kind in _RATIO_KINDS or per_unit:
+    if mention.explicit_scale or mention.kind in _UNSCALED_KINDS or per_unit:
         return ()
     if mention.kind == "currency":
         if declared:
@@ -1260,9 +1362,12 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
     """
     Grounds every figure in a list of answer segments (claims or sentences).
 
-    Two passes per segment: every figure is first looked up verbatim; the ones
-    not found are then tried as derivations from the segment's own grounded
-    figures (see _derive), and failing that are classed by wording.
+    Per segment, every figure is first looked up in the context and bound to
+    the row or sentence it sits in (ContextIndex.bind); the ones not found are
+    tried as derivations from the segment's own grounded figures (see _derive).
+    What is still unexplained is "derived_unverified" only if it is worded as a
+    calculation AND there are figures it could have been calculated from, in
+    its claim or elsewhere in the answer; otherwise it is "unsupported".
 
     Args:
         texts: Answer segments, citation markers already stripped.
@@ -1272,6 +1377,8 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
         One list of NumericCheck per input text, in order.
     """
     results: list[list[NumericCheck]] = []
+    segments: list[tuple] = []
+    answer_operands: list[tuple[float, str]] = []
 
     for ti, text in enumerate(texts):
         checks: list[NumericCheck] = []
@@ -1291,6 +1398,7 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
             figure_periods(text, [(m.start, m.end) for m in every]),
         ))
         explained = {fig.unit for group in found for fig in group}
+        overlaps = index.unit_overlaps(claim_tokens) if any(found) else {}
 
         for mention, group in zip(mentions, found):
             if group:
@@ -1300,6 +1408,7 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
                     stated.get((mention.start, mention.end), ""),
                     mention.kind,
                     explained,
+                    overlaps,
                 )
                 fig = binding.figure or group[0]
                 # Operand value in the context's normalisation, so a claim
@@ -1366,6 +1475,17 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
             if not progressed:
                 break
 
+        segments.append((text, mentions, checks, pending, list(operands)))
+        answer_operands.extend(
+            (value, check.kind) for _, check, value in grounded if check.is_confirmed
+        )
+
+    # Second pass: what to make of a figure that is neither in the context nor
+    # reproducible from its own claim. It needs every claim's confirmed figures,
+    # so it runs after all of them are grounded.
+    answer_operands = list(dict.fromkeys(answer_operands))[:_MAX_ANSWER_OPERANDS]
+    attempts = 0
+    for text, mentions, checks, pending, operands in segments:
         for mention, check in pending:
             if check.status == "derived":
                 continue
@@ -1378,7 +1498,18 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
                 (m.end for m in mentions if m.end <= mention.start), default=0
             )
             lead_in = text[max(previous_end, mention.start - _CUE_WINDOW): mention.start]
-            if _COMPUTATION_CUE_RE.search(lead_in) or _COMPUTED_CLAIM_RE.search(text):
+            if not (_COMPUTATION_CUE_RE.search(lead_in) or _COMPUTED_CLAIM_RE.search(text)):
+                continue
+            # Wording alone does not make a figure a calculation: "revenue
+            # increased to $999.9 million" used to be downgraded from a failure
+            # to a warning by the word "increased". There must be something it
+            # could have been calculated FROM — two like figures in the same
+            # claim, or inputs stated elsewhere in the answer that reproduce it.
+            plausible = _has_inputs(mention, operands)
+            if not plausible and attempts < _MAX_ANSWER_DERIVATIONS:
+                attempts += 1
+                plausible = _derive(mention, answer_operands) is not None
+            if plausible:
                 check.status = "derived_unverified"
 
         # A figure restating the one just before it in other units —
@@ -1403,6 +1534,34 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
         results.append(checks)
 
     return results
+
+
+# Bounds on the answer-wide plausibility check: an answer is model output, and
+# trying every pair of its figures for every unexplained one is cubic.
+_MAX_ANSWER_OPERANDS = 200
+_MAX_ANSWER_DERIVATIONS = 50
+
+
+def _has_inputs(mention: NumericMention, operands: list[tuple[float, str]]) -> bool:
+    """
+    True when a claim states figures its unexplained figure could come from.
+
+    Args:
+        mention: The figure that is not in the context.
+        operands: (value, kind) of the claim's grounded and derived figures.
+
+    Returns:
+        Whether at least two like figures stand beside it: two amounts for an
+        amount; two amounts or two ratios for a ratio. A quantity ("27 months")
+        is never treated as a calculation.
+    """
+    if mention.kind == "quantity":
+        return False
+    amounts = sum(1 for _, kind in operands if kind in ("currency", "count"))
+    if mention.kind in ("currency", "count"):
+        return amounts >= 2
+    ratios = sum(1 for _, kind in operands if kind in _RATIO_KINDS)
+    return amounts >= 2 or ratios >= 2
 
 
 def ground_answer_numbers(answer: str, chunks: list[dict]) -> list[dict]:
