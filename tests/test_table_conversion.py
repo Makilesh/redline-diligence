@@ -412,6 +412,29 @@ def _payloads(rows, source, **kwargs):
 
 
 class TestRegistrySeesConverterTables:
+    def test_per_share_figures_are_never_scaled_by_the_caption(self):
+        """Every representation of the table, in any chunk order, keeps EPS as printed."""
+        chunks = _payloads(MIXED_UNIT_ROWS, "cim.pdf")
+        for ordering in (chunks, list(reversed(chunks))):
+            registry = NumericalRegistry.from_chunks(ordering)
+            eps = [e for (label, _), es in registry._entries.items() if "eps" in label for e in es]
+            assert eps, "EPS rows were not registered"
+            assert all(abs(e.normalized_value) < 10 for e in eps), [
+                (e.normalized_value, e.scale_factor) for e in eps]
+
+    def test_text_table_under_an_except_caption_keeps_per_share_rows_as_printed(self):
+        text = (
+            "(USD in millions, except per share data)\n"
+            "                 FY2023    FY2022\n"
+            "Revenue           452.8     398.1\n"
+            "Diluted EPS        2.74      2.31\n"
+        )
+        registry = NumericalRegistry.from_chunks([{"source_file": "memo.txt", "text": text}])
+        entries = [(label, e) for (label, _), es in registry._entries.items() for e in es]
+        assert all(e.normalized_value < 10 for label, e in entries if "eps" in label)
+        assert any(e.normalized_value == pytest.approx(452_800_000)
+                   for label, e in entries if "revenue" in label)
+
     def test_two_documents_disagreeing_are_reported(self):
         other = [list(row) for row in MIXED_UNIT_ROWS]
         other[1] = ["Revenue", "398.1", "448.1"]
