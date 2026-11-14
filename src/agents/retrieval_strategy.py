@@ -43,8 +43,6 @@ RETRIEVAL_CONFIGS: dict[str, dict] = {
         "final_top_k": 8,
         "use_parent_expansion": True,
         "use_sibling_expansion": False,
-        # NOTE: Comparative sub-query decomposition is a KNOWN LIMITATION in v1.
-        # Comparative queries still work via query_expansions from Agent 1.
     },
     "summary": {
         "dense_weight": 0.7,

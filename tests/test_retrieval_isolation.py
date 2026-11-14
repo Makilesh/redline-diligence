@@ -95,3 +95,65 @@ class TestBothChannelsAreFiltered:
             await _client(), {"document_category": "financial", "include_pii": False})
 
         assert dense == sparse == {"visible-financial"}
+
+
+class TestModelOutputCannotNarrowToNothing:
+    """
+    The filters dict is model output. Only a known document_category may become
+    a hard filter: any other key would confine every search of the request to
+    whatever the model echoed, and the rewrite loop cannot take it off again.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("llm_filters", [
+        {"doc_id": "some-other-doc"},
+        {"is_table": 1},
+        {"content_type": "table_markdown"},
+        {"document_category": "not-a-category"},
+        {"document_category": ["legal", {"nested": "object"}]},
+        {"fiscal_year": "FY2023", "currency": "USD"},
+    ])
+    async def test_unknown_or_invalid_keys_are_ignored(self, llm_filters):
+        dense, sparse = await _search(await _client(), {**llm_filters, "include_pii": False})
+
+        assert dense == sparse == {"visible", "visible-financial"}
+
+    @pytest.mark.parametrize("not_a_dict", [None, [], ["document_category"], "legal"])
+    def test_a_filters_value_of_the_wrong_type_is_treated_as_no_filters(self, not_a_dict):
+        from src.vector_db.hybrid_search import _build_filter
+
+        keys = [c.key for c in _build_filter(DEAL, not_a_dict).must]
+
+        assert keys == ["deal_id", "is_current_version", "contains_pii"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("extracted", [None, [], "legal"])
+    async def test_agent_3_survives_malformed_filters_in_state(self, monkeypatch, extracted):
+        import numpy as np
+
+        import src.agents.retrieval_executor as rx
+
+        seen = {}
+
+        async def embed(texts):
+            return np.zeros((len(texts), 4), dtype=np.float32)
+
+        async def search(**kwargs):
+            seen.update(kwargs["metadata_filters"])
+            return [], []
+
+        async def expand(**kwargs):
+            return []
+
+        monkeypatch.setattr(rx, "embed_texts_async", embed)
+        monkeypatch.setattr(rx, "compute_sparse_bm25", lambda text: None)
+        monkeypatch.setattr(rx, "hybrid_search", search)
+        monkeypatch.setattr(rx, "expand_context", expand)
+
+        await rx.retrieval_executor_node({
+            "current_query": "q", "query_type": "legal", "parsed_intent": {},
+            "deal_id": DEAL, "include_pii": False, "rewrite_iteration": 0,
+            "retrieval_config": {}, "extracted_filters": extracted,
+        })
+
+        assert seen == {"include_pii": False}

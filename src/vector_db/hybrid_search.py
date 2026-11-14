@@ -185,14 +185,16 @@ VALID_DOCUMENT_CATEGORIES = frozenset({
 })
 
 # Payload fields a query may narrow on. Everything else in metadata_filters is
-# dropped: the dict is largely LLM-authored (Agent 1 / Agent 6), and a key that
-# is not on the payload (fiscal_year, currency) would silently match nothing.
-ALLOWED_FILTER_KEYS = frozenset({
-    "document_category",
-    "is_table",
-    "content_type",
-    "doc_id",
-})
+# dropped: the dict is LLM-authored (Agent 1 / Agent 6), and a key that is not
+# on the payload (fiscal_year, currency) would silently match nothing.
+#
+# Only document_category. doc_id, content_type and is_table used to be accepted
+# as well, but nothing except model output ever supplied them, and each is a
+# hard filter: a model that echoed a doc_id or "is_table": 1 confined every
+# search of the request to it, and the rewrite loop cannot remove a key it is
+# not allowed to set. A trusted caller that needs to scope a search to one
+# document should get its own argument, as include_superseded did.
+ALLOWED_FILTER_KEYS = frozenset({"document_category"})
 
 
 def _valid_filter_value(key: str, value) -> bool:
@@ -210,10 +212,8 @@ def _valid_filter_value(key: str, value) -> bool:
     if not values:
         return False
     if key == "document_category":
-        return all(v in VALID_DOCUMENT_CATEGORIES for v in values)
-    if key == "is_table":
-        return all(v in (0, 1) and not isinstance(v, float) for v in values)
-    return all(isinstance(v, str) and v for v in values)
+        return all(isinstance(v, str) and v in VALID_DOCUMENT_CATEGORIES for v in values)
+    return False
 
 
 def _build_filter(
@@ -257,7 +257,8 @@ def _build_filter(
     # NOTE: Use .get() on a shallow copy — NOT .pop() on the original dict.
     # _build_filter() is called once per query expansion via asyncio.gather().
     # .pop() on the shared dict would consume include_pii on the first call.
-    local_filters = dict(metadata_filters)  # shallow copy — never mutate caller's dict
+    # A model can return null or a list where the filters object belongs.
+    local_filters = dict(metadata_filters) if isinstance(metadata_filters, dict) else {}
     include_pii = local_filters.pop("include_pii", False)
     if not include_pii:
         conditions.append(
@@ -271,9 +272,6 @@ def _build_filter(
         if key not in ALLOWED_FILTER_KEYS or not _valid_filter_value(key, value):
             dropped.append(key)
             continue
-        if key == "is_table":
-            # Stored as integer 0/1; a JSON `true` would never match it.
-            value = [int(v) for v in value] if isinstance(value, list) else int(value)
         if isinstance(value, list):
             conditions.append(
                 FieldCondition(key=key, match=MatchAny(any=value))
