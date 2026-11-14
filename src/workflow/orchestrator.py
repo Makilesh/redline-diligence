@@ -1033,7 +1033,8 @@ def _summarize_stage(node: str, delta: dict) -> tuple[str, dict]:
         }
 
     if node == "hallucination_validator":
-        status = delta.get("validation_status", "passed")
+        # Missing means the validator did not decide; never report that as passed.
+        status = delta.get("validation_status") or "warning"
         flags = delta.get("hallucination_flags") or []
         confidence = delta.get("confidence_score", 0.0)
         counts = trace.get("status_counts") or {}

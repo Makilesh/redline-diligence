@@ -128,7 +128,9 @@ def _build_response(
         answer=result.get("generated_answer", ""),
         query_type=result.get("query_type", "summary"),
         confidence_score=result.get("confidence_score", 0.0),
-        validation_status=result.get("validation_status", "passed"),
+        # A run that reached here without a status was not verified; it must
+        # not be reported as "passed" (the frontends badge that as Verified).
+        validation_status=result.get("validation_status") or "warning",
         citations=citations,
         hallucination_flags=diagnostics["hallucination_flags"],
         claim_checks=diagnostics["claim_checks"],

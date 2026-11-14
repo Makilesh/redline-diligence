@@ -260,8 +260,9 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
-    # Lets the browser read the correlation id that generic error messages cite.
-    expose_headers=[REQUEST_ID_HEADER],
+    # Lets the browser read the correlation id that generic error messages cite,
+    # and how long to wait after a 429 or 503 (hidden from fetch() otherwise).
+    expose_headers=[REQUEST_ID_HEADER, "Retry-After"],
 )
 app.add_middleware(RequestIdMiddleware)
 
