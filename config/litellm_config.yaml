@@ -106,8 +106,9 @@ general:
   retry_on_json_failure: 1       # one repair request on the same slot, then the next model
   safety_margin: 0.95            # fraction of each provider quota we spend
 
-# TPM (250K/min) is recorded in the registry but NOT enforced — metering it
-# needs per-call token accounting the pipeline does not do. At current traffic
-# RPM binds first (15 req/min against 250K TPM implies ~16K tokens/request
-# before TPM could bind; these prompts run ~8K). Recorded rather than left
-# implicit so it does not become a third quota surprise.
+# TPM (250K/min) is an INPUT-token limit and is metered per (key, model) slot at
+# the call boundary: an estimate is booked before each request and replaced by
+# the provider's prompt-token count afterwards. A request that would not fit is
+# not sent — it is handled like a per-minute 429 (rest the slot, rotate keys).
+# At ordinary traffic RPM still binds first (15 req/min against 250K TPM needs
+# ~16K input tokens/request; most prompts run ~8K).
