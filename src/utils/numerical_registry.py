@@ -2,10 +2,17 @@
 Numerical registry — collects labelled financial figures across documents and
 detects cross-document inconsistencies deterministically.
 
-Used by Agent 4 (Financial Verifier). Figures come from two places:
+Used by Agent 4 (Financial Verifier). Figures come from three places:
 
 - structured payloads written at ingestion (`structured_rows` on row-by-row
   table chunks, or a chunk-level `metric_name` / `normalized_value`);
+- the text of converted tables (PDF, DOCX, XLSX), in the forms the table
+  converter writes: "Revenue: FY2023=452,800,000 FY2022=387,100,000" (row by
+  row), "Revenue: FY2023: 452,800,000; FY2022: 387,100,000" (narrative) and a
+  markdown grid. Ingestion builds `structured_rows` but does not carry it into
+  the stored payload, so without this the registry saw no converted table at
+  all and the verifier reported "no labelled figures" for every non-.txt
+  document;
 - fixed-width tables in text chunks, parsed line by line: a period header
   ("FY2023   FY2022") followed by label + value rows ("Revenue  $452.8  $387.1").
 
@@ -24,7 +31,11 @@ import re
 from dataclasses import dataclass, field
 
 from src.utils.logger import setup_logger
-from src.verification.numeric_grounding import extract_numbers
+from src.verification.numeric_grounding import (
+    SCALE_HINT_RE as _SCALE_HINT,
+    SCALE_HINT_WORDS as _SCALE_WORD,
+    extract_numbers,
+)
 
 logger = setup_logger(__name__)
 
@@ -34,18 +45,19 @@ _PERIOD = re.compile(
     r"(?:19|20)\d{2}[EA]?|LTM|TTM)\b",
     re.IGNORECASE,
 )
-_SCALE_HINT = re.compile(
-    r"\(\s*(?:\$|USD|US\$|EUR|GBP)?\s*(?:in\s+)?(thousands|millions|billions)\b"
-    r"|\bin\s+(thousands|millions|billions)\s+of\b"
-    r"|\b(?:USD|\$)\s*(thousands|millions|billions|000s|mm|m)\b",
+_RULE_LINE = re.compile(r"^\s*[=\-_*~]{4,}\s*$")
+# "FY2023=452,800,000" / "FY2023: 452,800,000" — a period-keyed value in the
+# text of a converted table. The period is the same token _PERIOD matches.
+_KEYED_VALUE = re.compile(
+    r"(?P<period>" + _PERIOD.pattern + r")\s?[=:]\s?(?P<value>\(?-?\$?\d[\d,]*(?:\.\d+)?\)?%?)",
     re.IGNORECASE,
 )
-_SCALE_WORD = {
-    "thousands": 1e3, "000s": 1e3,
-    "millions": 1e6, "mm": 1e6, "m": 1e6,
-    "billions": 1e9,
-}
-_RULE_LINE = re.compile(r"^\s*[=\-_*~]{4,}\s*$")
+# A line-item label is a few words. Anything longer, or with sentence
+# punctuation, is prose sitting in a label position — and labels are quoted into
+# the synthesis prompt, so that prose could be an instruction (see
+# prompt_safety.wrap_finding).
+_MAX_LABEL_CHARS = 80
+_SENTENCE_IN_LABEL = re.compile(r"[.!?]\s+\S")
 _LABEL_PREFIX = re.compile(r"^(?:add(?:\s+back)?|less|plus|minus)\s*:\s*", re.IGNORECASE)
 # Parentheticals that annotate a figure without changing what it measures.
 # "(Non-Current)" or "(excluding restructuring)" DO change it, so they stay.
@@ -77,6 +89,15 @@ def normalize_metric_label(label: str) -> str:
     text = re.sub(r"\breported\b", " ", text, flags=re.IGNORECASE)
     text = re.sub(r"[^a-z0-9%/&+ ]", " ", text.lower())
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _is_line_item_label(label: str) -> bool:
+    """True for text that reads as a table row's label rather than as prose."""
+    return (
+        len(re.findall(r"[A-Za-z]", label)) >= 3
+        and len(label) <= _MAX_LABEL_CHARS
+        and not _SENTENCE_IN_LABEL.search(label)
+    )
 
 
 def normalize_period(token: str) -> str:
@@ -273,6 +294,8 @@ class NumericalRegistry:
         for line in text.splitlines():
             if not line.strip() or _RULE_LINE.match(line):
                 continue
+            if self._register_keyed_row(line, source, page):
+                continue
 
             header_periods = _PERIOD.findall(line)
             if header_periods:
@@ -284,11 +307,12 @@ class NumericalRegistry:
             numbers = extract_numbers(line, claims_only=False)
             if not numbers or not periods or len(numbers) != len(periods):
                 continue
-            # "($8.2)" leaves its opening parenthesis on the label side.
-            label = line[: numbers[0].start].strip().rstrip("(").strip().rstrip(":").strip()
+            # "($8.2)" leaves its opening parenthesis on the label side; a
+            # markdown grid row leaves its pipes.
+            label = line[: numbers[0].start].strip(" |").rstrip("(").strip().rstrip(":").strip()
             # Values must be the tail of the line — a table row, not prose.
-            tail = line[numbers[-1].end:].strip(" )")
-            if tail or len(re.findall(r"[A-Za-z]", label)) < 3:
+            tail = line[numbers[-1].end:].strip(" )|")
+            if tail or not _is_line_item_label(label):
                 continue
 
             for period, num in zip(periods, numbers):
@@ -310,6 +334,57 @@ class NumericalRegistry:
                     scale_known=scale_known,
                     raw_text=f"{label}  {num.raw}",
                 ))
+
+    def _register_keyed_row(self, line: str, source: str, page) -> bool:
+        """
+        Registers a row of a converted table from its text form.
+
+        The table converter writes each row as "Label: FY2023=452,800,000
+        FY2022=387,100,000" (row by row) or "Label: FY2023: 452,800,000;
+        FY2022: 387,100,000" (narrative), with values already multiplied out to
+        full units. The structured form of the same row (`structured_rows`) is
+        not in the stored payload, so this text is the only place a converted
+        table's figures reach the registry.
+
+        Args:
+            line: One line of chunk text.
+            source: File the chunk came from.
+            page: Page number, if any.
+
+        Returns:
+            True when the line was a period-keyed row (registered or not), so
+            the fixed-width parser should leave it alone.
+        """
+        label, sep, rest = line.partition(":")
+        if not sep or not _is_line_item_label(label.strip(" |-*")) or _PERIOD.search(label):
+            return False
+        pairs = list(_KEYED_VALUE.finditer(rest))
+        # The whole row must be period-keyed values: "SaaS ARR Growth: 27.9% YoY
+        # (SaaS ARR as of Dec 31, 2023: $210.5M)" has a period and a colon too.
+        if not pairs or _KEYED_VALUE.sub("", rest).strip(" ;,|"):
+            return False
+        label = label.strip(" |-*")
+        for pair in pairs:
+            found = extract_numbers(pair.group("value"), claims_only=False)
+            if not found:
+                continue
+            num = found[0]
+            self.register(NumericalEntry(
+                metric_name=label,
+                raw_value=num.value,
+                normalized_value=num.value,
+                scale_factor=1.0,
+                source_file=source,
+                page_number=page,
+                fiscal_year=normalize_period(pair.group("period")),
+                kind="percent" if num.kind in ("percent", "pp") else (
+                    "multiple" if num.kind == "multiple" else "currency"
+                ),
+                decimals=num.decimals,
+                scale_known=True,
+                raw_text=f"{label}  {num.raw}",
+            ))
+        return True
 
     # ── Comparison ─────────────────────────────────────────────────────────
 

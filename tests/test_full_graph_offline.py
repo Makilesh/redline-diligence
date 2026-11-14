@@ -655,8 +655,13 @@ class TestProviderFailures:
         assert "could not generate an answer" in run.answer
         assert run.state["citations"] == []
         assert "$" not in run.answer
-        # Bounded: a provider-wide outage cannot walk the ladder forever.
-        assert 1 < p.llm.count("synthesis") <= 6
+        # Bounded: a provider-wide outage cannot walk the ladder forever. The
+        # bound is the synthesizer's own — six rungs plus one hop per key, the
+        # same rule as the structured-call ladder.
+        from src.agents.answer_synthesizer import _hop_bound
+        from src.llm.budget_tracker import BudgetTracker
+
+        assert 1 < p.llm.count("synthesis") <= _hop_bound(await BudgetTracker.get_instance())
 
 
 # ==============================================================================
@@ -823,7 +828,6 @@ def known_defect(audit_id: str, why: str, raises=AssertionError):
 
 
 class TestKnownDefects:
-    @known_defect("W4/L1", "the 220-character floor is applied before the citation check")
     async def test_short_cited_answer_is_accepted(self, offline_pipeline):
         p = offline_pipeline
         await p.load_data_room()
@@ -894,7 +898,6 @@ class TestKnownDefects:
 
         assert run.state["original_query"] == REVENUE_QUESTION
 
-    @known_defect("V7", "the synthesizer's apology is verified as if it were an answer")
     async def test_failed_synthesis_is_not_verified_as_an_answer(self, offline_pipeline):
         p = offline_pipeline
         await p.load_data_room()
