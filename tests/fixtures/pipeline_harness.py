@@ -33,6 +33,7 @@ import contextlib
 import html
 import json
 import re
+import warnings
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -475,7 +476,11 @@ class OfflinePipeline:
             from src.vector_db.collection_manager import setup_collections
 
             self._client = AsyncQdrantClient(location=":memory:")
-            await setup_collections(self._client)
+            with warnings.catch_warnings():
+                # Local Qdrant filters by scanning, so it warns that the payload
+                # indexes setup_collections creates do nothing. Expected here.
+                warnings.filterwarnings("ignore", message="Payload indexes have no effect")
+                await setup_collections(self._client)
             # get_qdrant_client() hands out this module-level singleton.
             module_path, attribute = SEAMS["qdrant_singleton"]
             if not hasattr(qdrant_module, attribute):
