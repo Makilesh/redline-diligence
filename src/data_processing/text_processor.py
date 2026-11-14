@@ -38,6 +38,49 @@ _SINGLE_DASH_RULE = re.compile(r"^\s*-{2,}\s*$")
 
 MAX_HEADING_CHARS = 100
 
+# Share of control characters above which a decoded file is treated as binary.
+_MAX_CONTROL_SHARE = 0.02
+
+
+def decode_text_file(data: bytes) -> tuple[str, str]:
+    """
+    Decodes the bytes of an uploaded .txt file.
+
+    Reading every file as UTF-8 with errors="replace" turned a Windows-1252
+    disclosure schedule's "£25.0 million (€29.1 million)" into "�25.0 million
+    (�29.1 million)" — the currency of both figures gone — and a UTF-16 file
+    (what Notepad and many exports write) into one letter per line separated
+    by NULs, which was then indexed. Order: a byte-order mark if present, then
+    strict UTF-8, then Windows-1252 (a superset of Latin-1 for printable text,
+    and what a Western-locale Office export uses).
+
+    Args:
+        data: File bytes.
+
+    Returns:
+        (text, encoding name).
+
+    Raises:
+        ValueError: The bytes are not text in any of these encodings (a binary
+            file with a .txt extension).
+    """
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        text, encoding = data.decode("utf-16"), "utf-16"
+    elif data.startswith(b"\xef\xbb\xbf"):
+        text, encoding = data.decode("utf-8-sig"), "utf-8-sig"
+    else:
+        try:
+            text, encoding = data.decode("utf-8"), "utf-8"
+        except UnicodeDecodeError:
+            try:
+                text, encoding = data.decode("cp1252"), "cp1252"
+            except UnicodeDecodeError as e:
+                raise ValueError("not text") from e
+    controls = sum(1 for ch in text if ord(ch) < 32 and ch not in "\n\r\t\f")
+    if text and controls / len(text) > _MAX_CONTROL_SHARE:
+        raise ValueError("not text")
+    return text, encoding
+
 
 def _is_table_line(line: str) -> bool:
     """

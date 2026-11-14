@@ -77,7 +77,7 @@ from src.data_processing.semantic_chunker import (
     SemanticChunker,
 )
 from src.data_processing.structural_chunker import StructuralChunker
-from src.data_processing.text_processor import parse_text_sections
+from src.data_processing.text_processor import decode_text_file, parse_text_sections
 from src.decisions import ingest_signals
 from src.decisions.laya_client import LayaUnavailable, laya_enabled
 from src.vector_db.constants import (
@@ -263,6 +263,17 @@ def validate_office_archive(file_path: str, extension: str) -> None:
     try:
         archive = zipfile.ZipFile(file_path)
     except zipfile.BadZipFile as e:
+        with open(file_path, "rb") as f:
+            magic = f.read(8)
+        # An OLE compound file: what Office writes for a password-protected
+        # document, and what a legacy .doc/.xls/.ppt renamed to the new
+        # extension is. Both are common in data rooms and both are fixable by
+        # the uploader, so say which.
+        if magic == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+            raise DocumentExtractionError(
+                f"The {extension} file is password-protected or in the legacy binary Office "
+                f"format; upload an unprotected {extension} copy"
+            ) from e
         raise DocumentExtractionError(
             f"The file is not a valid {extension} document"
         ) from e
@@ -308,8 +319,15 @@ def _content_sample(file_path: str, extension: str) -> str:
     """
     try:
         if extension == ".txt":
-            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                return f.read(_CONTENT_SAMPLE_CHARS)
+            with open(file_path, "rb") as f:
+                data = f.read(_CONTENT_SAMPLE_CHARS * 4)
+            # Cut at a line end so a multi-byte character is never split.
+            if b"\n" in data[:-1]:
+                data = data[: data.rindex(b"\n") + 1]
+            try:
+                return decode_text_file(data)[0][:_CONTENT_SAMPLE_CHARS]
+            except (ValueError, UnicodeDecodeError):
+                return data[:_CONTENT_SAMPLE_CHARS].decode("utf-8", errors="replace")
         if extension == ".pdf":
             import fitz
             with fitz.open(file_path) as pdf:
@@ -460,6 +478,8 @@ def extract_sections(
                     page_number=s.page_number,
                     table_id=next_table_id(),
                     extra={"page_range": s.page_range} if s.page_range else None,
+                    caption=s.caption,
+                    notes=s.notes,
                 ))
             else:
                 sections.append({
@@ -469,6 +489,7 @@ def extract_sections(
                     "section_type": s.section_type,
                     "clause_id": s.clause_id,
                 })
+        warnings.extend(processor.warnings)
 
     elif extension == ".docx":
         from src.data_processing.docx_processor import process_docx_with_versions
@@ -531,8 +552,16 @@ def extract_sections(
         warnings.extend(processor.warnings)
 
     elif extension == ".txt":
-        with open(file_path, "r", encoding="utf-8-sig", errors="replace") as f:
-            text = f.read()
+        with open(file_path, "rb") as f:
+            data = f.read()
+        try:
+            text, encoding = decode_text_file(data)
+        except ValueError:
+            raise DocumentExtractionError(
+                "The .txt file is not text (it looks like a binary file with a .txt extension)"
+            ) from None
+        if encoding not in ("utf-8", "utf-8-sig"):
+            logger.info("Text file decoded", extra={"doc_id": doc_id, "encoding": encoding})
         for s in parse_text_sections(text):
             if s["is_table"]:
                 sections.extend(_table_sections(
@@ -923,6 +952,23 @@ def _doc_filter(deal_id: str, doc_id: str, keep_ids: list[str] | None = None):
     )
 
 
+async def _retired_by(client, collection_name: str, deal_id: str, doc_id: str) -> str:
+    """The doc_id that superseded this document, or "" when it is current."""
+    points, _ = await client.scroll(
+        collection_name=collection_name,
+        scroll_filter=_doc_filter(deal_id, doc_id),
+        limit=1,
+        with_payload=["is_current_version", "superseded_by"],
+        with_vectors=False,
+    )
+    if not points:
+        return ""
+    payload = points[0].payload or {}
+    if payload.get("is_current_version") == 0 and payload.get("superseded_by"):
+        return str(payload["superseded_by"])
+    return ""
+
+
 async def _upsert_batches(client, collection_name: str, points: list) -> None:
     """Upserts points in QDRANT_BATCH_SIZE batches, waiting for each."""
     for start in range(0, len(points), QDRANT_BATCH_SIZE):
@@ -956,9 +1002,13 @@ async def index_document(
     stale points (ids no longer produced, e.g. after a chunking change).
     Re-indexing identical bytes therefore replaces rather than duplicates.
 
-    If any upsert fails, every point for this (deal_id, doc_id) is deleted
-    from both collections before the error propagates, so a document is
-    either fully indexed or absent — never half-indexed.
+    If an upsert fails on a first-time ingest, every point for this
+    (deal_id, doc_id) is deleted from both collections before the error
+    propagates, so a new document is either fully indexed or absent. On a
+    re-index nothing is deleted: the copy that was already serving stays.
+
+    A document that a newer version has superseded stays superseded when it is
+    re-indexed (is_current_version=0, superseded_by kept, and a warning).
 
     Args:
         file_path: Path to the file on disk.
@@ -978,7 +1028,8 @@ async def index_document(
     Returns:
         Dict with doc_id, deal_id, filename, document_category, chunks_created,
         parent_chunks_created, table_count, risk_signals, has_redline, warnings,
-        content_sha256 and previously_indexed.
+        content_sha256, previously_indexed and superseded_by ("" unless this
+        document had been retired by a newer version).
 
     Raises:
         IngestionError subclasses for client-attributable failures; other
@@ -1020,6 +1071,26 @@ async def index_document(
         supersedes_doc_id=supersedes_doc_id,
     )
 
+    existing = await client.count(
+        collection_name=collection_name,
+        count_filter=_doc_filter(deal_id, doc.doc_id),
+        exact=True,
+    )
+    retired_by = await _retired_by(client, collection_name, deal_id, doc.doc_id) \
+        if existing.count else ""
+    if retired_by:
+        # Re-indexing a retired version (a folder re-ingest, a bulk loader, the
+        # old file uploaded again by mistake) used to rewrite its payloads as
+        # current and both versions were then retrieved side by side. The
+        # retirement stands; only superseding the newer version undoes it.
+        for payload in [*doc.chunks, *doc.parents]:
+            payload["is_current_version"] = 0
+            payload["superseded_by"] = retired_by
+        doc.warnings.append(
+            f"This document was superseded by {retired_by}; it was re-indexed as a superseded "
+            "version and is not searched by default"
+        )
+
     # Vectors are computed over header + text (see chunk_context.py); the
     # payload keeps the source text alone.
     texts = [embedding_text(c) for c in doc.chunks]
@@ -1053,16 +1124,23 @@ async def index_document(
             payload=parent,
         ))
 
-    existing = await client.count(
-        collection_name=collection_name,
-        count_filter=_doc_filter(deal_id, doc.doc_id),
-        exact=True,
-    )
-
     try:
         await _upsert_batches(client, collection_name, child_points)
         await _upsert_batches(client, parent_collection_name, parent_points)
     except Exception:
+        if existing.count:
+            # A re-index of a document that was already serving. Deleting every
+            # point of the doc_id here removed the good copy along with the
+            # failed attempt (audit I9). The points are keyed by chunk id, so
+            # what is there now is the old copy with some chunks rewritten to
+            # the same content — a valid state; the caller sees the error and
+            # can retry.
+            logger.error(
+                "Re-index upsert failed; the previously indexed copy is kept",
+                extra={"doc_id": doc.doc_id, "deal_id": deal_id},
+                exc_info=True,
+            )
+            raise
         logger.error(
             "Upsert failed; rolling back document",
             extra={"doc_id": doc.doc_id, "deal_id": deal_id},
@@ -1110,6 +1188,7 @@ async def index_document(
         "warnings": doc.warnings,
         "content_sha256": doc.content_sha256,
         "previously_indexed": bool(existing.count),
+        "superseded_by": retired_by,
     }
     logger.info(
         "Document indexed",
@@ -1130,7 +1209,7 @@ async def mark_superseded(
     client=None,
     collection_name: str = COLLECTION_NAME,
     parent_collection_name: str = PARENT_COLLECTION_NAME,
-) -> None:
+) -> dict:
     """
     Flips every chunk (and parent) of a superseded document to is_current_version=0.
 
@@ -1138,9 +1217,11 @@ async def mark_superseded(
     current, and retrieval's is_current_version=1 filter happily returns stale
     terms alongside the ones that replaced them.
 
-    Failures are logged, not raised: the new document is already indexed and
-    usable, and losing the retirement stamp degrades results rather than
-    invalidating the upload.
+    Failures are not raised — the new document is already indexed and usable —
+    but they are reported: the result says whether the retirement happened, so
+    the caller can answer "partial" instead of recording a supersession that
+    Qdrant never applied (audit I8). A superseded_doc_id with no points in the
+    deal (a typo, another deal's id) is a failure, not a silent no-op.
 
     Args:
         deal_id: Deal scope, so one deal can never retire another deal's docs.
@@ -1149,6 +1230,10 @@ async def mark_superseded(
         client: AsyncQdrantClient; defaults to the application singleton.
         collection_name: Child collection.
         parent_collection_name: Parent collection.
+
+    Returns:
+        {"ok": bool, "chunks_retired": int, "error": str | None}. ok is True
+        only when the document existed and both collections were updated.
     """
     if superseded_doc_id == superseded_by:
         # Re-uploading identical bytes yields the same doc_id; retiring it
@@ -1156,18 +1241,31 @@ async def mark_superseded(
         logger.warning(
             "Ignoring self-supersession", extra={"doc_id": superseded_doc_id}
         )
-        return
+        return {"ok": False, "chunks_retired": 0, "error": "a document cannot supersede itself"}
 
     if client is None:
         from src.vector_db.qdrant_client import get_qdrant_client
         client = get_qdrant_client()
 
     try:
+        found = await client.count(
+            collection_name=collection_name,
+            count_filter=_doc_filter(deal_id, superseded_doc_id),
+            exact=True,
+        )
+        if not found.count:
+            logger.error(
+                "Superseded document not found in the deal",
+                extra={"deal_id": deal_id, "superseded_doc_id": superseded_doc_id},
+            )
+            return {"ok": False, "chunks_retired": 0,
+                    "error": "the superseded document is not indexed in this deal"}
         for name in (collection_name, parent_collection_name):
             await client.set_payload(
                 collection_name=name,
                 payload={"is_current_version": 0, "superseded_by": superseded_by},
                 points=_doc_filter(deal_id, superseded_doc_id),
+                wait=True,
             )
         logger.info(
             "Superseded document retired",
@@ -1175,8 +1273,10 @@ async def mark_superseded(
                 "deal_id": deal_id,
                 "superseded_doc_id": superseded_doc_id,
                 "superseded_by": superseded_by,
+                "chunks_retired": found.count,
             },
         )
+        return {"ok": True, "chunks_retired": found.count, "error": None}
     except Exception as e:
         logger.error(
             "Failed to retire superseded document",
@@ -1186,3 +1286,4 @@ async def mark_superseded(
                 "error": str(e),
             },
         )
+        return {"ok": False, "chunks_retired": 0, "error": "the version store could not be updated"}
