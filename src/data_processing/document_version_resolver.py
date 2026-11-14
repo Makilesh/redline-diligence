@@ -329,6 +329,48 @@ class DocumentVersionResolver:
 
         return None
 
+    def relation(self, new_file_name: str, existing_file_name: str) -> str | None:
+        """
+        How an uploaded file relates to an indexed one, judged from file names.
+
+        This is the part of the resolver ingestion uses, and only to PROPOSE a
+        supersession: a file name is weak evidence ("Agreement_final.pdf" is
+        routinely followed by "Agreement_final_v2.pdf"), and retiring a
+        document on a guess silently removes it from every answer. The caller
+        decides; nothing here changes version state.
+
+        Args:
+            new_file_name: The file being ingested.
+            existing_file_name: A file already indexed in the deal.
+
+        Returns:
+            "newer" (the upload looks like a later version of the existing
+            file), "older", "same_document" (same base name, order unknown), or
+            None (different documents).
+        """
+        if self._comparable_base(new_file_name) != self._comparable_base(existing_file_name):
+            return None
+        new = self._extract_version_info(new_file_name)
+        old = self._extract_version_info(existing_file_name)
+        if new["version_number"] is not None and old["version_number"] is not None:
+            if new["version_number"] != old["version_number"]:
+                return "newer" if new["version_number"] > old["version_number"] else "older"
+        if new["is_final"] != old["is_final"]:
+            return "newer" if new["is_final"] else "older"
+        if new["version_number"] is not None and old["version_number"] is None:
+            return "newer"
+        if old["version_number"] is not None and new["version_number"] is None:
+            return "older"
+        return "same_document"
+
+    def _comparable_base(self, file_name: str) -> str:
+        """Base name with draft / redline / clean markers also removed."""
+        base = self._extract_base_name(file_name)
+        base = re.sub(r"[^a-z0-9]+", "_", base)  # "(clean)" -> "_clean_"
+        base = re.sub(r"(?:^|_)(?:draft|redline|blackline|clean|markup|execution|conformed|copy)"
+                      r"(?=_|$)", "", base)
+        return re.sub(r"_+", "_", base).strip("_")
+
     def build_version_metadata(self, doc_version: DocumentVersion) -> dict:
         """
         Build the version-related payload fields for Qdrant ingestion.

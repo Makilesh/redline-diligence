@@ -7,6 +7,7 @@ Tracks slide_number metadata for citation.
 from pathlib import Path
 from dataclasses import dataclass, field
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from src.utils.logger import setup_logger
 
@@ -64,9 +65,12 @@ class PPTXProcessor:
             if slide.shapes.title:
                 content.title = slide.shapes.title.text.strip()
 
-            # Extract text from all shapes
+            # Extract text from all shapes, including those inside groups:
+            # slide.shapes lists a group as one shape, and its text boxes and
+            # tables — a common way to lay out a deal-summary slide — were
+            # never read.
             body_parts = []
-            for shape in slide.shapes:
+            for shape in self._iter_shapes(slide.shapes):
                 if shape.has_text_frame:
                     for paragraph in shape.text_frame.paragraphs:
                         text = paragraph.text.strip()
@@ -109,6 +113,15 @@ class PPTXProcessor:
         )
 
         return slides
+
+    @classmethod
+    def _iter_shapes(cls, shapes):
+        """Every shape on a slide, descending into group shapes."""
+        for shape in shapes:
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                yield from cls._iter_shapes(shape.shapes)
+            else:
+                yield shape
 
     def to_text_chunks(self, slides: list[SlideContent]) -> list[dict]:
         """

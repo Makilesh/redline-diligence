@@ -62,6 +62,11 @@ def _section_metadata(section: dict) -> dict:
             meta[key] = value
     if section.get("is_table"):
         meta["is_table"] = 1
+    # A table stitched across pages is cited by its page range. page_range is
+    # a core key of the chunk itself, so it was consumed here and never
+    # reached the payload — every multi-page table was cited to its first page.
+    if section.get("page_range"):
+        meta["page_range"] = list(section["page_range"])
     return meta
 
 

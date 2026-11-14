@@ -316,3 +316,83 @@ class LegalClauseSegmenter:
             extra={"total_segments": len(all_segments)},
         )
         return all_segments
+
+    def segment_document(self, pages: list[tuple[int, str]]) -> list[dict]:
+        """
+        Segments a whole document at once, so a clause that runs over a page
+        break stays one clause.
+
+        segment_multipage() cuts at every page boundary: the end of clause
+        8.2(b) on page 2 became a separate "PREAMBLE" segment with no clause
+        number, cited to page 2 with nothing to say what it belonged to.
+
+        Lettered and roman sub-clauses are qualified by the numbered clause
+        they sit in ("8.2(a)", not "(a)"), so two "(a)" clauses of different
+        sections no longer share an id.
+
+        Args:
+            pages: (page_number, page_text) in reading order.
+
+        Returns:
+            Segments with text, clause_id, page_number (the page the clause
+            starts on) and page_range ([first, last] page it covers).
+        """
+        parts: list[str] = []
+        starts: list[tuple[int, int]] = []  # (offset where the page begins, page number)
+        offset = 0
+        for page_number, page_text in pages:
+            text = page_text.rstrip("\n")
+            if not text.strip():
+                continue
+            starts.append((offset, page_number))
+            parts.append(text)
+            offset += len(text) + 1  # the joining "\n"
+        full = "\n".join(parts)
+        if not full.strip():
+            return []
+
+        def page_at(position: int) -> int:
+            page = starts[0][1]
+            for begin, number in starts:
+                if begin > position:
+                    break
+                page = number
+            return page
+
+        boundaries = sorted(self._find_boundaries(full), key=lambda b: b[0])
+        if not boundaries:
+            segments = []
+            for page_number, page_text in pages:
+                segments.extend(self._paragraph_fallback(page_text, page_number))
+            for seg in segments:
+                seg["page_range"] = [seg["page_number"], seg["page_number"]]
+            return segments
+
+        cuts = [(0, None)] if boundaries[0][0] > 0 else []
+        cuts += boundaries
+        segments: list[dict] = []
+        parent_number: str | None = None
+        for i, (pos, boundary_text) in enumerate(cuts):
+            end = cuts[i + 1][0] if i + 1 < len(cuts) else len(full)
+            text = full[pos:end].strip()
+            if not text:
+                continue
+            if boundary_text is None:
+                clause_id = "PREAMBLE"
+            else:
+                after = full[pos + len(boundary_text): pos + len(boundary_text) + 200]
+                clause_id = self._extract_clause_id(boundary_text, after)
+                if re.match(r"^\d+(\.\d+)*$", clause_id):
+                    parent_number = clause_id
+                elif clause_id.startswith("ARTICLE") or clause_id.startswith("Article"):
+                    parent_number = None
+                elif clause_id.startswith("(") and parent_number:
+                    clause_id = f"{parent_number}{clause_id}"
+            last = full.rstrip()[:end].rstrip()
+            segments.append({
+                "text": text,
+                "clause_id": clause_id,
+                "page_number": page_at(pos),
+                "page_range": [page_at(pos), page_at(max(pos, len(last) - 1))],
+            })
+        return segments

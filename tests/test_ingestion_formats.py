@@ -145,8 +145,19 @@ class TestXlsx:
         assert "Revenue CAGR" in by_rep["metrics_summary"]["text"]
         assert by_rep["row_by_row"]["scale_label"] == "thousands"
         assert by_rep["row_by_row"]["currency"] == "USD"
-        # Normalised with the detected scale: 452,800 thousand.
-        assert "452,800,000" in by_rep["row_by_row"]["text"]
+        # The text carries the figure as the sheet states it (452,800, in
+        # thousands); the normalised value lives only in structured_rows. This
+        # used to assert "452,800,000" in the text — the converter rewriting
+        # every cell by the table's scale, which also turned per-share and
+        # headcount rows into millions.
+        assert "452,800" in by_rep["row_by_row"]["text"]
+        assert "452,800,000" not in by_rep["row_by_row"]["text"]
+        revenue = next(
+            r for r in by_rep["row_by_row"]["structured_rows"]
+            if r["line_item"].lower().startswith(("revenue", "total revenue"))
+        )
+        value = next(v for k, v in revenue["values"].items() if "2023" in k)
+        assert value["normalized_value"] == pytest.approx(452_800_000)
         assert all(c["page_number"] is None for c in income)
 
     def test_text_only_sheet_is_indexed_verbatim(self, tmp_path):
