@@ -5,9 +5,10 @@ No LLM calls. All embedding/reranking calls via run_in_executor (non-blocking).
 Executes the retrieval pipeline: embed → hybrid search → RRF fusion → rerank.
 """
 
+import asyncio
 import time
 
-from src.vector_db.reranker import embed_texts_async, rerank_async
+from src.vector_db.reranker import embed_texts_async, get_embed_executor, rerank_pairs_async
 from src.vector_db.hybrid_search import hybrid_search, compute_sparse_bm25
 from src.vector_db.rrf_fusion import reciprocal_rank_fusion
 from src.vector_db.parent_child_retrieval import expand_context
@@ -22,46 +23,43 @@ logger = setup_logger(__name__)
 # simply crowds the others out again and nothing has been gained.
 MIN_CHUNKS_PER_SUB_QUESTION = 2
 
-async def _retrieve_for_query(
+def _passage_for_reranking(chunk: dict) -> str:
+    """The text the cross-encoder scores: the chunk with its document and section."""
+    parts = []
+    if chunk.get("source_file"):
+        parts.append(f"Document: {chunk['source_file']}")
+    if chunk.get("section_heading"):
+        parts.append(f"Section: {chunk['section_heading']}")
+    parts.append(chunk.get("text", ""))
+    return " | ".join(parts)
+
+
+async def _candidates_for_query(
     query: str,
+    query_vector: list[float],
+    query_sparse,
     config: dict,
     deal_id: str,
     metadata_filters: dict,
 ) -> list[dict]:
     """
-    Runs one full retrieval pass for a single query string.
+    Hybrid search + RRF for one query: the candidates its rerank will score.
 
-    Embed → BM25 → hybrid search → RRF → rerank, returning chunks scored against
-    *this* query. Reranking against the query that fetched them is the reason
-    this is a separate function: a passage holding only the share price scores
-    poorly against "what is the implied EV/EBITDA multiple", but scores highly
-    against "what is the per-share merger consideration". Scoring each candidate
-    against the sub-question that went looking for it is what makes the facet
-    survive to the final context.
+    Payloads are taken from the search responses themselves. Both searches
+    already return them, so the scroll that used to re-fetch the fused ids was a
+    second round trip to Qdrant for data already in hand.
 
     Args:
-        query: The query or sub-question to retrieve for.
+        query: The query or sub-question (logging only).
+        query_vector: Its dense embedding.
+        query_sparse: Its BM25 sparse vector.
         config: Retrieval config (weights, top-k values).
         deal_id: Deal scope.
         metadata_filters: Filters, already relaxed/augmented by the caller.
 
     Returns:
-        Chunks sorted by descending reranker score, each carrying reranker_score.
-        No score cut-off is applied here: a fixed threshold measurably cost fact
-        coverage (91.6% -> 85.2% on the retrieval eval), and irrelevant context is
-        the Quality Assessor's call, not this function's.
+        Up to reranker_top_k chunk payloads in fused-rank order.
     """
-    import asyncio
-    from src.vector_db.reranker import get_embed_executor
-    from src.vector_db.hybrid_search import fetch_chunks_by_ids
-
-    query_vector = (await embed_texts_async([query]))[0].tolist()
-
-    loop = asyncio.get_running_loop()
-    query_sparse = await loop.run_in_executor(
-        get_embed_executor(), lambda: compute_sparse_bm25(query)
-    )
-
     dense_results, sparse_results = await hybrid_search(
         query_text=query,
         query_vector=query_vector,
@@ -80,31 +78,85 @@ async def _retrieve_for_query(
         sparse_weight=config.get("sparse_weight", 0.4),
     )
 
-    top_chunk_ids = [cid for cid, _ in fused[: config.get("reranker_top_k", 20)]]
-    chunks = await fetch_chunks_by_ids(top_chunk_ids)
-    if not chunks:
-        return []
+    payloads = {p.payload["chunk_id"]: p.payload for p in (*dense_results, *sparse_results)}
+    return [
+        payloads[cid]
+        for cid, _ in fused[: config.get("reranker_top_k", 20)]
+        if cid in payloads
+    ]
 
-    passages = []
-    for c in chunks:
-        parts = []
-        if c.get("source_file"):
-            parts.append(f"Document: {c['source_file']}")
-        if c.get("section_heading"):
-            parts.append(f"Section: {c['section_heading']}")
-        parts.append(c.get("text", ""))
-        passages.append(" | ".join(parts))
 
-    scores = await rerank_async(query, passages)
+async def _retrieve_for_queries(
+    queries: list[str],
+    config: dict,
+    deal_id: str,
+    filters_per_query: list[dict],
+) -> list[list[dict]]:
+    """
+    Runs one retrieval pass per query and reranks every pass in a single call.
 
-    scored = []
-    for chunk, score in zip(chunks, scores):
-        chunk = dict(chunk)
-        chunk["reranker_score"] = float(score)
-        scored.append(chunk)
+    Embed → BM25 → hybrid search → RRF → rerank, returning for each query the
+    chunks scored against *that* query. Reranking against the query that fetched
+    them is the point of keeping the passes separate: a passage holding only the
+    share price scores poorly against "what is the implied EV/EBITDA multiple",
+    but scores highly against "what is the per-share merger consideration".
+    Scoring each candidate against the sub-question that went looking for it is
+    what makes the facet survive to the final context.
 
-    scored.sort(key=lambda c: c["reranker_score"], reverse=True)
-    return scored
+    The passes share their model calls, though. Each used to embed, encode and
+    rerank on its own, which made a decomposed question pay the cross-encoder
+    once per pass, one after another: measured on the retrieval eval, an
+    undecomposed question took ~0.8s in this node and a decomposed one 2.2-4.6s.
+    All queries are now embedded in one call and every (query, passage) pair of
+    every pass goes to the cross-encoder together.
+
+    Args:
+        queries: The parent query followed by any sub-questions.
+        config: Retrieval config (weights, top-k values), shared by all passes.
+        deal_id: Deal scope.
+        filters_per_query: Filters for each query, already relaxed/augmented.
+
+    Returns:
+        One list per query, in order: chunks sorted by descending reranker score,
+        each carrying reranker_score. No score cut-off is applied here: a fixed
+        threshold measurably cost fact coverage (91.6% -> 85.2% on the retrieval
+        eval), and irrelevant context is the Quality Assessor's call, not this
+        function's.
+    """
+    query_vectors = await embed_texts_async(queries)
+
+    loop = asyncio.get_running_loop()
+    query_sparses = await loop.run_in_executor(
+        get_embed_executor(), lambda: [compute_sparse_bm25(q) for q in queries]
+    )
+
+    candidates = await asyncio.gather(*[
+        _candidates_for_query(
+            query, query_vectors[i].tolist(), query_sparses[i], config, deal_id,
+            filters_per_query[i],
+        )
+        for i, query in enumerate(queries)
+    ])
+
+    pairs = [
+        (query, _passage_for_reranking(chunk))
+        for query, chunks in zip(queries, candidates)
+        for chunk in chunks
+    ]
+    scores = await rerank_pairs_async(pairs) if pairs else []
+
+    results: list[list[dict]] = []
+    offset = 0
+    for chunks in candidates:
+        scored = []
+        for chunk, score in zip(chunks, scores[offset: offset + len(chunks)]):
+            chunk = dict(chunk)
+            chunk["reranker_score"] = float(score)
+            scored.append(chunk)
+        offset += len(chunks)
+        scored.sort(key=lambda c: c["reranker_score"], reverse=True)
+        results.append(scored)
+    return results
 
 
 def _merge_by_quota(
@@ -241,8 +293,6 @@ async def retrieval_executor_node(state: AgentState) -> dict:
     # sub-questions, and each gets its own pass. The parent query is retained as
     # the first pass so passages relevant to the question as a whole — which no
     # single sub-question asks for — are still reachable.
-    import asyncio
-
     sub_questions = [s for s in (state.get("sub_questions") or []) if s.strip()]
     retrieval_queries = [query] + sub_questions
 
@@ -326,12 +376,14 @@ async def retrieval_executor_node(state: AgentState) -> dict:
     def _filters_for(index: int) -> dict:
         return parent_filters if index == 0 else sub_question_filters
 
-    # Passes are independent, so run them concurrently. The embedding and
-    # reranking thread pools are bounded, so this queues rather than oversubscribes.
-    per_query_results = await asyncio.gather(*[
-        _retrieve_for_query(q, pass_config, deal_id, _filters_for(i))
-        for i, q in enumerate(retrieval_queries)
-    ])
+    # Passes are independent: their searches run concurrently and their model
+    # work is batched (see _retrieve_for_queries).
+    per_query_results = await _retrieve_for_queries(
+        retrieval_queries,
+        pass_config,
+        deal_id,
+        [_filters_for(i) for i in range(len(retrieval_queries))],
+    )
 
     if len(retrieval_queries) == 1:
         reranked = per_query_results[0][:final_top_k]
@@ -357,6 +409,12 @@ async def retrieval_executor_node(state: AgentState) -> dict:
     elapsed_ms = (time.monotonic() - start) * 1000
 
     candidates_per_pass = [len(r) for r in per_query_results]
+
+    # Tables whose sibling lookup failed: the answer is then written without the
+    # exact grid, which must be visible in the trace rather than only in a log.
+    siblings_missing = sorted(
+        {c["table_id"] for c in expanded if c.get("table_siblings_missing")}
+    )
 
     logger.info(
         "Agent 3: Retrieval Executor complete",
@@ -395,6 +453,7 @@ async def retrieval_executor_node(state: AgentState) -> dict:
                 "sources": sorted(
                     {c.get("source_file", "") for c in reranked} - {""}
                 ),
+                **({"table_siblings_missing": siblings_missing} if siblings_missing else {}),
             }
         ],
     }

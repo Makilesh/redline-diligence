@@ -57,6 +57,16 @@ RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
 # 1.6x on its own and costs nothing when chunks are 512 tokens to begin with.
 RERANKER_MAX_LENGTH = int(os.getenv("RERANKER_MAX_LENGTH", "1024"))
 
+# Half precision for the cross-encoder. "auto" (the default) enables it on CUDA
+# only: fp16 on a CPU is slower than fp32, not faster. Set RERANKER_FP16=0 to
+# force full precision on a GPU.
+RERANKER_FP16 = os.getenv("RERANKER_FP16", "auto").strip().lower()
+
+# Pairs per forward pass. Pairs are sorted by length before batching (see
+# _score_pairs), so a batch is padded to the length of its own longest member
+# rather than to the longest passage in the whole candidate set.
+RERANKER_BATCH_SIZE = int(os.getenv("RERANKER_BATCH_SIZE", "16"))
+
 # ==============================================================================
 # Model singletons — lazily loaded on first use
 # ==============================================================================
@@ -123,10 +133,71 @@ def _get_reranker_model() -> CrossEncoder:
             device=device,
             default_activation_function=torch.nn.Sigmoid(),  # ← MANDATORY for [0,1] scores
         )
+        half = _use_half_precision(device)
+        if half:
+            _reranker_model.model.half()
         logger.info(
-            f"{RERANKER_MODEL_NAME} loaded successfully on {device.upper()} (sigmoid activated)"
+            f"{RERANKER_MODEL_NAME} loaded successfully on {device.upper()} (sigmoid activated)",
+            extra={"half_precision": half},
         )
     return _reranker_model
+
+
+def _use_half_precision(device: str) -> bool:
+    """
+    Whether the cross-encoder weights should be converted to fp16.
+
+    Args:
+        device: "cuda" or "cpu", as chosen at load time.
+
+    Returns:
+        True on CUDA unless RERANKER_FP16 disables it; never on CPU.
+    """
+    if RERANKER_FP16 in ("0", "false", "no", "off"):
+        return False
+    return device == "cuda"
+
+
+def _score_pairs(pairs: list[tuple[str, str]]) -> np.ndarray:
+    """
+    Scores (query, passage) pairs with the cross-encoder. Synchronous.
+
+    Pairs are scored longest-first and the result is put back in input order.
+    CrossEncoder.predict pads every batch to its longest member, and passage
+    length is skewed — on the sample deal a pair is 144 tokens at the median and
+    575 at the maximum — so in input order one long passage made every pair in
+    its batch as expensive as itself.
+
+    The activation runs in float32 whatever the precision of the weights: fp16
+    resolves about 0.0005 near 1.0, which is enough to tie the strongest chunks.
+
+    Args:
+        pairs: (query, passage) pairs, any order, queries may differ.
+
+    Returns:
+        np.ndarray of shape (len(pairs),), float32, in the order of `pairs`.
+    """
+    model = _get_reranker_model()
+    order = sorted(
+        range(len(pairs)),
+        key=lambda i: len(pairs[i][0]) + len(pairs[i][1]),
+        reverse=True,
+    )
+    options = {}
+    # The model's own activation (sigmoid, set at load), moved to float32. A
+    # stand-in model without one keeps whatever its predict() does by default.
+    activation = getattr(model, "default_activation_function", None)
+    if activation is not None:
+        options["activation_fct"] = lambda logits: activation(logits.float())
+    sorted_scores = model.predict(
+        [list(pairs[i]) for i in order],
+        batch_size=RERANKER_BATCH_SIZE,
+        show_progress_bar=False,
+        **options,
+    )
+    scores = np.empty(len(pairs), dtype=np.float32)
+    scores[order] = np.asarray(sorted_scores, dtype=np.float32).reshape(len(pairs))
+    return scores
 
 
 # ==============================================================================
@@ -203,23 +274,43 @@ async def rerank_async(query: str, passages: list[str]) -> np.ndarray:
     if not passages:
         raise ValueError("Cannot rerank empty passage list")
 
-    model = _get_reranker_model()
+    return await rerank_pairs_async([(query, p) for p in passages])
+
+
+async def rerank_pairs_async(pairs: list[tuple[str, str]]) -> np.ndarray:
+    """
+    Non-blocking cross-encoder scoring of arbitrary (query, passage) pairs.
+
+    Unlike rerank_async the pairs need not share a query, so a decomposed
+    question can score the candidates of every sub-question in one call instead
+    of one call per pass.
+
+    Args:
+        pairs: (query, passage) pairs.
+
+    Returns:
+        np.ndarray of shape (len(pairs),) with sigmoid-normalized scores in
+        [0, 1], in the order of `pairs`.
+
+    Raises:
+        RuntimeError: If no running event loop is available.
+        ValueError: If pairs is empty.
+    """
+    if not pairs:
+        raise ValueError("Cannot rerank empty pair list")
+
     loop = asyncio.get_running_loop()  # ← NOT get_event_loop()
-    pairs = [[query, p] for p in passages]
 
-    logger.info("Reranking passages asynchronously", extra={"num_passages": len(passages)})
+    logger.info("Reranking passages asynchronously", extra={"num_passages": len(pairs)})
 
-    result = await loop.run_in_executor(
-        _rerank_executor,
-        lambda: model.predict(pairs),
-    )
+    result = await loop.run_in_executor(_rerank_executor, lambda: _score_pairs(pairs))
 
     logger.info(
         "Reranking complete",
         extra={
-            "num_passages": len(passages),
-            "min_score": float(np.min(result)) if len(result) > 0 else None,
-            "max_score": float(np.max(result)) if len(result) > 0 else None,
+            "num_passages": len(pairs),
+            "min_score": float(np.min(result)),
+            "max_score": float(np.max(result)),
         },
     )
     return result
@@ -275,7 +366,7 @@ async def warm_models() -> dict[str, float]:
             logger.warning(f"Model warmup failed for {name}: {e}")
 
     await _timed("dense_embedding", lambda: _get_embedding_model().encode([probe]))
-    await _timed("reranker", lambda: _get_reranker_model().predict([(probe, probe)]))
+    await _timed("reranker", lambda: _score_pairs([(probe, probe)]))
     await _timed("sparse_bm25", lambda: compute_sparse_bm25(probe))
 
     logger.info("Local model warmup complete", extra={"seconds": timings})
