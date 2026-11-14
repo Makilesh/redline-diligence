@@ -300,7 +300,19 @@ def parse_text_sections(text: str) -> list[dict]:
         prev_was_heading = False
 
         if _is_table_line(line):
+            # A column header without digits ("Name   Title   Base Salary")
+            # is not a table line on its own, so it was collected as prose and
+            # flushed into a separate section — the rows were indexed with no
+            # column names. A multi-cell line directly above the table's first
+            # line is its header.
+            header = None
+            if body_lines and body_lines[-1].strip() and len(
+                re.split(r"\s{2,}", body_lines[-1].strip())
+            ) >= 3:
+                header = body_lines.pop()
             flush_body()
+            if header is not None:
+                table_lines.append(header)
             table_lines.append(line)
             prev_line = line
             continue
