@@ -7,13 +7,16 @@
 #   pip install -r requirements-dev.txt
 #
 # Ranges bracket the versions the suite was last run with locally
-# (pytest 9.1.1, pytest-asyncio 1.4.0, httpx 0.28.1, ruff 0.16.8).
+# (pytest 9.1.1, pytest-asyncio 1.4.0, pytest-cov 7.1.0, httpx 0.28.1, ruff 0.16.8).
 
 -r requirements.txt
 
 pytest>=8.3,<10.0
 # 1.x: strict mode, tests opt in with @pytest.mark.asyncio.
 pytest-asyncio>=1.0,<2.0
+# Only active when pytest is run with --cov (CI does; see [tool.coverage] in
+# pyproject.toml). A plain `pytest` neither needs nor loads it.
+pytest-cov>=6.0,<8.0
 # fastapi.testclient.TestClient is built on httpx; FastAPI does not install it.
 httpx>=0.27,<1.0
 # Pinned to a minor: ruff adds and re-scopes rules between minors, which would
