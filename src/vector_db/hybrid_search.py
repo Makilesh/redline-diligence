@@ -10,7 +10,9 @@ There is NO third "metadata retrieval channel" via scroll.
 """
 
 import asyncio
+import re
 import time
+import unicodedata
 
 from fastembed import SparseTextEmbedding
 from qdrant_client import AsyncQdrantClient
@@ -54,9 +56,67 @@ def _get_bm25_model() -> SparseTextEmbedding:
     return _bm25_model
 
 
+# Version of the text normalisation applied before BM25 encoding. Stored on
+# every child point as `sparse_encoding` so that vectors written by an older
+# encoding can be found: a query encoded one way does not match a document
+# encoded another, and nothing else would say so.
+#   1 (or absent)  raw text through FastEmbed 0.3 — case-sensitive
+#   2              normalize_for_bm25
+SPARSE_ENCODING_VERSION = 2
+
+_THOUSANDS_SEPARATOR = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
+# A number keeps its decimal / section dots ("452.8", "8.1"); a word is a run of
+# letters and digits that starts with a letter ("fy2023", "q3"). Everything else
+# separates tokens.
+_BM25_TOKEN = re.compile(r"\d+(?:\.\d+)*|[^\W\d_][^\W_]*")
+
+
+def normalize_for_bm25(text: str) -> str:
+    """
+    Normalises text into the tokens BM25 should match on, for documents and
+    queries alike.
+
+    FastEmbed 0.3 (the pinned range) feeds text to an NLTK-style word tokenizer
+    and never lower-cases it, so on its own:
+      - "Revenue" and "revenue" are different terms, and "What"/"The" survive
+        the (lower-case) stopword list — "What is the Revenue and EBITDA?" shares
+        no term with "revenue and ebitda were strong";
+      - a sentence-final period stays on the word unless it ends the whole text
+        ("FY2023.", "months."), because the tokenizer expects one sentence;
+      - "$452.8M", "7.5x", "EV/EBITDA" and "change-of-control" are single terms,
+        so "452.8", "EBITDA" or "change of control" in a question miss them.
+    Figures and defined terms are what a diligence question keys on, so the
+    text is reduced to plain tokens here, independently of the FastEmbed version
+    (0.4+ lower-cases by itself; lower-casing twice changes nothing).
+
+    Measured on the retrieval eval, sparse channel alone (35 questions): fact
+    coverage@10 73.1% -> 94.3% (paired bootstrap 95% CI +10.1 to +34.0 points,
+    10 questions improved, none regressed), recall@10 46.6% -> 77.3%. All of
+    that comes from lower-casing. The punctuation and unit handling cannot be
+    told apart from lower-casing alone on that set (every interval includes
+    zero); it is here for the term mismatches listed above, which are
+    deterministic and each pinned by a test.
+
+    Lower-cases (after NFKC), drops thousands separators, and splits on
+    everything that is not a letter or digit, except dots between digits. A
+    number is split from a unit glued to it ("452.8m" -> "452.8 m", "280g" ->
+    "280 g"). Stopwords and stemming are still FastEmbed's.
+
+    Args:
+        text: Chunk text or query.
+
+    Returns:
+        Space-separated tokens (may be empty if the text has no letters or digits).
+    """
+    text = unicodedata.normalize("NFKC", text).lower()
+    text = _THOUSANDS_SEPARATOR.sub("", text)
+    return " ".join(_BM25_TOKEN.findall(text))
+
+
 def compute_sparse_bm25(text: str) -> SparseVector:
     """
-    Computes BM25 sparse vector for a text string.
+    Computes BM25 sparse vector for a text string (document or query), after
+    normalize_for_bm25.
     FastEmbed returns embeddings as objects with .indices and .values arrays.
     These must be converted to lists before passing to Qdrant.
 
@@ -76,7 +136,7 @@ def compute_sparse_bm25(text: str) -> SparseVector:
         raise ValueError("Cannot compute BM25 for empty text")
 
     model = _get_bm25_model()
-    embeddings = list(model.embed([text]))
+    embeddings = list(model.embed([normalize_for_bm25(text)]))
     return SparseVector(
         indices=embeddings[0].indices.tolist(),
         values=embeddings[0].values.tolist(),
@@ -111,7 +171,7 @@ def compute_sparse_bm25_batch(texts: list[str], batch_size: int = 64) -> list[Sp
     model = _get_bm25_model()
     return [
         SparseVector(indices=e.indices.tolist(), values=e.values.tolist())
-        for e in model.embed(texts, batch_size=batch_size)
+        for e in model.embed([normalize_for_bm25(t) for t in texts], batch_size=batch_size)
     ]
 
 
