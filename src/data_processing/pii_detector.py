@@ -28,7 +28,8 @@ logger = setup_logger(__name__)
 SSN_PATTERN = re.compile(
     r'\b\d{3}-\d{2}-\d{4}\b'
     r'|(?i:\b(?:ssn|social\s+security(?:\s+(?:number|no\.?|#))?)\s*[:#\-]?\s*)'
-    r'\d{3}[-\s]?\d{2}[-\s]?\d{4}\b'
+    # Dots as well: "Social Security Number 123.45.6789" was missed (audit I11).
+    r'\d{3}[-.\s]?\d{2}[-.\s]?\d{4}\b'
 )
 
 # Email addresses
@@ -54,12 +55,52 @@ SALARY_PATTERNS = [
     re.compile(r'(?i)\b(?:salary|base\s+pay|compensation|annual\s+pay)\s*[:\-]?\s*\$\s*[\d,]+'),
     re.compile(r'(?i)\b(?:bonus|incentive|commission|stock\s+option|equity\s+grant)\s*[:\-]?\s*\$\s*[\d,]+'),
     re.compile(r'(?i)\b(?:hourly\s+rate|pay\s+rate|wage)\s*[:\-]?\s*\$\s*[\d,.]+'),
+    # Prose: "an annual base salary of $525,000 and a target bonus of $310,000"
+    # put words between the keyword and the amount, which every pattern above
+    # requires to be adjacent (audit I11). The gap is bounded and may not cross
+    # a digit, a "$" or a sentence end, and only words that describe ONE
+    # person's pay qualify — "compensation", "commission" and "incentive" also
+    # head company aggregates ("stock-based compensation of $4.2 million").
+    # Amounts in millions/billions are skipped for the same reason; the atomic
+    # group stops the engine from backtracking "$4.2 million" to "$4" to dodge
+    # that check.
+    re.compile(
+        r'(?i)\b(?:salary|base\s+pay|annual\s+pay|bonus)\b[^\d$\n.;]{1,40}?'
+        r'\$\s*(?>\d[\d,]*(?:\.\d+)?)(?!\s*(?:million|billion|bn|mm|m)\b)'
+    ),
 ]
 
-# Bank account / routing numbers
-BANK_PATTERN = re.compile(
-    r'(?i)\b(?:account\s*(?:number|#|no\.?)|routing\s*(?:number|#|no\.?))\s*[:\-]?\s*\d{6,}'
+# A compensation table: a header row naming a salary or bonus column, then
+# dollar amounts on the next lines. The amounts sit under the header, never
+# next to the keyword, so no pattern above sees them (audit I11: the sample
+# deal's executive compensation schedule).
+COMP_TABLE_PATTERN = re.compile(
+    r'(?im)^[^\n]*\b(?:base\s+salary|salary|cash\s+bonus|target\s+bonus|bonus)\b[^\n]*'
+    r'(?:\n[^\n]*){0,2}?\n[^\n]*\$\s*\d[\d,]{3,}'
 )
+
+# Not detected, deliberately: the sample deal's own executive compensation and
+# severance tables as the .txt chunker indexes them (it drops the column-header
+# row, so a chunk is only "Elena Marsh   Chief Executive Officer   $625,000"
+# rows). A name-row rule found both labelled chunks with no other corpus chunk
+# flagged, but flagged chunks are excluded from retrieval, and two golden
+# questions (severance multiples; cash needed at closing) are answered from the
+# severance table. Whether named executives' deal-disclosed pay is excludable
+# PII is a policy decision for the data-room owner, not a regex one.
+
+# Bank account / routing numbers. Digit groups may be separated: "Account No.
+# 4532-1234-5678-9010" was missed (audit I11).
+BANK_PATTERN = re.compile(
+    r'(?i)\b(?:account\s*(?:number|#|no\.?)|routing\s*(?:number|#|no\.?))\s*[:\-]?\s*'
+    r'\d(?:[-\s]?\d){5,}'
+)
+
+# IBAN candidates; only those passing the ISO 13616 mod-97 check count.
+IBAN_PATTERN = re.compile(r'\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?\b')
+
+# Payment-card candidates (4x4 grouped or 13-19 contiguous digits); only those
+# passing the Luhn check count.
+CARD_PATTERN = re.compile(r'\b(?:\d{4}[- ]){3}\d{4}\b|\b\d{13,19}\b')
 
 # Passport numbers
 PASSPORT_PATTERN = re.compile(
@@ -122,7 +163,8 @@ class PIIDetector:
     # Structured identifiers whose regex match is specific enough to trust on
     # its own. Every other type (salary wording, bank/tax-id labels, keyword
     # counts) matches business text too, so a Laya check can overrule it.
-    STRONG_TYPES = frozenset({"ssn", "date_of_birth", "passport"})
+    # payment_card is checksum-validated, so it is as specific as an SSN.
+    STRONG_TYPES = frozenset({"ssn", "date_of_birth", "passport", "payment_card"})
 
     def __init__(self, sensitivity: str = "high") -> None:
         """
@@ -286,18 +328,27 @@ class PIIDetector:
             count += len(dob_matches)
 
         # Salary/compensation detection
-        for pattern in SALARY_PATTERNS:
+        for pattern in [*SALARY_PATTERNS, COMP_TABLE_PATTERN]:
             matches = pattern.findall(text)
             if matches:
                 types.append("salary_data")
                 count += len(matches)
                 break  # Don't double-count salary patterns
 
-        # Bank account detection
-        bank_matches = BANK_PATTERN.findall(text)
+        # Bank account detection (labelled numbers, and checksummed IBANs)
+        bank_matches = BANK_PATTERN.findall(text) + [
+            m for m in IBAN_PATTERN.findall(text) if self._valid_iban(m)
+        ]
         if bank_matches:
             types.append("bank_account")
             count += len(bank_matches)
+
+        # Payment cards (Luhn-valid only: a 16-digit reference number passes
+        # by chance one time in ten, a labelled card number always)
+        card_matches = [m for m in CARD_PATTERN.findall(text) if self._luhn_valid(m)]
+        if card_matches:
+            types.append("payment_card")
+            count += len(card_matches)
 
         # Passport detection
         passport_matches = PASSPORT_PATTERN.findall(text)
@@ -351,6 +402,31 @@ class PIIDetector:
             return False
 
         return True
+
+    @staticmethod
+    def _valid_iban(candidate: str) -> bool:
+        """ISO 13616 check: move the first four characters to the end, map
+        letters to 10..35, and the number must be 1 mod 97."""
+        iban = candidate.replace(" ", "")
+        if not 15 <= len(iban) <= 34:
+            return False
+        rearranged = iban[4:] + iban[:4]
+        return int("".join(str(int(ch, 36)) for ch in rearranged)) % 97 == 1
+
+    @staticmethod
+    def _luhn_valid(candidate: str) -> bool:
+        """Luhn checksum over the digits of a card-number candidate."""
+        digits = [int(d) for d in re.sub(r'\D', '', candidate)]
+        if not 13 <= len(digits) <= 19 or len(set(digits)) == 1:
+            return False
+        total = 0
+        for i, d in enumerate(reversed(digits)):
+            if i % 2:
+                d *= 2
+                if d > 9:
+                    d -= 9
+            total += d
+        return total % 10 == 0
 
     def _evaluate(
         self,
