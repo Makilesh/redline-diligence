@@ -13,6 +13,16 @@ import pytest
 # real model set LAYA_ENABLED=1 themselves and are marked `models`.
 os.environ.setdefault("LAYA_ENABLED", "0")
 
+# The Streamlit UI tests run with the backing API deliberately down. Without a
+# default they target localhost:8000 and pass or fail on whether a developer's
+# API happens to be running there. Port 9 (discard) is never served.
+os.environ.setdefault("API_URL", "http://127.0.0.1:9")
+
+# The API lifespan loads several GB of weights unless told not to. No offline
+# test enters the lifespan today; this keeps a future one from doing so by
+# accident on a machine that has the weights cached.
+os.environ.setdefault("WARM_MODELS", "0")
+
 
 # Scripts that live in tests/ but are not test modules. test_pipeline_offline.py
 # matches the test_*.py glob yet defines no tests — it is a CLI validation run
@@ -29,12 +39,66 @@ def pytest_collection_modifyitems(config, items):
     — not skip — on any machine that lacks them, which trains people to ignore
     red runs. CI additionally deselects them with `-m "not live and not models"`.
     """
-    if os.getenv("RUN_LIVE_TESTS", "").strip().lower() in {"1", "true", "yes"}:
+    if _live_tests_enabled():
         return
     skip_live = pytest.mark.skip(reason="live test: set RUN_LIVE_TESTS=1 to run")
     for item in items:
         if item.get_closest_marker("live") is not None:
             item.add_marker(skip_live)
+
+
+def _live_tests_enabled() -> bool:
+    return os.getenv("RUN_LIVE_TESTS", "").strip().lower() in {"1", "true", "yes"}
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _dead_api_refuses_at_once():
+    """
+    Makes "the API is down" cost nothing instead of two seconds per request.
+
+    The UI tests point the Streamlit app at API_URL with nothing listening, and
+    the app degrades each panel on `requests.ConnectionError`. On Linux a
+    refused loopback connection fails in microseconds. On Windows the TCP stack
+    retransmits the SYN before reporting the refusal: measured 2.04s per
+    request, every time. The app makes several requests per rerun, so four UI
+    tests took 199s of a 231s suite (`--durations`: 153.6s, 30.6s, 10.2s, 4.6s)
+    — all of it waiting for a refusal that was never in doubt.
+
+    Requests to API_URL's host:port now raise the same `requests.ConnectionError`
+    without opening a socket. The app sees exactly what it saw before, so the
+    tests assert the same degraded behaviour; only the wait is gone. It also
+    removes a dependence on the machine's state: if something *was* listening on
+    that port, these tests used to talk to it.
+
+    Requests to any other address pass through untouched, and nothing is patched
+    when RUN_LIVE_TESTS=1 (live tests want the real API).
+    """
+    if _live_tests_enabled():
+        yield
+        return
+    try:
+        import requests
+        from requests.adapters import HTTPAdapter
+    except ImportError:  # requests arrives with streamlit; nothing to patch without it
+        yield
+        return
+    from urllib.parse import urlsplit
+
+    real_send = HTTPAdapter.send
+
+    def send(self, request, **kwargs):
+        dead = urlsplit(os.environ.get("API_URL", "http://127.0.0.1:9"))
+        target = urlsplit(request.url)
+        if (target.hostname, target.port) == (dead.hostname, dead.port):
+            raise requests.ConnectionError(
+                f"connection refused (offline test suite): {request.url}",
+                request=request,
+            )
+        return real_send(self, request, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(HTTPAdapter, "send", send)
+        yield
 
 
 @dataclass
