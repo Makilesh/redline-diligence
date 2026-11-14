@@ -971,9 +971,17 @@ async def index_document(
     if embed_fn is None:
         from src.vector_db.reranker import embed_texts_async
         embed_fn = embed_texts_async
+    # Stamped on every child point so vectors written by an older BM25 text
+    # normalisation can be found (see hybrid_search.SPARSE_ENCODING_VERSION).
+    # A caller-supplied sparse_fn has no known encoding, so it is not stamped.
+    sparse_encoding = None
     if sparse_fn is None:
-        from src.vector_db.hybrid_search import compute_sparse_bm25_batch
+        from src.vector_db.hybrid_search import (
+            SPARSE_ENCODING_VERSION,
+            compute_sparse_bm25_batch,
+        )
         sparse_fn = compute_sparse_bm25_batch
+        sparse_encoding = SPARSE_ENCODING_VERSION
     if ensure_collections:
         from src.vector_db.collection_manager import setup_collections
         await setup_collections(client, collection_name, parent_collection_name)
@@ -999,7 +1007,10 @@ async def index_document(
         PointStruct(
             id=point_id_for(payload["chunk_id"]),
             vector={"dense": dense[i].tolist(), "sparse": sparse[i]},
-            payload=payload,
+            payload=(
+                payload if sparse_encoding is None
+                else {**payload, "sparse_encoding": sparse_encoding}
+            ),
         )
         for i, payload in enumerate(doc.chunks)
     ]

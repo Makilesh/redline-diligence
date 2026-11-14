@@ -111,6 +111,19 @@ class RateLimiter:
                 return True
             return False
 
+    async def release(self) -> None:
+        """
+        Hands back the most recently taken slot — for a request that was never sent.
+
+        The selector takes a window slot and only then tries to debit the daily
+        allowance. When that debit loses the race for the last unit the request
+        goes elsewhere, and without this the window entry stayed: an RPM slot
+        consumed by a call that did not happen.
+        """
+        async with self._lock:
+            if self._call_timestamps:
+                self._call_timestamps.pop()
+
     @property
     def current_usage(self) -> int:
         """

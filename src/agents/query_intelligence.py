@@ -9,12 +9,14 @@ Model: selected per call from the agent ladder (src/llm/model_registry.py) | Tem
 JSON mode: response_format={"type": "json_object"}
 """
 
-from src.llm.litellm_wrapper import call_structured_agent
+from src.agents.retrieval_strategy import apply_filter_overrides
+from src.llm.litellm_wrapper import ServedModel, call_structured_agent
 from src.llm.budget_tracker import BudgetTracker
 from src.llm.prompt_templates.query_intelligence import (
     QUERY_INTELLIGENCE_SYSTEM_PROMPT,
     QUERY_INTELLIGENCE_USER_TEMPLATE,
 )
+from src.llm.schemas import QUERY_TYPES, QueryIntelligenceOutput
 from src.workflow.state_definitions import AgentState
 from src.utils.logger import setup_logger
 
@@ -61,33 +63,65 @@ async def query_intelligence_node(state: AgentState) -> dict:
         deal_id=deal_id,
     )
 
-    result = await call_structured_agent(
-        system_prompt=QUERY_INTELLIGENCE_SYSTEM_PROMPT,
-        user_prompt=user_prompt,
-        model=model,
-        temperature=0.0,
-        max_tokens=800,
-        api_key=choice.api_key,
-    )
-
-    # Validate query_type
-    valid_types = {"financial", "legal", "comparative", "summary", "multi_hop"}
-    query_type = result.get("query_type", "summary")
-    if query_type not in valid_types:
-        logger.warning(
-            f"Agent 1 returned invalid query_type '{query_type}', defaulting to 'summary'"
+    # The call may descend the ladder, so the model that answers is not
+    # necessarily the one selected above; `served` keeps the trace truthful.
+    served = ServedModel(model)
+    degraded: str | None = None
+    try:
+        result = await call_structured_agent(
+            system_prompt=QUERY_INTELLIGENCE_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            model=model,
+            temperature=0.0,
+            max_tokens=800,
+            api_key=choice.api_key,
+            agent="query_intelligence",
+            served=served,
         )
-        query_type = "summary"
+    except Exception as e:
+        # Every rung, the local model included, failed to produce a usable
+        # analysis. This node only tunes retrieval — query type, an optional
+        # category filter, an optional decomposition — and each of those has a
+        # default the pipeline is built to run with. Failing the query here
+        # would throw away retrieval, the quality gate and verification, none
+        # of which need this call; the answer is still checked claim by claim.
+        logger.error(
+            "Agent 1: query analysis unavailable, continuing with defaults",
+            extra={"error": str(e), "error_type": type(e).__name__},
+        )
+        result = {}
+        degraded = f"{type(e).__name__}: {e}"
+    model = served.model
 
-    # Extract metadata filters — NEVER include include_pii (compliance constraint)
-    extracted_filters = result.get("metadata_filters", {})
-    extracted_filters.pop("include_pii", None)  # Compliance enforcement
+    # Everything read from the model goes through the schema: a null filter
+    # dict, an unknown query type or a null reformulation become their defaults
+    # here instead of an AttributeError three lines further down.
+    parsed = QueryIntelligenceOutput.from_llm(result)
+    raw = result if isinstance(result, dict) else {}
+
+    query_type = parsed.query_type
+    if not degraded and raw.get("query_type") not in QUERY_TYPES:
+        logger.warning(
+            f"Agent 1 returned invalid query_type '{raw.get('query_type')}', "
+            f"defaulting to '{query_type}'"
+        )
+
+    # Metadata filters are a PROPOSAL. Only document_category, and only a known
+    # value, becomes a filter — through the same whitelist the rewriter's
+    # proposals pass. The dict used to be forwarded whole (minus include_pii),
+    # and hybrid search accepts doc_id, content_type and is_table as hard
+    # filters that nothing ever relaxes: a model that volunteered a doc_id made
+    # every retrieval pass search an empty set, and the query ended in a
+    # refusal after two wasted rewrites. include_pii and is_current_version are
+    # never accepted (compliance).
+    extracted_filters = apply_filter_overrides({}, parsed.metadata_filters)
 
     logger.info(
         "Agent 1: Query Intelligence complete",
         extra={
             "query_type": query_type,
-            "num_expansions": len(result.get("query_expansions", [])),
+            "model": model,
+            "degraded": bool(degraded),
         },
     )
 
@@ -107,13 +141,7 @@ async def query_intelligence_node(state: AgentState) -> dict:
     # Letting one veto the other means the feature works only when two
     # independent guesses agree, and fails invisibly when they do not. The
     # prompt decides when to decompose; MAX_SUB_QUESTIONS bounds the cost.
-    sub_questions = result.get("sub_questions") or []
-    if not isinstance(sub_questions, list):
-        sub_questions = []
-    sub_questions = [
-        s.strip() for s in sub_questions
-        if isinstance(s, str) and s.strip()
-    ][:MAX_SUB_QUESTIONS]
+    sub_questions = parsed.sub_questions[:MAX_SUB_QUESTIONS]
 
     if sub_questions:
         logger.info(
@@ -121,19 +149,29 @@ async def query_intelligence_node(state: AgentState) -> dict:
             extra={"query_type": query_type, "count": len(sub_questions)},
         )
 
+    # Downstream nodes read flags out of parsed_intent with .get(); overlaying
+    # the validated fields means they see booleans and a known query type, not
+    # whatever the model wrote. The model's other fields are kept for the trace;
+    # its filter proposals are not — only the whitelisted ones travel on.
+    parsed_intent = {**raw, **parsed.model_dump(), "metadata_filters": extracted_filters}
+
+    trace = {
+        "agent": "query_intelligence",
+        "model": model,
+        "input_query": query,
+        "output": parsed_intent,
+    }
+    if degraded:
+        trace["degraded"] = True
+        trace["error"] = degraded
+
     return {
         "query_type": query_type,
-        "parsed_intent": result,
+        "parsed_intent": parsed_intent,
         "extracted_filters": extracted_filters,
         "sub_questions": sub_questions,
-        "current_query": result.get("reformulated_query", query),
+        # Never None or blank: this string is what gets embedded.
+        "current_query": parsed.reformulated_query or query,
         "rewrite_iteration": 0,
-        "agent_trace": [
-            {
-                "agent": "query_intelligence",
-                "model": model,
-                "input_query": query,
-                "output": result,
-            }
-        ],
+        "agent_trace": [trace],
     }

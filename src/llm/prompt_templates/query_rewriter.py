@@ -9,6 +9,10 @@ CRITICAL: JSON output key → state key mapping.
 The rewriter's JSON output uses updated_retrieval_config and updated_metadata_filters,
 but AgentState fields are retrieval_config and extracted_filters.
 The query_rewriter_node MUST map these when returning state.
+
+alternative_formulations is no longer requested: it was stored in
+rewrite_history and never searched with, so it only cost output tokens on a
+call capped at 600.
 """
 
 QUERY_REWRITER_SYSTEM_PROMPT = """You are an expert M&A Query Rewriter. Your job is to reformulate queries that failed to retrieve sufficient context in previous attempts.
@@ -24,7 +28,6 @@ Your goal is to rewrite the query and optionally adjust retrieval parameters to 
 Return a JSON object:
 {
   "rewritten_query": "improved query text",
-  "alternative_formulations": ["alt1", "alt2"],
   "updated_metadata_filters": {"document_category": "legal or null to remove the category filter"},
   "updated_retrieval_config": {
     "dense_weight": 0.5,

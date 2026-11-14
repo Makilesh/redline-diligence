@@ -39,6 +39,109 @@ CATEGORY_OVERRIDES = {
 }
 
 
+# ------------------------------------------------------------------------------
+# Distractor documents (--distractors N)
+#
+# The sample data room is 9 documents and ~110 chunks, so every ranking stage is
+# choosing among a handful of candidates and Qdrant never has to discriminate.
+# The distractor mode adds real commercial contracts to the SAME deal, so the
+# golden questions have to be answered out of a few thousand chunks of
+# plausible-looking legal text. The contracts are CUAD v1 (510 contracts, The
+# Atticus Project, CC BY 4.0), pinned to one dataset revision, downloaded on
+# first use into a cache outside the repository and never committed.
+# ------------------------------------------------------------------------------
+DISTRACTOR_REPO = "theatticusproject/cuad"
+DISTRACTOR_REVISION = "a3c393f5d103fd0c516374e4fdff676c8176dcb1"
+DISTRACTOR_SUBDIR = "CUAD_v1/full_contract_txt"
+DISTRACTOR_LICENCE = "CC BY 4.0 (The Atticus Project, CUAD v1)"
+DISTRACTOR_PREFIX = "distractor_"
+DISTRACTOR_CACHE_ENV = "REDLINE_EVAL_CACHE"
+
+
+def is_distractor(chunk: dict) -> bool:
+    """True for a chunk that came from a distractor document."""
+    return str(chunk.get("source_file") or "").startswith(DISTRACTOR_PREFIX)
+
+
+def distractor_cache_dir() -> Path:
+    """Where downloaded distractor documents are kept (never inside the repo)."""
+    import os
+
+    configured = os.getenv(DISTRACTOR_CACHE_ENV)
+    return Path(configured) if configured else Path.home() / ".cache" / "redline-eval"
+
+
+def fetch_distractors(count: int, cache_dir: Path | None = None) -> list[Path]:
+    """
+    Downloads the first `count` CUAD contracts (by file name) and returns their paths.
+
+    Deterministic: the dataset revision is pinned and files are taken in sorted
+    order, so `--distractors 100` is the same 100 contracts on every machine.
+    Files already in the cache are not downloaded again.
+
+    Args:
+        count: Number of contracts.
+        cache_dir: Download cache; defaults to distractor_cache_dir().
+
+    Returns:
+        Paths of the contract text files, in sorted order.
+
+    Raises:
+        RuntimeError: If fewer than `count` contracts are available.
+    """
+    from huggingface_hub import HfApi, hf_hub_download
+
+    cache_dir = cache_dir or distractor_cache_dir()
+    names = sorted(
+        name for name in HfApi().list_repo_files(
+            DISTRACTOR_REPO, repo_type="dataset", revision=DISTRACTOR_REVISION)
+        if name.startswith(DISTRACTOR_SUBDIR + "/") and name.lower().endswith(".txt")
+    )
+    if len(names) < count:
+        raise RuntimeError(f"only {len(names)} distractor documents available, {count} requested")
+    return [
+        Path(hf_hub_download(
+            DISTRACTOR_REPO, name, repo_type="dataset", revision=DISTRACTOR_REVISION,
+            local_dir=cache_dir / "cuad"))
+        for name in names[:count]
+    ]
+
+
+async def index_distractors(client: AsyncQdrantClient, paths: list[Path]) -> list[dict]:
+    """
+    Indexes distractor documents into the evaluation deal through index_document.
+
+    They go into the same deal as the sample data room on purpose: a distractor
+    in another deal is removed by the deal filter before ranking and would only
+    test isolation. The Laya ingest decisions (risk signals, PII second opinion)
+    are skipped for these documents: they do not affect what is retrieved and
+    would add minutes per run. Rule-based PII flagging still applies, so a
+    flagged distractor chunk is unreachable exactly as in production.
+
+    Args:
+        client: The evaluation Qdrant client.
+        paths: Distractor text files.
+
+    Returns:
+        Per-document index_document results.
+    """
+    import os
+
+    previous = os.environ.get("LAYA_ENABLED")
+    os.environ["LAYA_ENABLED"] = "0"
+    try:
+        return [
+            await index_document(
+                str(path), f"{DISTRACTOR_PREFIX}{number:04d}.txt", DEAL_ID, "legal", client=client)
+            for number, path in enumerate(paths, start=1)
+        ]
+    finally:
+        if previous is None:
+            os.environ.pop("LAYA_ENABLED", None)
+        else:
+            os.environ["LAYA_ENABLED"] = previous
+
+
 def load_golden_set(path: Path = GOLDEN_SET_PATH) -> dict:
     """Loads tests/golden_qa_set.json."""
     return json.loads(path.read_text(encoding="utf-8"))
@@ -93,6 +196,9 @@ def is_retrievable(chunk: dict) -> bool:
     include_pii=False: the deal, the current version, and no PII flag. A chunk
     failing these is unreachable by policy, so it is left out of the relevance
     labels rather than counted as a retrieval miss.
+
+    Distractor chunks are retrievable too; callers that build relevance labels
+    or look for facts exclude them with is_distractor().
     """
     return (
         chunk.get("deal_id") == DEAL_ID

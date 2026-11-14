@@ -535,11 +535,12 @@ class TestSubQuestionDecomposition:
 
         seen: list[dict] = []
 
-        async def fake_retrieve(query, config, deal_id, metadata_filters):
-            seen.append({"query": query, "filters": dict(metadata_filters)})
-            return []
+        async def fake_retrieve(queries, config, deal_id, filters_per_query):
+            for query, metadata_filters in zip(queries, filters_per_query):
+                seen.append({"query": query, "filters": dict(metadata_filters)})
+            return [[] for _ in queries]
 
-        monkeypatch.setattr(rx, "_retrieve_for_query", fake_retrieve)
+        monkeypatch.setattr(rx, "_retrieve_for_queries", fake_retrieve)
         monkeypatch.setattr(rx, "expand_context",
                             lambda **kw: _coro([]))
 
@@ -589,11 +590,12 @@ class TestSubQuestionDecomposition:
 
         seen: list[dict] = []
 
-        async def fake_retrieve(query, config, deal_id, metadata_filters):
-            seen.append({"query": query, "filters": dict(metadata_filters)})
-            return []
+        async def fake_retrieve(queries, config, deal_id, filters_per_query):
+            for query, metadata_filters in zip(queries, filters_per_query):
+                seen.append({"query": query, "filters": dict(metadata_filters)})
+            return [[] for _ in queries]
 
-        monkeypatch.setattr(rx, "_retrieve_for_query", fake_retrieve)
+        monkeypatch.setattr(rx, "_retrieve_for_queries", fake_retrieve)
         monkeypatch.setattr(rx, "expand_context", lambda **kw: _coro([]))
 
         await rx.retrieval_executor_node({
@@ -625,15 +627,17 @@ class TestSubQuestionDecomposition:
 
         captured = {}
 
-        async def fake_retrieve(query, config, deal_id, metadata_filters):
+        async def fake_retrieve(queries, config, deal_id, filters_per_query):
             captured.setdefault("k", config["final_top_k"])
             # Distinct ids per query — identical ids would dedupe and mask the
             # very allocation this test is checking.
-            slug = query.replace(" ", "_")
-            return [{"chunk_id": f"{slug}-{i}", "reranker_score": 0.9 - i / 100,
-                     "source_file": "d.txt", "text": "x"} for i in range(20)]
+            return [
+                [{"chunk_id": f"{query.replace(' ', '_')}-{i}", "reranker_score": 0.9 - i / 100,
+                  "source_file": "d.txt", "text": "x"} for i in range(20)]
+                for query in queries
+            ]
 
-        monkeypatch.setattr(rx, "_retrieve_for_query", fake_retrieve)
+        monkeypatch.setattr(rx, "_retrieve_for_queries", fake_retrieve)
         monkeypatch.setattr(rx, "expand_context", lambda **kw: _coro([]))
 
         out = await rx.retrieval_executor_node({
