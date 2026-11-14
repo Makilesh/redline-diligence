@@ -124,21 +124,37 @@ def answerability_facets(question: str, sub_questions: list[str] | None) -> list
 
 def top_passages(chunks: list[dict], k: int = TOP_K_PASSAGES) -> list[str]:
     """
-    Texts of the k highest-reranked chunks that have text.
+    Texts of the k highest-reranked chunks that have text, each preceded by the
+    chunk's `context_header` when ingestion wrote one (CHUNK_CONTEXT_HEADERS=1).
+
+    Why the header: with headers on, retrieval surfaces table rows such as
+    "Total Employees 700" or "Capital Expenditures ($14.2) ($12.8)" for
+    questions it used to miss, and a bare row says neither which document nor
+    which period it is from. Scored bare, those two dev questions fell to P
+    0.249 and 0.333 — false vetoes below 0.35. With the header they score 0.398
+    and 0.387: dev false vetoes 2/28 -> 0/28. Measured only with headers: with
+    them off, prefixing the section heading instead LOWERED dev AUC (0.793 ->
+    0.760), so a chunk without a context_header is passed bare, exactly as
+    before. Held out (golden, headers on): ctrl_02 0.356 (admitted) -> 0.244
+    (refused); lowest answerable 0.394; controls refused 4/6 as with headers off.
 
     Args:
         chunks: reranked_results payloads.
         k: How many to keep.
 
     Returns:
-        Up to k chunk texts, best first.
+        Up to k passages, best first.
     """
     ranked = sorted(
         (c for c in chunks if (c.get("text") or "").strip()),
         key=lambda c: float(c.get("reranker_score", 0.0)),
         reverse=True,
     )
-    return [c["text"] for c in ranked[:k]]
+    out = []
+    for c in ranked[:k]:
+        header = (c.get("context_header") or "").strip()
+        out.append(f"{header}\n\n{c['text']}" if header else c["text"])
+    return out
 
 
 def aggregate(
