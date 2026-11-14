@@ -87,6 +87,14 @@ jobs:
       - name: Pytest (offline suite)
         run: pytest -m "not live and not models" -ra --durations=15 --cov --cov-report=term
 
+      # The deterministic verification stages against the labelled claim set
+      # (eval/verification_set.json): no model weights, no LLM, ~20s. Fails if
+      # the false-pass rate, the false-alarm rate or the random-figure grounding
+      # rate regresses against eval/verification_baseline.json — the numbers a
+      # change to numeric grounding must not make worse.
+      - name: Verification benchmark (deterministic)
+        run: python -m eval.run_verification_eval --no-nli --baseline eval/verification_baseline.json --output-dir /tmp/verification
+
   web:
     name: Web (typecheck + lint + build)
     runs-on: ubuntu-latest
