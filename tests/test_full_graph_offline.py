@@ -38,9 +38,11 @@ from tests.fixtures.pipeline_harness import (
     SUPERSEDED_FEE,
     HarnessSeamMoved,
     LexicalReranker,
+    PipelineErrored,
     ScriptedLLM,
     ScriptedRateLimitError,
     _patch_seam,
+    parse_sse,
     quote,
 )
 
@@ -654,9 +656,259 @@ class TestProviderFailures:
         assert "could not generate an answer" in run.answer
         assert run.state["citations"] == []
         assert "$" not in run.answer
-        assert run.state["validation_status"] != "failed"
         # Bounded: a provider-wide outage cannot walk the ladder forever.
         assert 1 < p.llm.count("synthesis") <= 6
+
+
+# ==============================================================================
+# Through the HTTP routes
+# ==============================================================================
+
+# Shaped like the text real failures carry: a provider error body, a credential
+# fragment, an internal address.
+INTERNAL_ERROR = "litellm.AuthenticationError: key=sk-live-EXAMPLE at http://10.0.0.7:6333"
+INTERNAL_FRAGMENTS = ("sk-live", "10.0.0.7", "AuthenticationError")
+
+
+class TestHttp:
+    """
+    The same pipeline behind the real FastAPI routes, dependencies and response
+    models — nothing between the request and the graph is stubbed.
+    """
+
+    async def test_query_returns_the_validated_answer(self, offline_pipeline):
+        p = offline_pipeline
+        await p.load_data_room()
+        p.llm.script("synthesis", REVENUE_ANSWER)
+
+        async with p.api() as http:
+            response = await http.post("/api/v1/query", json={"query": REVENUE_QUESTION, "deal_id": DEAL})
+
+        assert response.status_code == 200
+        body = response.json()
+        assert "$452.8 million" in body["answer"]
+        assert body["validation_status"] == "passed"
+        assert body["confidence_score"] == 1.0
+        assert body["is_refusal"] is False
+        assert {c["source_file"] for c in body["citations"]} == {FINANCIALS_FILE}
+        assert [t["agent"] for t in body["agent_trace"]] == ANSWERED
+
+    async def test_unanswerable_query_is_marked_as_a_refusal(self, offline_pipeline):
+        p = offline_pipeline
+        await p.load_data_room()
+
+        async with p.api() as http:
+            response = await http.post("/api/v1/query", json={"query": OFF_TOPIC_QUESTION, "deal_id": DEAL})
+
+        body = response.json()
+        assert response.status_code == 200
+        assert body["is_refusal"] is True
+        assert body["citations"] == []
+        assert body["confidence_score"] == 0.0
+        assert body["rewrite_iterations"] == 2
+
+    async def test_stream_ends_with_the_answer_the_client_is_already_showing(self, offline_pipeline):
+        p = offline_pipeline
+        await p.load_data_room()
+        p.llm.script("synthesis", REVENUE_ANSWER)
+
+        async with p.api() as http:
+            response = await http.post(
+                "/api/v1/query/stream", json={"query": REVENUE_QUESTION, "deal_id": DEAL}
+            )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        events = parse_sse(response.text)
+        names = [name for name, _ in events]
+        assert names[0] == "start" and names[-1] == "result"
+        assert names.count("result") == 1 and "error" not in names
+        assert [payload["agent"] for name, payload in events if name == "stage"] == ANSWERED
+        draft = "".join(payload["text"] for name, payload in events if name == "token")
+        result = events[-1][1]
+        assert draft == result["answer"]
+        assert result["validation_status"] == "passed"
+        # Every token frame precedes the validation stage that vouches for it.
+        last_token = max(i for i, name in enumerate(names) if name == "token")
+        assert last_token < names.index("result") - 1
+
+    async def test_public_caller_cannot_grant_itself_pii_access(self, offline_pipeline):
+        p = offline_pipeline
+        await p.load_data_room()
+        p.llm.script("synthesis", BONUS_ANSWER)
+
+        async with p.api() as http:
+            response = await http.post(
+                "/api/v1/query",
+                json={"query": BONUS_QUESTION, "deal_id": DEAL, "include_pii": True},
+            )
+
+        body = response.json()
+        assert body["is_refusal"] is True
+        assert not any(marker in response.text for marker in PII_MARKERS)
+        assert not any(p.llm.saw(marker) for marker in PII_MARKERS)
+
+    async def test_admin_caller_is_granted_pii_access(self, offline_pipeline):
+        p = offline_pipeline
+        await p.load_data_room()
+        p.llm.script("synthesis", BONUS_ANSWER)
+        admin = p.admin_headers()
+
+        async with p.api() as http:
+            response = await http.post(
+                "/api/v1/query",
+                json={"query": BONUS_QUESTION, "deal_id": DEAL, "include_pii": True},
+                headers=admin,
+            )
+
+        body = response.json()
+        assert body["is_refusal"] is False
+        assert "$1,250,000" in body["answer"]
+        assert {c["source_file"] for c in body["citations"]} == {RETENTION_FILE}
+
+    async def test_node_failure_is_a_generic_500(self, offline_pipeline):
+        p = offline_pipeline
+        await p.load_data_room()
+        p.break_seam("embedding_model", RuntimeError(INTERNAL_ERROR))
+
+        async with p.api() as http:
+            response = await http.post("/api/v1/query", json={"query": REVENUE_QUESTION, "deal_id": DEAL})
+
+        assert response.status_code == 500
+        assert not any(fragment in response.text for fragment in INTERNAL_FRAGMENTS)
+        assert "request id" in response.json()["detail"]
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason="audit W1/P1: stream_query puts str(exception) in the error event and the "
+        "route forwards it verbatim",
+    )
+    async def test_node_failure_mid_stream_does_not_leak_internals(self, offline_pipeline):
+        """
+        The retrieval node raises after query intelligence has already been
+        streamed to the client. Driven through the real graph, the real
+        stream_query and the real route — the existing guard for this replaces
+        stream_query with a generator that raises, which the real one never
+        does, so it stays green while this leaks.
+        """
+        p = offline_pipeline
+        await p.load_data_room()
+        p.break_seam("embedding_model", RuntimeError(INTERNAL_ERROR))
+
+        async with p.api() as http:
+            response = await http.post(
+                "/api/v1/query/stream", json={"query": REVENUE_QUESTION, "deal_id": DEAL}
+            )
+
+        events = parse_sse(response.text)
+        names = [name for name, _ in events]
+        # The failure really was mid-stream, and the client was told.
+        assert names[:2] == ["start", "stage"] and names[-1] == "error"
+        assert "result" not in names
+        assert not any(fragment in response.text for fragment in INTERNAL_FRAGMENTS)
+
+
+# ==============================================================================
+# Known defects
+# ==============================================================================
+# Each test states the behaviour the pipeline should have and fails today for
+# the reason given. They are strict: the fix that makes one pass turns it into
+# a failure until its marker is removed, so a fix cannot land unnoticed and a
+# regression afterwards cannot hide behind the marker. IDs refer to the
+# architecture and correctness audit.
+
+
+def known_defect(audit_id: str, why: str, raises=AssertionError):
+    return pytest.mark.xfail(strict=True, raises=raises, reason=f"audit {audit_id}: {why}")
+
+
+class TestKnownDefects:
+    @known_defect("W4/L1", "the 220-character floor is applied before the citation check")
+    async def test_short_cited_answer_is_accepted(self, offline_pipeline):
+        p = offline_pipeline
+        await p.load_data_room()
+        p.llm.script("synthesis", quote("Total revenue for FY2023"))
+
+        run = await p.ask(REVENUE_QUESTION)
+
+        assert p.llm.count("synthesis") == 1
+        assert "$452.8 million" in run.answer
+        assert run.cited_sources == {FINANCIALS_FILE}
+
+    @known_defect("L1", "a content rejection is recorded as a provider outage (process-wide cooldown)")
+    async def test_discarded_draft_does_not_sideline_the_model_for_the_next_query(
+        self, offline_pipeline
+    ):
+        p = offline_pipeline
+        await p.load_data_room()
+        p.llm.script("synthesis", "Total revenue for FY2023 was $452.8 million.", REVENUE_ANSWER)
+
+        await p.ask(REVENUE_QUESTION)
+        await p.ask(REVENUE_QUESTION)
+
+        rejected, _fallback, next_query = p.llm.of("synthesis")
+        assert next_query.model == rejected.model
+
+    @known_defect("W5", "agent_trace and rewrite_history use additive reducers on a reused thread")
+    async def test_second_query_in_a_session_does_not_return_the_first_ones_trace(
+        self, offline_pipeline
+    ):
+        p = offline_pipeline
+        await p.load_data_room()
+        p.llm.script("synthesis", REVENUE_ANSWER)
+
+        await p.ask(OFF_TOPIC_QUESTION, session_id="shared")
+        second = await p.ask(REVENUE_QUESTION, session_id="shared")
+
+        assert [t["agent"] for t in second.state["agent_trace"]] == ANSWERED
+        assert second.state["rewrite_history"] == []
+
+    @known_defect("W5", "thread id is f'{deal_id}_{session_id}', ambiguous for ids containing '_'")
+    async def test_sessions_of_different_deals_do_not_share_a_thread(self, offline_pipeline):
+        p = offline_pipeline
+        await p.load_data_room()
+        p.llm.script("synthesis", FEE_ANSWER)
+
+        await p.ask(FEE_QUESTION, DEAL, session_id="a_b")
+        other = await p.ask(REVENUE_QUESTION, f"{DEAL}_a", session_id="b")
+
+        asked = [t["input_query"] for t in other.state["agent_trace"] if t["agent"] == QI]
+        assert asked == [REVENUE_QUESTION]
+
+    @pytest.mark.parametrize(
+        "agent_1_output",
+        [
+            pytest.param({"query_type": "summary", "metadata_filters": None}, id="null-filters"),
+            pytest.param([{"query_type": "summary"}], id="top-level-array"),
+            pytest.param({"query_type": "summary", "reformulated_query": None}, id="null-query"),
+        ],
+    )
+    @known_defect("W2", "Agent 1's JSON is used unvalidated", raises=PipelineErrored)
+    async def test_malformed_query_intelligence_output_degrades(
+        self, offline_pipeline, agent_1_output
+    ):
+        p = offline_pipeline
+        await p.load_data_room()
+        p.llm.script("query_intelligence", agent_1_output)
+        p.llm.script("synthesis", REVENUE_ANSWER)
+
+        run = await p.ask(REVENUE_QUESTION)
+
+        assert run.state["original_query"] == REVENUE_QUESTION
+
+    @known_defect("V7", "the synthesizer's apology is verified as if it were an answer")
+    async def test_failed_synthesis_is_not_verified_as_an_answer(self, offline_pipeline):
+        p = offline_pipeline
+        await p.load_data_room()
+        p.llm.script("synthesis", ScriptedRateLimitError())
+
+        run = await p.ask(REVENUE_QUESTION)
+
+        # No model call is spent judging an apology while the provider is failing,
+        # and nothing about it is reported as verified.
+        assert p.llm.count("judge") == 0
+        assert run.state["confidence_score"] == 0.0
 
 
 # ==============================================================================

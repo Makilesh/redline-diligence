@@ -29,6 +29,7 @@ near 1.0, one that shares none scores 0.0, and the quality gate's thresholds
 
 from __future__ import annotations
 
+import contextlib
 import html
 import json
 import re
@@ -56,6 +57,8 @@ SEAMS = {
     # Ingestion imported the function by name, so it holds its own reference.
     "laya_ingest": ("src.decisions.ingest_signals", "decide_batch"),
     "nli": ("src.verification.nli", "ascore_pairs"),
+    # The graph the HTTP routes run, normally compiled by the API lifespan.
+    "app_graph": ("api.main", "_app_graph"),
 }
 
 # Long enough to pass BudgetTracker's fragment filter; obviously not credentials.
@@ -66,10 +69,15 @@ FAKE_API_KEYS = (
 
 DEAL = "deal-alpha"
 OTHER_DEAL = "deal-beta"
+ADMIN_KEY = "offline-suite-admin-key"
 
 
 class HarnessSeamMoved(AssertionError):
     """A production seam the harness patches no longer exists under that name."""
+
+
+class PipelineErrored(AssertionError):
+    """A query ended in the pipeline's error outcome rather than a result."""
 
 
 def _patch_seam(monkeypatch: pytest.MonkeyPatch, seam: str, value: Any) -> None:
@@ -379,6 +387,17 @@ def _all_supported(call: LLMCall) -> dict:
     }
 
 
+def parse_sse(body: str) -> list[tuple[str, dict]]:
+    """Splits a text/event-stream body into (event, payload) pairs."""
+    events = []
+    for frame in body.split("\n\n"):
+        if not frame.strip():
+            continue
+        fields = dict(line.split(": ", 1) for line in frame.split("\n") if ": " in line)
+        events.append((fields["event"], json.loads(fields["data"])))
+    return events
+
+
 async def _stream(content: str):
     for start in range(0, len(content), 48):
         piece = content[start : start + 48]
@@ -523,6 +542,7 @@ class OfflinePipeline:
         *,
         include_pii: bool = False,
         stream: bool = True,
+        session_id: str | None = None,
     ) -> Run:
         """
         Runs one query through the compiled graph.
@@ -533,26 +553,34 @@ class OfflinePipeline:
             include_pii: The authenticated caller's PII authorization.
             stream: Use stream_query (records stages and tokens) rather than
                 run_query.
+            session_id: Session to run under; a fresh one when None.
 
         Returns:
             The Run.
+
+        Raises:
+            PipelineErrored: The pipeline reported an error instead of a result.
         """
         from src.workflow.orchestrator import run_query, stream_query
 
         await self.client()
         if not stream:
-            state = await run_query(self.graph, query, deal_id, include_pii=include_pii)
-            assert state.get("status") == "completed", f"pipeline errored: {state.get('error')}"
+            state = await run_query(
+                self.graph, query, deal_id, session_id=session_id, include_pii=include_pii
+            )
+            if state.get("status") != "completed":
+                raise PipelineErrored(str(state.get("error")))
             return Run(state=state)
 
         events = [
             (name, payload)
             async for name, payload in stream_query(
-                self.graph, query, deal_id, include_pii=include_pii
+                self.graph, query, deal_id, session_id=session_id, include_pii=include_pii
             )
         ]
         errors = [p for e, p in events if e == "error"]
-        assert not errors, f"pipeline errored: {errors}"
+        if errors:
+            raise PipelineErrored(str(errors))
         results = [p for e, p in events if e == "result"]
         assert len(results) == 1, f"expected exactly one result event, got {len(results)}"
         return Run(
@@ -577,6 +605,62 @@ class OfflinePipeline:
     async def aclose(self) -> None:
         if self._client is not None:
             await self._client.close()
+
+    def break_seam(self, seam: str, error: Exception) -> None:
+        """
+        Makes one replaced dependency fail, e.g. "embedding_model" to have the
+        retrieval node raise after query intelligence has already completed.
+
+        Args:
+            seam: A key of SEAMS whose replacement is a callable.
+            error: Raised whenever the pipeline reaches for that dependency.
+        """
+
+        def broken(*_args, **_kwargs):
+            raise error
+
+        _patch_seam(self._monkeypatch, seam, broken)
+
+    @contextlib.asynccontextmanager
+    async def api(self):
+        """
+        An HTTP client for the real FastAPI app, serving this pipeline's graph.
+
+        Requests run in-process through the real routes, dependencies and
+        response models. The lifespan is not entered, so nothing is compiled,
+        connected or warmed; the graph is installed where the lifespan would
+        have put it. Callers are anonymous public clients unless they send the
+        admin header (see `admin_headers`).
+
+        Yields:
+            httpx.AsyncClient rooted at the app; routes live under /api/v1.
+        """
+        import httpx
+
+        import api.main as api_main
+        import api.security as security
+
+        await self.client()
+        _patch_seam(self._monkeypatch, "app_graph", self.graph)
+        # Generous, so only a test about limits would ever meet one.
+        for name in ("RATE_LIMIT_QUERY_PER_MINUTE", "RATE_LIMIT_QUERY_PER_DAY", "DAILY_QUERY_CAP"):
+            self._monkeypatch.setenv(name, "1000")
+        self._monkeypatch.setenv("MAX_CONCURRENT_PIPELINES", "2")
+        self._monkeypatch.delenv("TRUST_PROXY_HEADERS", raising=False)
+        security.reset_limits()
+        transport = httpx.ASGITransport(app=api_main.app)
+        try:
+            async with httpx.AsyncClient(transport=transport, base_url="http://offline") as http:
+                yield http
+        finally:
+            security.reset_limits()
+
+    def admin_headers(self) -> dict[str, str]:
+        """Configures an admin key and returns the header that presents it."""
+        import api.security as security
+
+        self._monkeypatch.setenv("ADMIN_API_KEY", ADMIN_KEY)
+        return {security.ADMIN_HEADER: ADMIN_KEY}
 
     def use_laya(self, decide: Callable[[dict, dict], dict]) -> None:
         """
@@ -758,6 +842,7 @@ def install(monkeypatch: pytest.MonkeyPatch, workdir: Path) -> OfflinePipeline:
         monkeypatch.setenv(name, value)
     for i in range(1, 10):
         monkeypatch.delenv(f"GEMINI_API_KEY_{i}", raising=False)
+    monkeypatch.delenv("ADMIN_API_KEY", raising=False)
 
     llm = ScriptedLLM()
     _patch_seam(monkeypatch, "llm", llm)
