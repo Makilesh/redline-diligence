@@ -49,6 +49,7 @@ def _err(kind: str) -> Exception:
             message="Connection reset by peer", llm_provider="gemini", model="m"),
         "bad-request": lambda: litellm.BadRequestError(
             message="Request contains an invalid argument", model="m", llm_provider="gemini"),
+        "unclassified": lambda: RuntimeError("stream could not be opened"),
     }[kind]()
 
 
@@ -533,11 +534,23 @@ class TestProseAgent:
 
     @pytest.mark.asyncio
     async def test_in_place_retries_are_charged(self, tracker, monkeypatch):
-        provider = _install(monkeypatch, lambda m, k, n, kw: "500", good="answer")
+        provider = _install(monkeypatch, lambda m, k, n, kw: _Resp(""))
         with pytest.raises(ProseAgentFailed):
             await _synthesis_call(tracker)
         assert len(provider.calls) == wrapper.MAX_RETRIES
         assert _units(tracker) == {(SYN_TOP, 0): wrapper.MAX_RETRIES}
+
+    @pytest.mark.asyncio
+    async def test_a_500_goes_to_the_ladder_instead_of_spending_three_units(
+        self, tracker, monkeypatch
+    ):
+        """An admitted request keeps its unit; retrying in place tripled the cost."""
+        provider = _install(monkeypatch, lambda m, k, n, kw: "500")
+        with pytest.raises(litellm.InternalServerError) as raised:
+            await _synthesis_call(tracker)
+        assert len(provider.calls) == 1
+        assert _units(tracker) == {(SYN_TOP, 0): 1}
+        assert wrapper.is_service_unavailable(raised.value), "the synthesizer moves on this"
 
     @pytest.mark.asyncio
     async def test_retries_stop_when_the_slot_cannot_pay(self, tracker, monkeypatch):
@@ -590,7 +603,7 @@ class TestStreaming:
     ):
         def rule(model, key, n, kw):
             if kw.get("stream"):
-                return "500"
+                return "unclassified"
             return _Resp("the whole answer")
 
         provider = _install(monkeypatch, rule)
@@ -736,10 +749,10 @@ class TestProviderHealthIsReportedByTheWrapper:
         assert (SYN_TOP in tracker._models_in_cooldown()) is cooled
 
     @pytest.mark.asyncio
-    async def test_in_place_retries_count_as_one_failure(self, tracker, monkeypatch):
-        """Three 500s inside one call must not escalate the cooldown three steps."""
+    async def test_one_failed_call_is_one_step_of_backoff(self, tracker, monkeypatch):
+        """However the call ended, it must not escalate the cooldown twice."""
         _install(monkeypatch, lambda m, k, n, kw: "500")
-        with pytest.raises(ProseAgentFailed):
+        with pytest.raises(litellm.InternalServerError):
             await _synthesis_call(tracker)
         assert tracker._model_failures[SYN_TOP] == 1
 

@@ -180,6 +180,13 @@ class TestUntypedExceptions:
         for exc in samples:
             assert sum(bool(p(exc)) for p in predicates) == 1, repr(exc)
 
+    def test_a_500_sends_the_ladder_to_another_model(self):
+        """It matched no predicate, so the synthesizer's ladder stopped and refused."""
+        from src.llm.litellm_wrapper import is_quota_error, is_service_unavailable
+
+        exc = litellm.InternalServerError(message="internal", llm_provider="g", model="m")
+        assert is_service_unavailable(exc) and not is_quota_error(exc)
+
 
 class TestOwnErrorTypes:
     def test_unusable_structured_output(self):

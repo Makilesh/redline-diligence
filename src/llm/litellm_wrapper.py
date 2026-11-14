@@ -238,12 +238,14 @@ def is_service_unavailable(exc: Exception) -> bool:
     retire that model for the rest of the day over a blip that typically clears
     in minutes.
 
-    Also True for ProseAgentFailed — a model whose same-model retries all came
-    back empty or errored. The repair is identical (try another model), and
-    without it that case matched no classifier and ended the caller's ladder.
+    Also True for a 500/502 and for ProseAgentFailed — a model whose same-model
+    retries all came back empty or errored. The repair is identical (try
+    another model), and without it those cases matched no classifier and ended
+    the caller's ladder in a refusal while six other rungs sat unused.
     """
     return classify_failure(exc).kind in (
         FailureKind.SERVICE_UNAVAILABLE,
+        FailureKind.SERVER_ERROR,
         FailureKind.MODEL_FAILED,
     )
 
@@ -918,10 +920,14 @@ async def call_structured_agent(
 
 
 # Failures a prose call hands straight to the caller's ladder: retrying the same
-# slot cannot change the answer. Everything else (a 5xx, a dropped connection,
-# an empty completion) is retried in place first.
+# slot cannot change the answer, or costs more than moving on. A 500 is in the
+# second group — each in-place retry is an admitted request that keeps its
+# daily unit, so three of them spent 15% of a reasoning slot's day on a model
+# that had just failed. A dropped connection and an empty completion are still
+# retried in place first.
 _PROSE_NO_RETRY_KINDS = frozenset({
     FailureKind.SERVICE_UNAVAILABLE,
+    FailureKind.SERVER_ERROR,
     FailureKind.TIMEOUT,
     FailureKind.QUOTA,
     FailureKind.AUTH,
