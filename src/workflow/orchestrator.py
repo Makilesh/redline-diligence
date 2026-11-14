@@ -15,9 +15,13 @@ State Machine Topology:
     answer_synthesizer → hallucination_validator → route_after_validation → END
 """
 
+import asyncio
+import functools
+import os
 import time
 import uuid
 from contextlib import AsyncExitStack
+from datetime import datetime, timedelta, timezone
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -25,6 +29,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from src.workflow.state_definitions import AgentState
 from src.workflow.conditional_edges import (
+    _as_score,
     route_to_financial_verifier,
     route_after_quality_check,
     route_after_validation,
@@ -38,6 +43,7 @@ from src.agents.answer_synthesizer import answer_synthesizer_node, synthesize_an
 from src.agents.hallucination_validator import hallucination_validator_node
 from src.llm.litellm_wrapper import set_trace_context
 from src.verification.claim_checker import revision_feedback
+from src.utils import metrics, runtime_status
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -45,6 +51,164 @@ logger = setup_logger(__name__)
 # Holds the open AsyncPostgresSaver context for the process lifetime.
 # None when the MemorySaver fallback is in use.
 _checkpointer_stack: AsyncExitStack | None = None
+
+
+# ==============================================================================
+# Configuration
+# ==============================================================================
+
+
+def _env_seconds(name: str, default: float) -> float:
+    """Reads a non-negative number of seconds; junk or unset gives the default."""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        logger.warning(f"Ignoring non-numeric {name}={raw!r}; using {default}")
+        return default
+
+
+def _env_flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+# Whole-request ceiling. Before this existed a run had no deadline of its own:
+# a provider that accepted the connection and never answered held a pipeline
+# slot until the slot reaper took it back at 15 minutes — while the run itself
+# kept going. 900s keeps that horizon, so nothing that completes today is cut.
+DEFAULT_QUERY_TIMEOUT_SECONDS = 900.0
+
+
+def query_timeout_seconds() -> float:
+    """
+    Deadline for one pipeline run, in seconds (env QUERY_TIMEOUT_SECONDS; 0 = none).
+
+    With SYNTHESIS_MODEL_PIN set and no explicit timeout, the default stretches
+    to cover the pin's own wait: a pinned measurement run is told to sit out a
+    provider cooldown for up to SYNTHESIS_PIN_MAX_WAIT_SECONDS, and a 15-minute
+    deadline would turn that deliberate wait into a failure.
+
+    Returns:
+        Seconds, or 0.0 when disabled.
+    """
+    if os.getenv("QUERY_TIMEOUT_SECONDS", "").strip():
+        return _env_seconds("QUERY_TIMEOUT_SECONDS", DEFAULT_QUERY_TIMEOUT_SECONDS)
+    if os.getenv("SYNTHESIS_MODEL_PIN", "").strip():
+        pin_wait = _env_seconds("SYNTHESIS_PIN_MAX_WAIT_SECONDS", 1800.0)
+        return max(DEFAULT_QUERY_TIMEOUT_SECONDS, pin_wait + 300.0)
+    return DEFAULT_QUERY_TIMEOUT_SECONDS
+
+
+def node_timeout_seconds() -> float:
+    """
+    Ceiling for a single graph step (env NODE_TIMEOUT_SECONDS; 0 = none, the default).
+
+    Off by default because the right value is deployment-specific: the same
+    rerank is 3s on a GPU and minutes on two CPU cores. The LLM calls inside a
+    node already carry their own 60s/120s timeouts; this is the backstop for
+    everything else a node does.
+    """
+    return _env_seconds("NODE_TIMEOUT_SECONDS", 0.0)
+
+
+# ==============================================================================
+# Node instrumentation
+# ==============================================================================
+
+
+def _attach_perf(result, scope: dict, node: str):
+    """
+    Adds a `perf` block to the trace entry a node returned.
+
+    Every node appends exactly one `agent_trace` entry; the block goes on that
+    entry so the trace stays one row per node execution. A node that returned
+    no entry gets a minimal one rather than vanishing from the timings.
+
+    Args:
+        result: The node's state delta.
+        scope: The finished metrics scope for this execution.
+        node: Graph node name.
+
+    Returns:
+        The delta with `perf` attached; non-dict results pass through untouched.
+    """
+    if not isinstance(result, dict):
+        return result
+    perf = {
+        "duration_ms": scope.get("duration_ms", 0.0),
+        "llm_calls": scope["llm_calls"],
+        "prompt_tokens": scope["prompt_tokens"],
+        "completion_tokens": scope["completion_tokens"],
+        "models": list(scope["models"]),
+    }
+    trace = result.get("agent_trace")
+    if isinstance(trace, list) and trace and isinstance(trace[-1], dict):
+        trace = [*trace[:-1], {**trace[-1], "perf": perf}]
+    else:
+        trace = [*(trace or []), {"agent": node, "perf": perf}]
+    return {**result, "agent_trace": trace}
+
+
+def _instrument(node: str, fn):
+    """
+    Wraps a graph node so its latency and LLM usage are measured and reported.
+
+    The measurement lives here rather than in each agent so that it is uniform
+    (a node cannot forget to time itself) and so that both transports get it:
+    the SSE path derived durations from the gaps between stream events, which
+    folds the checkpoint write into the node, and `/query` had nothing at all.
+
+    `functools.wraps` matters: LangGraph inspects a node's signature to decide
+    whether to pass `config`, and must see the original's.
+
+    Args:
+        node: Graph node name.
+        fn: The async node function.
+
+    Returns:
+        An async function with the same signature.
+    """
+
+    @functools.wraps(fn)
+    async def instrumented(*args, **kwargs):
+        with metrics.node_scope(node) as scope:
+            result = await fn(*args, **kwargs)
+        state = args[0] if args and isinstance(args[0], dict) else {}
+        logger.info(
+            "Node completed",
+            extra={
+                "node": node,
+                "session_id": state.get("session_id"),
+                "duration_ms": scope.get("duration_ms"),
+                "llm_calls": scope["llm_calls"],
+                "prompt_tokens": scope["prompt_tokens"],
+                "completion_tokens": scope["completion_tokens"],
+            },
+        )
+        return _attach_perf(result, scope, node)
+
+    return instrumented
+
+
+def node_timings(agent_trace: list[dict]) -> list[dict]:
+    """
+    Flattens a run's trace into one timing row per node execution, in order.
+
+    Args:
+        agent_trace: The accumulated `agent_trace` of a finished run.
+
+    Returns:
+        [{agent, duration_ms, llm_calls, prompt_tokens, completion_tokens, models}]
+        for every entry that carries a `perf` block.
+    """
+    rows = []
+    for entry in agent_trace or []:
+        perf = entry.get("perf") if isinstance(entry, dict) else None
+        if isinstance(perf, dict):
+            rows.append({"agent": entry.get("agent", ""), **perf})
+    return rows
 
 
 async def insufficient_context_node(state: AgentState) -> dict:
@@ -67,7 +231,7 @@ async def insufficient_context_node(state: AgentState) -> dict:
             "the relevant documents haven't been uploaded yet, or the question falls "
             "outside the scope of the available materials.\n\n"
             f"Search attempts: {state.get('rewrite_iteration', 0) + 1}\n"
-            f"Best quality score achieved: {state.get('context_quality_score', 0):.2f}"
+            f"Best quality score achieved: {_as_score(state.get('context_quality_score')):.2f}"
         ),
         "confidence_score": 0.0,
         "validation_status": "passed",  # No validation needed for refusal
@@ -114,17 +278,21 @@ def build_graph() -> StateGraph:
         Uncompiled StateGraph.
     """
     graph = StateGraph(AgentState)
+    metrics.install_llm_usage_tap()
 
-    # Add nodes
-    graph.add_node("query_intelligence", query_intelligence_node)
-    graph.add_node("retrieval_executor", retrieval_executor_node)
-    graph.add_node("financial_verifier", financial_verifier_node)
-    graph.add_node("quality_assessor", quality_assessor_node)
-    graph.add_node("query_rewriter", query_rewriter_node)
-    graph.add_node("answer_synthesizer", answer_synthesizer_node)
-    graph.add_node("hallucination_validator", hallucination_validator_node)
-    graph.add_node("insufficient_context", insufficient_context_node)
-    graph.add_node("retry_synthesis", retry_synthesis_node)
+    # Add nodes — each wrapped so its latency and LLM usage reach the trace.
+    for name, fn in (
+        ("query_intelligence", query_intelligence_node),
+        ("retrieval_executor", retrieval_executor_node),
+        ("financial_verifier", financial_verifier_node),
+        ("quality_assessor", quality_assessor_node),
+        ("query_rewriter", query_rewriter_node),
+        ("answer_synthesizer", answer_synthesizer_node),
+        ("hallucination_validator", hallucination_validator_node),
+        ("insufficient_context", insufficient_context_node),
+        ("retry_synthesis", retry_synthesis_node),
+    ):
+        graph.add_node(name, _instrument(name, fn))
 
     # Set entry point
     graph.set_entry_point("query_intelligence")
@@ -202,25 +370,49 @@ async def get_compiled_graph(postgres_url: str):
     global _checkpointer_stack
 
     graph = build_graph()
+    stack = AsyncExitStack()
     try:
-        stack = AsyncExitStack()
-        checkpointer = await stack.enter_async_context(
-            AsyncPostgresSaver.from_conn_string(postgres_url)
+        # Bounded: a Postgres host that drops packets instead of refusing them
+        # would otherwise hold startup for the OS connect timeout (minutes).
+        checkpointer = await asyncio.wait_for(
+            stack.enter_async_context(AsyncPostgresSaver.from_conn_string(postgres_url)),
+            timeout=_env_seconds("CHECKPOINTER_CONNECT_TIMEOUT_SECONDS", 15.0) or None,
         )
         await checkpointer.setup()
         app = graph.compile(checkpointer=checkpointer)
         _checkpointer_stack = stack
+        runtime_status.set_checkpointer("postgres")
         logger.info("LangGraph state machine compiled with PostgresSaver")
     except Exception as e:
+        await stack.aclose()
+        await close_checkpointer()
+        if _env_flag("REQUIRE_DURABLE_CHECKPOINTS"):
+            # The deployment said Postgres is not optional. Refusing to start is
+            # the only response that cannot be missed: the alternative is a
+            # service that looks healthy and forgets every in-flight run.
+            logger.error(
+                "PostgresSaver unavailable and REQUIRE_DURABLE_CHECKPOINTS is set; "
+                "refusing to start",
+                extra={"error_type": type(e).__name__, "error": str(e)},
+            )
+            raise RuntimeError(
+                "Durable checkpointing is required (REQUIRE_DURABLE_CHECKPOINTS=1) but "
+                f"the Postgres checkpointer could not be initialised: {type(e).__name__}"
+            ) from e
         # Degrade rather than fail: the pipeline is fully functional without
         # durable checkpoints, it just cannot resume a session after a restart.
+        # The degradation is recorded, not just logged — see runtime_status.
         logger.warning(
             f"Failed to initialize PostgresSaver: {e}. Falling back to MemorySaver."
         )
-        await close_checkpointer()
         checkpointer = MemorySaver()
         app = graph.compile(checkpointer=checkpointer)
+        runtime_status.set_checkpointer("memory", error=type(e).__name__)
         logger.info("LangGraph state machine compiled with MemorySaver")
+
+    step_timeout = node_timeout_seconds()
+    if step_timeout:
+        app.step_timeout = step_timeout
     return app
 
 
@@ -243,6 +435,187 @@ async def close_checkpointer() -> None:
         logger.warning(f"Error closing checkpointer: {e}")
     finally:
         _checkpointer_stack = None
+
+
+def checkpointer_connection_broken(app) -> bool:
+    """
+    True when the graph's Postgres checkpointer has lost its connection.
+
+    The saver holds ONE connection for the life of the process and never
+    reconnects. If Postgres restarts — a deploy, an OOM kill, the host
+    rebooting under it — every later checkpoint write raises, and since a
+    checkpoint is written after every node, every query fails until the API is
+    restarted. psycopg knows the connection is gone (`closed` is set as soon as
+    an operation fails on it); this reads that flag without doing any I/O, so
+    the request path can check it for free and rebuild the graph.
+
+    Args:
+        app: Compiled LangGraph application.
+
+    Returns:
+        True if the checkpointer exposes a connection that reports closed.
+    """
+    conn = getattr(getattr(app, "checkpointer", None), "conn", None)
+    return bool(getattr(conn, "closed", False))
+
+
+# ==============================================================================
+# Checkpoint retention
+# ==============================================================================
+# A run writes one checkpoint per graph step (7-12 for a typical query), each a
+# full copy of the state — retrieved chunk text included. Nothing ever deleted
+# them: every query left a thread behind for good, and a client that reused a
+# session id got something worse, because LangGraph applies a new run's input
+# ON TOP of the thread's existing state. For plain fields that is an overwrite,
+# but `agent_trace` and `rewrite_history` use an `operator.add` reducer, so the
+# second question in a session returned the first question's trace as well
+# (measured: 2 trace entries after run one, 4 after run two on the same thread),
+# and the rewriter was handed the previous question's rewrite history.
+#
+# The policy now, in order of when it applies:
+#   * before a run   — the thread is cleared, so a run always starts clean and a
+#                      thread never holds more than one run;
+#   * after success  — the thread is deleted (CHECKPOINT_KEEP_COMPLETED=1 keeps
+#                      the finished run for inspection). The answer has been
+#                      returned and audited; nothing reads the checkpoints again;
+#   * after failure  — the thread is left alone: an interrupted run is the one
+#                      case where the saved state has diagnostic value;
+#   * on a TTL       — whatever is left is swept after CHECKPOINT_TTL_SECONDS;
+#   * on deal purge  — a deal's threads go with it, so a visitor's uploaded text
+#                      does not outlive their sandbox inside a checkpoint.
+#
+# Every operation here is best-effort: retention must never fail a query.
+
+
+def thread_id_for(deal_id: str, session_id: str) -> str:
+    """
+    The checkpoint thread key for one (deal, session).
+
+    Joined with ":" because both ids are validated to `[A-Za-z0-9_-]`, so the
+    separator cannot occur inside either. The previous "_" could: the pairs
+    ("sbx-1_a", "b") and ("sbx-1", "a_b") both produced "sbx-1_a_b", and two
+    callers sharing a thread share its accumulated state.
+    """
+    return f"{deal_id}:{session_id}"
+
+
+def _keep_completed() -> bool:
+    return _env_flag("CHECKPOINT_KEEP_COMPLETED")
+
+
+async def _delete_thread(app, thread_id: str, reason: str) -> bool:
+    """
+    Deletes one checkpoint thread, swallowing (and logging) any failure.
+
+    Args:
+        app: Compiled LangGraph application.
+        thread_id: Thread to delete.
+        reason: Why, for the metric and the log.
+
+    Returns:
+        True if the delete was issued without error.
+    """
+    checkpointer = getattr(app, "checkpointer", None)
+    delete = getattr(checkpointer, "adelete_thread", None)
+    if delete is None:
+        return False
+    try:
+        await delete(thread_id)
+    except Exception as e:
+        logger.warning(
+            "Checkpoint thread delete failed",
+            extra={"thread_id": thread_id, "reason": reason, "error_type": type(e).__name__},
+        )
+        return False
+    metrics.CHECKPOINT_THREADS_DELETED.inc(reason=reason)
+    return True
+
+
+async def _thread_last_seen(app) -> dict[str, str]:
+    """
+    Maps every checkpoint thread to the ISO timestamp of its newest checkpoint.
+
+    Uses the saver's public `alist`, so it works on both backends. That reads
+    whole checkpoints, which is only acceptable because the table is kept small
+    by the policy above; it is called from the periodic sweep and from deal
+    purges, never from the request path.
+    """
+    checkpointer = getattr(app, "checkpointer", None)
+    if checkpointer is None or not hasattr(checkpointer, "alist"):
+        return {}
+    last_seen: dict[str, str] = {}
+    async for item in checkpointer.alist(None):
+        thread_id = (item.config.get("configurable") or {}).get("thread_id")
+        if not thread_id:
+            continue
+        ts = str((item.checkpoint or {}).get("ts") or "")
+        if ts > last_seen.get(thread_id, ""):
+            last_seen[thread_id] = ts
+        else:
+            last_seen.setdefault(thread_id, ts)
+    return last_seen
+
+
+async def purge_deal_checkpoints(app, deal_id: str) -> int:
+    """
+    Deletes every checkpoint thread that belongs to a deal.
+
+    Thread ids are `<deal_id>:<session_id>` (see thread_id_for), so the prefix
+    `<deal_id>:` identifies the deal exactly. Threads written under the old
+    `<deal_id>_<session_id>` form are not matched; the TTL sweep removes those.
+
+    Args:
+        app: Compiled LangGraph application (None is tolerated).
+        deal_id: Deal being purged.
+
+    Returns:
+        Number of threads deleted.
+    """
+    if app is None:
+        return 0
+    prefix = f"{deal_id}:"
+    deleted = 0
+    try:
+        threads = await _thread_last_seen(app)
+    except Exception as e:
+        logger.warning(
+            "Could not list checkpoint threads for deal purge",
+            extra={"deal_id": deal_id, "error_type": type(e).__name__},
+        )
+        return 0
+    for thread_id in threads:
+        if thread_id.startswith(prefix) and await _delete_thread(app, thread_id, "deal_purged"):
+            deleted += 1
+    return deleted
+
+
+async def sweep_stale_checkpoints(app, max_age_seconds: float | None = None) -> int:
+    """
+    Deletes checkpoint threads whose newest checkpoint is older than the TTL.
+
+    Args:
+        app: Compiled LangGraph application (None is tolerated).
+        max_age_seconds: TTL; defaults to CHECKPOINT_TTL_SECONDS (24h). 0 disables.
+
+    Returns:
+        Number of threads deleted.
+    """
+    if app is None:
+        return 0
+    if max_age_seconds is None:
+        max_age_seconds = _env_seconds("CHECKPOINT_TTL_SECONDS", 24 * 60 * 60.0)
+    if not max_age_seconds:
+        return 0
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)).isoformat()
+    deleted = 0
+    for thread_id, ts in (await _thread_last_seen(app)).items():
+        # ISO-8601 UTC timestamps order lexicographically. A thread with no
+        # readable timestamp is left alone rather than guessed at.
+        if ts and ts < cutoff and await _delete_thread(app, thread_id, "expired"):
+            deleted += 1
+    if deleted:
+        logger.info("Checkpoint sweep complete", extra={"threads_deleted": deleted})
+    return deleted
 
 
 def _build_initial_state(
@@ -316,6 +689,7 @@ async def run_query(
     deal_id: str,
     session_id: str | None = None,
     include_pii: bool = False,
+    timeout_seconds: float | None = None,
 ) -> AgentState:
     """
     Executes a full query through the pipeline.
@@ -328,9 +702,15 @@ async def run_query(
         include_pii: Compliance override from the authenticated caller. Defaults
             to False so PII-flagged chunks stay excluded unless explicitly
             authorized. Never set from LLM output — see AgentState.include_pii.
+        timeout_seconds: Deadline for the run. None uses QUERY_TIMEOUT_SECONDS;
+            0 disables it.
 
     Returns:
-        Final AgentState with answer and metadata.
+        Final AgentState with answer and metadata. On failure, the initial
+        state with status "error", `error`, and `error_kind` ("timeout" or
+        "error"). Cancellation is not caught: a caller that cancels this
+        coroutine (client gone, shutdown) gets CancelledError, and LangGraph
+        cancels the node in flight on the way out.
     """
     if session_id is None:
         session_id = str(uuid.uuid4())
@@ -339,11 +719,8 @@ async def run_query(
 
     initial_state = _build_initial_state(query, deal_id, session_id, include_pii)
 
-    config = {
-        "configurable": {
-            "thread_id": f"{deal_id}_{session_id}",
-        }
-    }
+    thread_id = thread_id_for(deal_id, session_id)
+    config = {"configurable": {"thread_id": thread_id}}
 
     set_trace_context(deal_id=deal_id, session_id=session_id)
 
@@ -352,9 +729,14 @@ async def run_query(
         extra={"query": query, "deal_id": deal_id, "session_id": session_id},
     )
 
+    # A run always starts on an empty thread — see "Checkpoint retention".
+    await _delete_thread(app, thread_id, "reset")
+
     try:
-        # CRITICAL: Use ainvoke() — NOT invoke() which deadlocks with async nodes
-        result = await app.ainvoke(initial_state, config=config)
+        # CRITICAL: Use ainvoke() — NOT invoke() which deadlocks with async nodes.
+        # asyncio.timeout(None) is a no-op, so a disabled deadline costs nothing.
+        async with asyncio.timeout(_deadline_delay(timeout_seconds)):
+            result = await app.ainvoke(initial_state, config=config)
         elapsed_ms = (time.monotonic() - start) * 1000
         result["total_latency_ms"] = round(elapsed_ms, 2)
         result["status"] = "completed"
@@ -366,25 +748,53 @@ async def run_query(
                 "elapsed_ms": round(elapsed_ms, 2),
                 "validation_status": result.get("validation_status"),
                 "confidence_score": result.get("confidence_score"),
+                **_run_summary(result),
             },
         )
+        if not _keep_completed():
+            await _delete_thread(app, thread_id, "completed")
 
         return result
 
     except Exception as e:
         elapsed_ms = (time.monotonic() - start) * 1000
+        timed_out = isinstance(e, TimeoutError)
         logger.error(
-            "Query pipeline failed",
+            "Query pipeline timed out" if timed_out else "Query pipeline failed",
             extra={
                 "session_id": session_id,
                 "elapsed_ms": round(elapsed_ms, 2),
-                "error": str(e),
+                # A step timeout raises a bare TimeoutError whose str() is empty.
+                "error": str(e) or type(e).__name__,
+                "error_type": type(e).__name__,
             },
         )
         initial_state["status"] = "error"
-        initial_state["error"] = str(e)
+        initial_state["error"] = str(e) or type(e).__name__
+        # Read by the route to answer 504 rather than 500. Not an AgentState
+        # field: this dict never re-enters the graph.
+        initial_state["error_kind"] = "timeout" if timed_out else "error"
         initial_state["total_latency_ms"] = round(elapsed_ms, 2)
         return initial_state
+
+
+def _deadline_delay(timeout_seconds: float | None) -> float | None:
+    """Resolves a run's deadline: explicit value, else the configured default; None = off."""
+    if timeout_seconds is None:
+        timeout_seconds = query_timeout_seconds()
+    return timeout_seconds or None
+
+
+def _run_summary(final_state: dict) -> dict:
+    """Per-node latency and LLM-call totals of a finished run, for its log line."""
+    timings = node_timings(final_state.get("agent_trace") or [])
+    per_node: dict[str, float] = {}
+    for row in timings:
+        per_node[row["agent"]] = round(per_node.get(row["agent"], 0.0) + row["duration_ms"], 2)
+    return {
+        "node_ms": per_node,
+        "llm_calls": sum(row["llm_calls"] for row in timings),
+    }
 
 
 # ==============================================================================
@@ -506,7 +916,7 @@ def _summarize_stage(node: str, delta: dict) -> tuple[str, dict]:
         }
 
     if node == "quality_assessor":
-        score = delta.get("context_quality_score", 0.0)
+        score = _as_score(delta.get("context_quality_score"))
         missing = delta.get("missing_aspects") or []
         method = delta.get("quality_method", "heuristic")
         breakdown = delta.get("quality_breakdown", {}) or {}
@@ -596,9 +1006,15 @@ async def stream_query(
     deal_id: str,
     session_id: str | None = None,
     include_pii: bool = False,
+    timeout_seconds: float | None = None,
 ):
     """
     Runs the pipeline, yielding an event per completed node then the final state.
+
+    `timeout_seconds` is the run's deadline (None = QUERY_TIMEOUT_SECONDS, 0 =
+    off). On expiry, or on any pipeline failure, the stream ends with an "error"
+    event carrying a generic `detail` and a `code` ("timeout" or
+    "pipeline_error") — never the exception text.
 
     Uses `stream_mode=["updates", "values"]`: "updates" carries each node's own
     delta — the only place per-node output is visible — while "values" carries
@@ -632,13 +1048,16 @@ async def stream_query(
 
     start = time.monotonic()
     initial_state = _build_initial_state(query, deal_id, session_id, include_pii)
+    thread_id = thread_id_for(deal_id, session_id)
     config = {
         "configurable": {
-            "thread_id": f"{deal_id}_{session_id}",
+            "thread_id": thread_id,
             "stream_tokens": True,
         }
     }
     set_trace_context(deal_id=deal_id, session_id=session_id)
+    delay = _deadline_delay(timeout_seconds)
+    deadline = None if delay is None else asyncio.get_running_loop().time() + delay
 
     logger.info(
         "Starting streamed query pipeline",
@@ -664,10 +1083,24 @@ async def stream_query(
     last_mark = start
     seq = 0
 
+    # A run always starts on an empty thread — see "Checkpoint retention".
+    await _delete_thread(app, thread_id, "reset")
+
+    events = app.astream(
+        initial_state, config=config, stream_mode=["updates", "values", "custom"]
+    ).__aiter__()
+
     try:
-        async for mode, chunk in app.astream(
-            initial_state, config=config, stream_mode=["updates", "values", "custom"]
-        ):
+        while True:
+            # The deadline wraps each wait on the graph, never a `yield`: a
+            # timeout scope left open across a yield would fire while the
+            # consumer — not this generator — is the code that is running.
+            try:
+                async with asyncio.timeout_at(deadline):
+                    mode, chunk = await events.__anext__()
+            except StopAsyncIteration:
+                break
+
             if mode == "values":
                 final_state = chunk
                 continue
@@ -703,22 +1136,56 @@ async def stream_query(
                         "detail": detail,
                         "duration_ms": round((now - last_mark) * 1000, 2),
                         "elapsed_ms": round((now - start) * 1000, 2),
+                        # The node's own measurement. `duration_ms` above is the
+                        # gap between stream events, so it also contains the
+                        # checkpoint write; the difference is that overhead.
+                        "perf": (delta.get("agent_trace") or [{}])[-1].get("perf"),
                     },
                 )
                 last_mark = now
 
     except Exception as e:
+        timed_out = isinstance(e, TimeoutError)
         logger.error(
-            "Streamed query pipeline failed",
-            extra={"session_id": session_id, "error": str(e)},
+            "Streamed query pipeline timed out" if timed_out else "Streamed query pipeline failed",
+            extra={
+                "session_id": session_id,
+                "elapsed_ms": round((time.monotonic() - start) * 1000, 2),
+                "error": str(e) or type(e).__name__,
+                "error_type": type(e).__name__,
+            },
         )
-        yield ("error", {"detail": str(e), "session_id": session_id})
+        # The exception text stays in the log. It used to be the event's
+        # `detail`, and the route forwards events verbatim — so a Qdrant URL or
+        # a provider error body went straight to a public browser.
+        yield (
+            "error",
+            {
+                "detail": "The pipeline timed out." if timed_out else "The pipeline failed.",
+                "code": "timeout" if timed_out else "pipeline_error",
+                "session_id": session_id,
+            },
+        )
         return
+    finally:
+        # Reached on normal exit, on error, and when the consumer stops early
+        # (client disconnect closes this generator at a yield). Closing the
+        # graph stream is what cancels a node that is still running.
+        aclose = getattr(events, "aclose", None)
+        if aclose is not None:
+            try:
+                await aclose()
+            except Exception:
+                pass
 
     if final_state is None:
         yield (
             "error",
-            {"detail": "Pipeline produced no state", "session_id": session_id},
+            {
+                "detail": "Pipeline produced no state",
+                "code": "pipeline_error",
+                "session_id": session_id,
+            },
         )
         return
 
@@ -732,7 +1199,10 @@ async def stream_query(
             "session_id": session_id,
             "elapsed_ms": round(elapsed_ms, 2),
             "validation_status": final_state.get("validation_status"),
+            **_run_summary(final_state),
         },
     )
+    if not _keep_completed():
+        await _delete_thread(app, thread_id, "completed")
 
     yield ("result", final_state)

@@ -77,9 +77,30 @@ def _meets_type_threshold(state: AgentState) -> bool:
     Returns:
         True if every dimension score >= its threshold for this query type.
     """
-    breakdown = state.get("quality_breakdown", {})
+    breakdown = state.get("quality_breakdown") or {}
+    if not isinstance(breakdown, dict):
+        breakdown = {}
     thresholds = THRESHOLDS.get(state["query_type"], {})
-    return all(breakdown.get(k, 0.0) >= v for k, v in thresholds.items())
+    return all(_as_score(breakdown.get(k)) >= v for k, v in thresholds.items())
+
+
+def _as_score(value) -> float:
+    """
+    Reads a quality score as a float, treating anything unreadable as 0.0.
+
+    In the ambiguous band the scores come from an LLM, as JSON. A model that
+    returns `"0.8"` or `null` used to raise TypeError in the comparison below —
+    inside an edge function, which fails the whole query. An unreadable score
+    is not evidence of quality, so it counts as none: the query is rewritten or
+    refused rather than crashed, and never admitted on a value nobody could
+    parse.
+    """
+    if isinstance(value, bool):
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def route_after_quality_check(state: AgentState) -> str:
@@ -97,7 +118,7 @@ def route_after_quality_check(state: AgentState) -> str:
     Returns:
         Routing string for the next node.
     """
-    score = state["context_quality_score"]
+    score = _as_score(state["context_quality_score"])
     iteration = state["rewrite_iteration"]
 
     # The thresholds read reranker relevance; an answerability veto says the
