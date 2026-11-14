@@ -97,6 +97,16 @@ def test_only_top_k_reranked_passages_are_scored():
     assert ans.top_passages(chunks, k=3) == ["passage 1", "passage 3", "passage 2"]
 
 
+def test_passages_carry_the_context_header_only_when_ingestion_wrote_one():
+    chunks = _chunks(0.9, 0.5)
+    chunks[0]["context_header"] = "Document: aurora_financials_fy2023.txt\nSection: Cash Flow"
+    chunks[1]["section_heading"] = "SECTION 6"  # headers off: no fallback to the heading
+    assert ans.top_passages(chunks) == [
+        "Document: aurora_financials_fy2023.txt\nSection: Cash Flow\n\npassage 0",
+        "passage 1",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_assess_scores_every_facet_against_top_passages(monkeypatch):
     calls = _stub_laya(monkeypatch, {"Q?": 0.2, "sub?": 0.5})
@@ -172,7 +182,10 @@ async def test_ambiguous_band_still_asks_llm_when_not_vetoed(monkeypatch):
 
     async def fake_llm(**kwargs):
         seen["called"] = True
-        return {"context_quality_score": 0.5, "quality_breakdown": {"relevance": 0.5},
+        # All three dimensions: a reply missing one is now treated as unusable
+        # (test_quality_assessor_llm_output.py).
+        return {"context_quality_score": 0.5,
+                "quality_breakdown": {"relevance": 0.5, "completeness": 0.5, "precision": 0.5},
                 "missing_aspects": [], "force_refusal": False}
 
     monkeypatch.setattr(qa.BudgetTracker, "get_instance", staticmethod(get_instance))

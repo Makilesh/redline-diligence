@@ -63,7 +63,10 @@ class TestGateIsTheRoutersDecision:
         verdict = {"context_quality_score": 0.9, "force_refusal": True, "answerability_veto": True,
                    "quality_breakdown": {"relevance": 0.9, "completeness": 1.0, "precision": 0.9}}
         assert harness._decision(_state(), verdict) == "refused"
-        assert harness._decision(_state(), {**verdict, "answerability_veto": False}) == "admitted"
+        # Without the veto the node does not refuse either (it sets both together).
+        assert harness._decision(
+            _state(), {**verdict, "answerability_veto": False, "force_refusal": False}
+        ) == "admitted"
 
     def test_decision_agrees_with_the_edge_on_every_band(self):
         """Whatever the thresholds become, the harness reports what the edge does."""

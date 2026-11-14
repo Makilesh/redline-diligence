@@ -144,3 +144,68 @@ class QueryRewriterOutput(_AgentOutput):
     @classmethod
     def _alternatives(cls, value: Any) -> list[str]:
         return _text_list(value)
+
+
+QUALITY_DIMENSIONS: tuple[str, ...] = ("relevance", "completeness", "precision")
+
+
+def _unit_score(value: Any) -> float | None:
+    """A finite number in [0, 1] (a numeric string counts) — or None.
+
+    Out-of-range is None, not clamped: a model scoring on a 10-point scale
+    would otherwise have every 0.8+ reading clamp to a perfect 1.0.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        try:
+            value = float(value.strip())
+        except ValueError:
+            return None
+    if not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    return value if 0.0 <= value <= 1.0 else None
+
+
+class QualityAssessorOutput(_AgentOutput):
+    """Agent 5's LLM branch — the fields the quality gate reads.
+
+    Unlike the other agents, a field here has no safe default: a missing
+    precision is not 0.0 (that silently refuses) and not 1.0 (that admits).
+    `complete` says whether the reply can be used at all; when it cannot, the
+    node falls back to its heuristic numbers.
+    """
+
+    context_quality_score: float | None = None
+    quality_breakdown: dict[str, float | None] = {}
+    missing_aspects: list[str] = []
+    force_refusal: bool = False
+
+    @field_validator("context_quality_score", mode="before")
+    @classmethod
+    def _score(cls, value: Any) -> float | None:
+        return _unit_score(value)
+
+    @field_validator("quality_breakdown", mode="before")
+    @classmethod
+    def _breakdown(cls, value: Any) -> dict[str, float | None]:
+        given = _mapping(value)
+        return {dim: _unit_score(given.get(dim)) for dim in QUALITY_DIMENSIONS}
+
+    @field_validator("missing_aspects", mode="before")
+    @classmethod
+    def _missing(cls, value: Any) -> list[str]:
+        return _text_list(value)
+
+    @field_validator("force_refusal", mode="before")
+    @classmethod
+    def _refusal(cls, value: Any) -> bool:
+        return _flag(value)
+
+    @property
+    def complete(self) -> bool:
+        """True when the score and all three dimensions are usable."""
+        return self.context_quality_score is not None and all(
+            self.quality_breakdown.get(dim) is not None for dim in QUALITY_DIMENSIONS
+        )

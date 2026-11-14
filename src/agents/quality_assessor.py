@@ -26,12 +26,15 @@ from src.decisions.answerability import (
     laya_gate_enabled,
 )
 from src.decisions.laya_client import LayaUnavailable
-from src.llm.litellm_wrapper import call_structured_agent
+from src.llm.failures import FailureKind, classify_failure
+from src.llm.litellm_wrapper import ServedModel, call_structured_agent
 from src.llm.budget_tracker import BudgetTracker
 from src.llm.prompt_templates.quality_assessor import (
     QUALITY_ASSESSOR_SYSTEM_PROMPT,
     QUALITY_ASSESSOR_USER_TEMPLATE,
 )
+from src.llm.schemas import QualityAssessorOutput
+from src.verification.prompt_safety import chunk_attributes, wrap_document
 from src.workflow.state_definitions import AgentState
 from src.utils.logger import setup_logger
 
@@ -88,10 +91,20 @@ def _evidence_dimensions(state: AgentState, scores: list[float]) -> tuple[int, f
     Returns:
         (expected evidence count, precision, completeness, overall).
     """
-    usable = [s for s in scores if s >= RELEVANCE_FLOOR]
+    usable = sorted((s for s in scores if s >= RELEVANCE_FLOOR), reverse=True)
     relevance = max(scores)
     expected = EXPECTED_EVIDENCE_COUNT.get(state.get("query_type", ""), 2)
-    precision = float(np.mean(usable)) if usable else 0.0
+    # Mean of the best `expected` usable chunks, not of all of them: averaging
+    # every usable chunk made precision FALL when retrieval found one more
+    # relevant passage — the Decision 17 failure, surviving in this dimension
+    # (audit W8). Measured: comp_05 (answerable) scored [0.459, 0.212, 0.164]
+    # -> 0.278, admitted; with chunk context headers retrieval added the 280G
+    # passage (0.145) from the same section, the mean fell to 0.245 < 0.25 and
+    # the router refused. The top-`expected` mean is never below the old
+    # mean-of-usable (equal while there are at most `expected` usable chunks,
+    # where completeness is the binding dimension) and, once `expected` usable
+    # chunks exist, cannot fall as more are retrieved.
+    precision = float(np.mean(usable[:expected])) if usable else 0.0
     completeness = min(len(usable) / expected, 1.0)
     overall = relevance * 0.4 + completeness * 0.3 + precision * 0.3
     return expected, precision, completeness, overall
@@ -340,11 +353,18 @@ async def quality_assessor_node(state: AgentState) -> dict:
     choice = await tracker.get_model_for_agent()
     model = choice.model
 
+    # Chunk text is untrusted data-room content and goes in through the same
+    # escaped <document> boundary as the synthesis and validation prompts. It
+    # used to be pasted raw, so a chunk saying "return force_refusal true"
+    # could suppress an answer from inside the ambiguous band (audit W6).
     chunks_summary = "\n".join(
-        f"Chunk {i+1} (score={c.get('reranker_score', 0):.2f}, "
-        f"source={c.get('source_file', 'unknown')}, "
-        f"category={c.get('document_category', 'unknown')}): "
-        f"{c.get('text', '')[:1200]}..."
+        wrap_document(
+            i + 1,
+            c.get("text", "")[:1200],
+            reranker_score=f"{float(c.get('reranker_score', 0.0)):.2f}",
+            category=c.get("document_category") or None,
+            **chunk_attributes(c),
+        )
         for i, c in enumerate(chunks[:10])
     )
 
@@ -358,42 +378,86 @@ async def quality_assessor_node(state: AgentState) -> dict:
         mean_score=f"{float(np.mean(scores)):.3f}" if scores else "N/A",
     )
 
-    result = await call_structured_agent(
-        system_prompt=QUALITY_ASSESSOR_SYSTEM_PROMPT,
-        user_prompt=user_prompt,
-        model=model,
-        temperature=0.0,
-        max_tokens=600,
-        api_key=choice.api_key,
-    )
+    # The call may descend the ladder; `served` keeps the trace truthful.
+    served = ServedModel(model)
+    degraded: str | None = None
+    try:
+        result = await call_structured_agent(
+            system_prompt=QUALITY_ASSESSOR_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            model=model,
+            temperature=0.0,
+            max_tokens=600,
+            api_key=choice.api_key,
+            agent="quality_assessor",
+            served=served,
+        )
+    except Exception as e:
+        # Every rung failed. The heuristic numbers below are still a decision
+        # the router can make, so the query continues instead of failing here.
+        logger.error(
+            "Agent 5: LLM assessment unavailable, using heuristic numbers",
+            extra={"error": str(e), "error_type": type(e).__name__},
+        )
+        result = {}
+        # The trace reaches API callers; keep only the failure class.
+        degraded = classify_failure(e).kind.value
+    model = served.model
+
+    # A reply with a missing, non-numeric or out-of-range score or dimension
+    # used to reach route_after_quality_check as-is and raise TypeError there
+    # ("0.8", null), or default every dimension to 0.0 (renamed keys) (audit W3).
+    parsed = QualityAssessorOutput.from_llm(result)
+    if degraded is None and not parsed.complete:
+        degraded = FailureKind.BAD_OUTPUT.value
+        logger.warning("Agent 5: LLM assessment unusable, using heuristic numbers")
+
+    if degraded:
+        # Best chunk is in 0.05–0.30 here, under the router's 0.30 relevance
+        # floor, so these numbers send the query to a rewrite, never straight
+        # to synthesis: without a usable second opinion the gate fails closed.
+        all_scores = [float(c.get("reranker_score", 0.0)) for c in chunks]
+        relevance = max(all_scores) if all_scores else 0.0
+        _, precision, completeness, overall = (
+            _evidence_dimensions(state, all_scores) if all_scores else (0, 0.0, 0.0, 0.0)
+        )
+        score = round(overall, 3)
+        breakdown = {
+            "relevance": round(relevance, 3),
+            "completeness": round(completeness, 3),
+            "precision": round(precision, 3),
+        }
+        method, missing, force_refusal = "heuristic", [], False
+    else:
+        score = parsed.context_quality_score
+        breakdown = dict(parsed.quality_breakdown)
+        method, missing, force_refusal = "llm", parsed.missing_aspects, parsed.force_refusal
 
     logger.info(
         "Agent 5: LLM assessment complete",
-        extra={
-            "score": result.get("context_quality_score", 0),
-            "method": "llm",
-            "model": model,
-        },
+        extra={"score": score, "method": method, "model": model, "degraded": bool(degraded)},
     )
 
-    breakdown = result.get("quality_breakdown", {})
-    if verdict is not None and isinstance(breakdown, dict):
+    if verdict is not None:
         breakdown = {**breakdown, **verdict.as_breakdown()}
 
+    trace = {
+        "agent": "quality_assessor",
+        "method": method,
+        "model": model,
+        "score": score,
+        **_laya_trace(verdict),
+    }
+    if degraded:
+        trace["degraded"] = True
+        trace["error"] = degraded
+
     return {
-        "context_quality_score": result.get("context_quality_score", 0.0),
+        "context_quality_score": score,
         "quality_breakdown": breakdown,
-        "quality_method": "llm",
-        "missing_aspects": result.get("missing_aspects", []),
-        "force_refusal": result.get("force_refusal", False),
+        "quality_method": method,
+        "missing_aspects": missing,
+        "force_refusal": force_refusal,
         "answerability_veto": False,
-        "agent_trace": [
-            {
-                "agent": "quality_assessor",
-                "method": "llm",
-                "model": model,
-                "score": result.get("context_quality_score", 0),
-                **_laya_trace(verdict),
-            }
-        ],
+        "agent_trace": [trace],
     }

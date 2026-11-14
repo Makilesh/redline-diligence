@@ -16,10 +16,20 @@ Every caller must keep a non-Laya path. `LAYA_ENABLED=0`, a missing package or a
 failed download all raise LayaUnavailable, and the caller falls back to the
 rule or heuristic that ran before Laya existed.
 
+The checkpoint is pinned to a Hub commit. laya.Router resolves the bundle repo
+at whatever `main` is, and `main` moved between September and November: the
+weights happened to be byte-identical, but an upstream change would have moved
+every threshold in this package without a line of this repository changing.
+The snapshot is therefore resolved here, at LAYA_REVISION, and handed to the
+Router as a local path.
+
 Env:
     LAYA_ENABLED   "0" disables every Laya decision (default on).
     LAYA_MODEL     Router checkpoint key (default "typed-decisions").
     LAYA_DEVICE    "cuda" / "cpu"; default picks CUDA when available.
+    LAYA_REVISION  Hub commit of convaiinnovations/laya to load (default
+                   DEFAULT_REVISION). "main" follows upstream — every number in
+                   eval/ must then be re-measured.
 """
 
 from __future__ import annotations
@@ -35,6 +45,18 @@ from src.utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 DEFAULT_MODEL = "typed-decisions"
+# The bundle repo and where each Router key lives in it (laya 0.3.20,
+# router.DEFAULT_MODELS). A key outside this table is left to the Router.
+BUNDLE_REPO = "convaiinnovations/laya"
+BUNDLE_SUBFOLDERS: dict[str, str | None] = {
+    "english": None,
+    "multilingual": "multilingual",
+    "typed-decisions": "typed-decisions",
+}
+# The commit every number in eval/ was measured on (typed-decisions/
+# model.safetensors sha256 4fa56de7…a24e, identical at the September commit
+# 55cf4c4). Bump it only together with a re-run of the decision evals.
+DEFAULT_REVISION = "85cc74ddae6109077ebe2853a9b3077fb6606a78"
 # Upper bound on (state, question) sequences per forward pass. Laya's own
 # batch_size counts states, and each state is encoded once per question, so a
 # fixed state count lets an 11-question ingest pass balloon to 176 sequences —
@@ -64,6 +86,44 @@ def laya_enabled() -> bool:
 def laya_model() -> str:
     """The Router checkpoint key in use."""
     return os.getenv("LAYA_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+
+
+def laya_revision() -> str:
+    """The Hub commit (or branch) of the bundle repo that is loaded."""
+    return os.getenv("LAYA_REVISION", DEFAULT_REVISION).strip() or DEFAULT_REVISION
+
+
+def _pinned_checkpoint(model: str) -> tuple[str, str | None] | None:
+    """
+    Local snapshot of `model` at laya_revision(), as a Router model spec.
+
+    Mirrors laya.Agent's own download (same files, same subfolder) with the one
+    argument it does not expose: `revision`. A commit already in the Hub cache
+    resolves without the network.
+
+    Args:
+        model: Router checkpoint key.
+
+    Returns:
+        (snapshot directory, subfolder), or None for a key that is not one of
+        the bundle's checkpoints.
+    """
+    if model not in BUNDLE_SUBFOLDERS:
+        return None
+    from huggingface_hub import snapshot_download
+
+    subfolder = BUNDLE_SUBFOLDERS[model]
+    prefix = f"{subfolder}/" if subfolder else ""
+    directory = snapshot_download(
+        BUNDLE_REPO,
+        revision=laya_revision(),
+        token=os.getenv("HF_TOKEN") or None,
+        allow_patterns=[
+            prefix + name
+            for name in ("rl_agent_config.json", "model.safetensors", "tokenizer/*", "encoder/*")
+        ],
+    )
+    return directory, subfolder
 
 
 def _device() -> str:
@@ -107,10 +167,18 @@ def _get_router():
             from laya import Router
 
             device = _device()
-            logger.info(f"Loading Laya ({laya_model()}) on {device.upper()}")
+            pinned = _pinned_checkpoint(laya_model())
+            logger.info(
+                f"Loading Laya ({laya_model()}) on {device.upper()}",
+                extra={"revision": laya_revision() if pinned else "unpinned"},
+            )
             # max_loaded=1: only the one checkpoint is ever requested, and each
             # resident checkpoint is ~1.7GB.
-            _router = Router(device=device, max_loaded=1)
+            _router = Router(
+                models={laya_model(): pinned} if pinned else None,
+                device=device,
+                max_loaded=1,
+            )
             return _router
         except Exception as e:
             _load_failed = True
@@ -180,6 +248,13 @@ def noul(answer: dict[str, Any]) -> float:
 def loaded_model() -> str | None:
     """Checkpoint key if Laya has been loaded in this process, else None."""
     return laya_model() if _router is not None else None
+
+
+def loaded_revision() -> str | None:
+    """Hub revision of the loaded checkpoint (None if not loaded or not a bundle key)."""
+    if _router is None or laya_model() not in BUNDLE_SUBFOLDERS:
+        return None
+    return laya_revision()
 
 
 async def warm_laya() -> float | None:
