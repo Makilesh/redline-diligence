@@ -1,68 +1,147 @@
-# CPU backend image: used by docker-compose.prod.yml on a VM (see DEPLOYMENT.md),
-# and runnable unchanged as a Hugging Face Space (Docker SDK).
+# CPU backend image, built for linux/amd64 and linux/arm64 alike. Used by
+# docker-compose.yml and docker-compose.prod.yml (see DEPLOYMENT.md), and
+# runnable as a Hugging Face Space (Docker SDK) if copied to `Dockerfile`.
 #
-# The free tier gives 2 vCPU / 16GB RAM / 50GB disk, which is the only free host
-# that fits this workload at all — bge-m3 alone is 2.27GB resident, so the 512MB
-# tiers at Render, Fly and Koyeb are not near-misses, they are an order of
-# magnitude short.
+# A CPU host is the only free option that fits this workload — bge-m3 alone is
+# 2.27GB resident — and the target is Oracle Cloud's Always Free ARM VM
+# (aarch64, 2 OCPU / 12GB).
 #
-# Three things differ from the local Dockerfile, each forced by the platform:
-#   1. Port 7860. Spaces routes to that port and nothing else.
-#   2. User 1000. Spaces runs the container as a non-root user, so anything the
-#      process writes — most importantly the several-GB model cache — must be
-#      owned by that user or the first download fails with EACCES.
-#   3. CPU-only torch. `pip install sentence-transformers` pulls the CUDA build
-#      by default: ~2.5GB of NVIDIA wheels that cannot be used on a CPU host and
-#      push the image past what a free build will finish.
+# Two stages. The builder installs every Python dependency into /opt/venv; the
+# runtime stage copies that venv and nothing else, so the compiler toolchain
+# the builder needs never reaches the image that runs.
+#
+# Why the builder needs a compiler at all, on ARM only: requirements.txt pins
+# fastembed<0.4, and every fastembed 0.3.x requires PyStemmer<3. PyStemmer
+# publishes no aarch64 wheel before 3.1.0, so on ARM pip builds it from source
+# (measured: `uv pip compile --python-platform aarch64-manylinux_2_28
+# --only-binary :all:` fails on exactly this one package and resolves all 158
+# others to wheels). That sdist's setup.py downloads libstemmer_c from
+# snowballstem.org with urlretrieve and no timeout, then compiles it with
+# Cython fetched through setup_requires. A stalled connection there is a build
+# that hangs inside `pip install -r requirements.txt` printing nothing. It is
+# therefore built here as its own step: build tools pinned, the C source
+# fetched with a timeout and its checksum verified, and the whole step bounded.
+# On amd64 a wheel exists and the step is skipped. Moving to fastembed>=0.4.2
+# (py-rust-stemmers, which ships aarch64 wheels) removes the step entirely.
 
-FROM python:3.11-slim
+ARG PYTHON_IMAGE=python:3.11-slim-bookworm
 
-# Spaces runs as uid 1000. Creating the user here (rather than relying on the
-# platform's) keeps `docker run` locally identical to what Spaces does.
-RUN useradd -m -u 1000 user
+# ------------------------------------------------------------------------------
+FROM ${PYTHON_IMAGE} AS builder
 
-# HF_HOME is where huggingface_hub caches model weights. It must live under the
-# user's own directory: the default (/root/.cache) is unwritable as uid 1000,
-# and the failure surfaces as a download error at first query rather than at
-# build time, long after it would have been cheap to notice.
-ENV HF_HOME=/home/user/.cache/huggingface \
-    PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    API_HOST=0.0.0.0 \
-    API_PORT=7860
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PYTHONDONTWRITEBYTECODE=1
 
-# PyMuPDF and pdfplumber need a compiler; curl is used by the healthcheck.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+RUN python -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
 
-# CPU-only torch, installed first and pinned to the CPU index so the later
-# `sentence-transformers` install sees the requirement already satisfied and
-# does not pull the CUDA build over the top of it.
+# CPU-only torch, installed first from the CPU index so that the later
+# `sentence-transformers` install sees the requirement already satisfied. On
+# PyPI, torch is the CUDA build on aarch64 as well as amd64 now (2.15.0 resolves
+# with 16 nvidia-*/cuda-* wheels on both), so letting PyPI supply it costs
+# gigabytes of libraries a CPU VM cannot load.
+#
+# Pinned: unpinned, the largest dependency in the image was whatever the index
+# served on build day. 2.11.0 is the version the project is developed and
+# measured on, and the CPU index publishes it for cp311 on both architectures.
 #
 # --timeout/--retries: the CPU wheel is ~200MB, and pip's default 15s read
-# timeout is shorter than one quiet stretch on a slow or throttled connection
-# to pytorch.org's CDN. Measured locally: identical ReadTimeoutError at the same
-# ~100s mark on two consecutive attempts, so this is a real connection
-# characteristic to defend against, not a one-off blip.
-RUN pip install --no-cache-dir --timeout 120 --retries 5 \
-        torch --index-url https://download.pytorch.org/whl/cpu
+# timeout is shorter than one quiet stretch on a slow connection to
+# pytorch.org's CDN (measured: identical ReadTimeoutError at the same ~100s
+# mark on two consecutive attempts).
+ARG TORCH_VERSION=2.11.0
+RUN pip install --retries 5 "torch==${TORCH_VERSION}" \
+        --index-url https://download.pytorch.org/whl/cpu
 
-COPY --chown=user requirements.txt .
-RUN pip install --no-cache-dir --timeout 120 --retries 5 -r requirements.txt
+# PyStemmer from source, bounded — ARM only; see the header.
+#
+# Both archives are fetched with curl, with timeouts, and checked against
+# pinned SHA256s, because neither pip nor the package can be trusted not to
+# hang: even `pip download` of an sdist runs its setup.py to read metadata, and
+# that setup.py starts the unbounded libstemmer download at import time.
+# Extracting libstemmer_c next to setup.py first makes it skip that download.
+# The libstemmer checksum is the one setup.py itself hard-codes; the sdist's is
+# PyPI's published digest.
+ARG PYSTEMMER_VERSION=2.2.0.3
+ARG PYSTEMMER_SHA256=9ac74c8d0f3358dbb050f64cddbb8d55021d831d92305d7c20780ea8d6c0020e
+ARG LIBSTEMMER_SHA256=b941d9fe9cf36b4e2f8d3873cd4d8b8775bd94867a1df8d8c001bb8b688377c3
+RUN set -eu; \
+    if pip download --only-binary=:all: --no-deps -d /tmp/probe \
+            "PyStemmer==${PYSTEMMER_VERSION}" >/dev/null 2>&1; then \
+        echo "PyStemmer wheel available for $(uname -m); no source build"; \
+    else \
+        echo "No PyStemmer wheel for $(uname -m); building from source"; \
+        pip install --retries 5 "setuptools<81" wheel "Cython>=3.0,<3.4"; \
+        mkdir -p /tmp/pystemmer && cd /tmp/pystemmer; \
+        fetch() { curl -fsSL --retry 5 --connect-timeout 20 --max-time 300 -o "$1" "$2"; }; \
+        fetch pystemmer.tar.gz \
+            "https://files.pythonhosted.org/packages/source/p/pystemmer/pystemmer-${PYSTEMMER_VERSION}.tar.gz"; \
+        echo "${PYSTEMMER_SHA256}  pystemmer.tar.gz" | sha256sum -c -; \
+        tar xzf pystemmer.tar.gz; \
+        cd "pystemmer-${PYSTEMMER_VERSION}"; \
+        fetch libstemmer_c-2.2.0.tar.gz https://snowballstem.org/dist/libstemmer_c-2.2.0.tar.gz; \
+        echo "${LIBSTEMMER_SHA256}  libstemmer_c-2.2.0.tar.gz" | sha256sum -c -; \
+        tar xzf libstemmer_c-2.2.0.tar.gz; \
+        timeout 900 pip install --no-build-isolation . ; \
+    fi; \
+    rm -rf /tmp/probe /tmp/pystemmer
 
-COPY --chown=user . .
+COPY requirements.txt .
+RUN pip install --retries 5 -r requirements.txt
 
+# Fails the build, not the first query, if the stack cannot import on this
+# architecture.
+RUN python -c "import torch, fastembed, sentence_transformers, laya, psycopg, fitz; \
+print('imports ok', torch.__version__, torch.backends.mkldnn.is_available())"
+
+# ------------------------------------------------------------------------------
+FROM ${PYTHON_IMAGE} AS runtime
+
+# Spaces runs as uid 1000, and nothing here needs root at runtime. Creating the
+# user here (rather than relying on the platform's) keeps `docker run` locally
+# identical to what a Space or the VM does.
+RUN useradd -m -u 1000 user
+
+# curl: the healthcheck. Nothing else from apt is needed at runtime: every
+# remaining native dependency ships inside its wheel.
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/venv /opt/venv
+
+# HF_HOME is where huggingface_hub caches model weights. It must live under the
+# user's own directory: the default (/root/.cache) is unwritable as uid 1000,
+# and the failure surfaces as a download error at first query rather than at
+# build time, long after it would have been cheap to notice.
+ENV PATH=/opt/venv/bin:$PATH \
+    HF_HOME=/home/user/.cache/huggingface \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    API_HOST=0.0.0.0 \
+    API_PORT=7860
+
+WORKDIR /app
 USER user
 
+# The append-only audit trail (src/utils/audit_log.py). Created here, owned by
+# uid 1000, so a named volume mounted on it inherits that ownership.
+RUN mkdir -p /home/user/audit
+
 # Bake the models into the image rather than downloading them on first boot.
-# The free tier's disk is ephemeral, so a runtime download is paid again after
-# every sleep-wake cycle — roughly two minutes in front of whoever opened the
+# The free tiers' disks are ephemeral, so a runtime download is paid again
+# after every restart — roughly two minutes in front of whoever opened the
 # link. Baking moves that cost to build time, once.
+#
+# These layers come BEFORE the application code, so editing a .py file does
+# not re-download ~5GB of weights. They used to come after `COPY . .`, which
+# made every code change a full model download on a 2-core VM.
 #
 # RERANKER_MODEL must be set for this step, because it is the model this layer
 # caches: building with the default and running with an override would download
@@ -72,7 +151,11 @@ ARG RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
 # The claim-level entailment check in the hallucination validator. xsmall is the
 # CPU default in src/verification/nli.py; pinned here so build and runtime agree.
 ARG NLI_MODEL=cross-encoder/nli-deberta-v3-xsmall
-RUN python -c "\
+# Bounded per read, so a stalled Hub download fails the build instead of
+# hanging it.
+ENV HF_HUB_DOWNLOAD_TIMEOUT=60 \
+    HF_HUB_ETAG_TIMEOUT=30
+RUN timeout 3600 python -c "\
 from sentence_transformers import SentenceTransformer, CrossEncoder; \
 SentenceTransformer('${EMBEDDING_MODEL}'); \
 CrossEncoder('${RERANKER_MODEL}'); \
@@ -83,7 +166,7 @@ print('models cached')"
 # src/decisions — same reasoning: fetched here once, not on the first request.
 # (No backticks in the probe question: inside this double-quoted shell string
 # they would be command substitution.)
-RUN python -c "\
+RUN timeout 3600 python -c "\
 from laya import Router; \
 Router(device='cpu', max_loaded=1).predict({'passage': 'probe'}, \
     {'q': {'type': 'noul', 'instructions': 'Is the passage empty?'}}, \
@@ -91,10 +174,12 @@ Router(device='cpu', max_loaded=1).predict({'passage': 'probe'}, \
 print('laya cached')"
 
 # FastEmbed's BM25 model is small but is fetched on first use like the others.
-RUN python -c "\
+RUN timeout 600 python -c "\
 from fastembed import SparseTextEmbedding; \
 SparseTextEmbedding(model_name='Qdrant/bm25'); \
 print('bm25 cached')"
+
+COPY --chown=user . .
 
 # Measured on 2 vCPU: bge-reranker-v2-m3 needs 111s to score 40 passages and a
 # decomposed query reranks four times. The MiniLM cross-encoder does the same
@@ -107,7 +192,11 @@ ENV EMBEDDING_MODEL=${EMBEDDING_MODEL} \
 
 EXPOSE 7860
 
-HEALTHCHECK --interval=60s --timeout=10s --start-period=180s --retries=3 \
-    CMD curl -fsS http://localhost:7860/health || exit 1
+# /health answers once startup (model warmup included) has finished, and stays
+# 200 while the process lives; /ready is what says it can serve.
+HEALTHCHECK --interval=60s --timeout=10s --start-period=600s --retries=3 \
+    CMD curl -fsS "http://localhost:${API_PORT}/health" || exit 1
 
+# run_api.py, not uvicorn directly: it enforces the single worker, loads .env,
+# and gives in-flight requests a grace period on SIGTERM.
 CMD ["python", "run_api.py"]
