@@ -90,28 +90,31 @@ A typical query makes **2–3 LLM calls** (previously 3–4, one of which re-der
 
 Every advertised format has a fixture test that builds a real file and runs it through the production path (`tests/test_ingestion_formats.py`).
 
-- **PDF** — PyMuPDF text with per-page layout statistics: a block is a heading when its font size exceeds the page median × 1.2. Passages are cut at page boundaries so each citation carries its real page.
+- **PDF** — PyMuPDF text rebuilt as visual rows, so a financial statement's label and its figures stay on one line under the right year; a run of label + amount rows under a period header is recognised as a table even without ruling lines (the usual 10-K layout). Headings come from per-page font statistics, running headers and footers are dropped, and passages carry their real page.
 - **Multi-page table stitching** — `pdfplumber` tables are fingerprinted by column structure and header similarity; a headerless table on the *next* page is stitched onto its predecessor into one table with a page range.
-- **DOCX** — clean text is the document with tracked insertions accepted and deletions dropped; tables are read in document order; genuinely changed paragraphs are indexed separately as redlines.
-- **XLSX / PPTX** — sheets and slide tables go through the same table converter as PDF tables; PPTX keeps slide numbers and speaker notes.
-- **Plain text** — a heading-aware parser (ALL-CAPS lines, `Section 1.2 —`, `#`) so citations name a real section. No page number is invented for formats that don't have pages.
+- **DOCX** — clean text is the document with tracked insertions accepted and deletions dropped; content controls, nested tables and bold article lines are read; genuinely changed paragraphs are indexed separately as redlines.
+- **XLSX / PPTX** — workbooks are read cell by cell (merged and two-row headers, percentage formats, captions, stacked tables, hidden sheets flagged, formulas without a cached value flagged rather than read as empty); PPTX keeps slide numbers, speaker notes and text inside group shapes.
+- **Plain text** — a heading-aware parser (ALL-CAPS lines, `Section 1.2 —`, `#`) so citations name a real section; aligned tables keep their column header; Windows-1252 and UTF-16 files are decoded correctly. No page number is invented for formats that don't have pages.
+- **Unreadable files fail loudly** — an encrypted, corrupt or scanned (no text layer) PDF, an encrypted or legacy Office file, or a binary file named `.txt` is rejected with that reason, never indexed as empty text.
 
-**Tables are stored four ways under one `table_id`**: a narrative for dense matching, row-by-row key–value pairs for exact lookup, a deterministically computed metrics summary (YoY growth, CAGR, margins — pandas, not the LLM), and a markdown grid. Retrieving any one pulls its siblings, so the synthesizer always sees the exact grid.
+**Tables are stored four ways under one `table_id`**: a narrative for dense matching, row-by-row key–value pairs for exact lookup, a deterministically computed metrics summary (YoY growth, CAGR, margins — pandas, not the LLM), and a markdown grid. **Every representation prints each cell exactly as the document states it** — under "($ in millions, except per share)" EPS stays 2.74 — and states the unit once; normalised values live only in typed `structured_rows`, which the cross-document figure registry reads. Growth is computed only between fiscal years that are actually consecutive, CAGR over the real span, and nothing is emitted when the arithmetic is undefined. Retrieving any one representation pulls the whole grid, in order.
 
 **Parent–child chunks**: ~512-token child chunks are what gets searched (hard cap 800); ~2048-token parent sections are what the synthesizer and validator read.
 
-**Ingest is idempotent.** `doc_id` is derived from the deal and the file's SHA-256, point IDs from the chunk ID, so re-uploading identical bytes replaces rather than duplicates. A failed upsert rolls back every point already written for that document. Uploads are size-capped, filenames sanitised, Office archives checked for zip bombs, and parsing runs off the event loop.
+**Ingest is idempotent.** `doc_id` is derived from the deal and the file's SHA-256, point IDs from the chunk ID, so re-uploading identical bytes replaces rather than duplicates. A failed upsert rolls back every point already written for that document, and a failed re-index keeps the copy that was serving. A document a newer version retired stays retired when re-indexed, and an upload that looks like a new version of an existing file comes back with a `version_candidates` proposal — superseding stays an explicit choice. Uploads are size-capped before buffering, filenames sanitised, Office archives checked for zip bombs, and parsing runs off the event loop.
 
-PII (SSNs, account numbers, compensation data) and risk signals (change of control, MAC clauses, litigation…) are detected at ingestion, and each document is categorised. Risk signals and categories are decided with a local decision model on top of the rules — see [Decision layer](#decision-layer-laya); PII stays rule-based. PII-flagged chunks are excluded from retrieval by default.
+Personal identifiers (SSNs in any separator style, account numbers, IBANs with a mod-97 check, payment cards with a Luhn check, individual pay stated in prose) and risk signals (change of control, MAC clauses, litigation…) are detected at ingestion, and each document is categorised. Risk signals and categories are decided with a local decision model on top of the rules — see [Decision layer](#decision-layer-laya); PII stays rule-based. PII-flagged chunks are excluded from retrieval by default. Named-executive compensation is deliberately **not** treated as PII: in a data room it is diligence content (280G exposure, change-of-control cost), and hiding it would refuse questions a reviewer is there to ask ([Decision 59](DECISIONS_LOG.md)).
 
 ---
 
 ## Retrieval
 
-- **Hybrid dense + sparse** — `BAAI/bge-m3` (1024-dim) and FastEmbed BM25 in one Qdrant deployment, fused with a rank-based **Reciprocal Rank Fusion** that ignores raw scores to avoid scale mismatch.
-- **Cross-encoder rerank** — `BAAI/bge-reranker-v2-m3` locally (`ms-marco-MiniLM-L-6-v2` on the CPU-only Space), sigmoid-normalised to [0, 1].
+- **Hybrid dense + sparse** — `BAAI/bge-m3` (1024-dim) and BM25 in one Qdrant deployment, fused with a rank-based **Reciprocal Rank Fusion** that ignores raw scores to avoid scale mismatch. Text is normalised before BM25 on both the document and the query side (case, punctuation, figures such as `$452.8M`) and Qdrant applies IDF; each chunk records which encoding wrote its sparse vector, so an index that predates a change is reported at startup instead of silently missed. (The keyword channel was case-sensitive until November 2026 — [Decision 52](DECISIONS_LOG.md).)
+- **Cross-encoder rerank** — `BAAI/bge-reranker-v2-m3` locally (`ms-marco-MiniLM-L-6-v2` on the CPU-only host), sigmoid-normalised to [0, 1], half precision on a GPU. Every pass of a decomposed question is scored in **one** call, longest pairs first: p50 latency 943 → 144 ms per question.
+- **Section and table completion** — a retrieved paragraph brings the table printed in its own section, and a retrieved table brings its exact grid, whole and in order, directly after the chunk that hit.
 - **Sub-question decomposition** — query expansion rephrases the same question and cannot retrieve a fact the question never asks for. A multi-fact question is split into atomic sub-questions, each retrieved in **its own pass and reranked against itself**, then merged so every facet keeps a share of the context. A passage containing only a share price scores near zero against "what is the implied EV/EBITDA multiple?" and high against "what is the per-share merger consideration?".
-- **Server-enforced filters** — deal isolation, the current-version filter and PII exclusion are applied by the server on every query. The LLM can suggest a document category; it cannot see superseded versions or PII, because those conditions are never read from model output.
+- **Server-enforced filters** — deal isolation, the current-version filter and PII exclusion are applied by the server on every query, on both search channels (pinned by a test). The only filter a model may propose is a known document category; it cannot see superseded versions or PII, because those conditions are never read from model output.
+- **No silent fallback** — the Qdrant backend is set by `QDRANT_MODE` (`server`, the default, or `local` for development). An unreachable server fails startup; it used to fall back to an empty local index that answered nothing while the health check stayed green ([Decision 54](DECISIONS_LOG.md)).
 
 ---
 
@@ -119,13 +122,15 @@ PII (SSNs, account numbers, compensation data) and risk signals (change of contr
 
 A validator that is itself an LLM grading another LLM tells you what one model thinks of another. This one checks, cheapest first:
 
-1. **Numeric grounding (deterministic).** Every figure in the answer — `$452.8M`, `USD 1.2bn`, `17.0%`, `8.5x` — is extracted, unit-normalised (including units a table states only in its header), and located in the retrieved text within rounding tolerance. Years, dates, section numbers (`280G`, `4.3(a)`) and page references are skipped. A figure computed from two grounded figures in the same sentence or table row counts as *derived*; anything else is *unsupported*.
+1. **Numeric grounding (deterministic).** Every figure in the answer — `$452.8M`, `USD 1.2bn`, `17.0%`, `8.5x`, `24 months` — is extracted, unit-normalised, and located in the retrieved text within rounding tolerance, **at the unit its document declares and in the row or sentence the claim names, for the period it names**. A real figure attached to the wrong metric or year is not grounded: "net income was $452.8M", where $452.8M is revenue, goes to the judge instead of passing. Ratios are never rescaled, and a bare number in prose grounds nothing — before this, 33.5% of *random* "$X.Y billion" figures and 48.5% of random whole percentages were accepted. Years, dates, section numbers (`280G`, `4.3(a)`) and page references are skipped. A figure computed from grounded inputs counts as *derived* only when those inputs are found; anything else is *unsupported*.
 2. **Claim-level entailment (local NLI).** Each claim is scored against sentence-sized windows of the chunks it cites, plus the best lexical matches elsewhere — a correct claim with a sloppy citation isn't failed for the citation alone. `cross-encoder/nli-deberta-v3-small` on GPU, `-xsmall` on CPU.
 3. **LLM judge, only when needed.** Claims neither step could decide go to a lite model in **one batched call**; the common case makes none. An NLI contradiction alone never fails an answer: in calibration, all five of the small model's ≥0.9-confidence contradictions were wrong, so a contradiction must be confirmed by the judge.
 
-An answer **fails** on any confirmed contradiction or any figure not found in the context, and gets **one** re-synthesis that is told exactly which claims failed. It is a **warning** when non-numeric claims can't be confirmed. **Confidence is computed, not self-reported**: the share of supported claims, averaged with the share of grounded figures when there are any. Per-claim results are returned as `claim_checks`.
+An answer **fails** on any confirmed contradiction or any figure not found in the context, and gets **one** re-synthesis that is told exactly which claims failed. It is a **warning** when non-numeric claims can't be confirmed. **Confidence is computed, not self-reported**: the share of supported claims, averaged with the share of grounded figures when there are any. Every claim's figures are checked; statements of absence ("no litigation is disclosed") are verified rather than skipped, because a false absence tells a reviewer a risk does not exist; a claim beyond the checking budget is reported *not checked*, never supported; and a failed synthesis is never verified as if it were an answer. Per-claim results — verdict, method, figures, evidence passage — are returned as `claim_checks` and shown in both UIs.
 
-Document text is wrapped in escaped `<document>` tags and both prompts treat it as untrusted data — in M&A the data room comes from the counterparty, so prompt injection is adversarial input by design, not a hypothetical.
+**Measured on a labelled benchmark** ([`eval/verification_set.json`](eval/verification_set.json): 542 claims written against the sample data room — verbatim, paraphrased and computed support; facts the room never states; changed figures, real figures on the wrong metric or period, swapped parties, flipped negations, wrong units, false "not disclosed" — split dev/test by fact family). On the held-out half, the deterministic stages pass **6.7%** of wrong claims (from 40.9%) and flag **0%** of correct ones (from 2.1%); with the local NLI model in the loop, 9.7% of wrong claims pass and 5.0% of correct ones are flagged. CI fails on a regression ([`eval/verification_baseline.json`](eval/verification_baseline.json)).
+
+Document text is wrapped in escaped `<document>` tags and every prompt that reads it — synthesis, validation, the quality gate — treats it as untrusted data; figures and labels the code extracts from documents go in as escaped `<finding>` elements, never as trusted prompt text. In M&A the data room comes from the counterparty, so prompt injection is adversarial input by design, not a hypothetical.
 
 ---
 
@@ -141,9 +146,9 @@ Every use was measured against the method it would replace on a labelled set bui
 | **Document category** at ingest | filename/keyword rules, accuracy 0.77 | **0.95** | **On** |
 | **Public query guard** before any LLM call | none — off-topic and jailbreak prompts spent 2–3 Gemini calls each | blocked **23/27** junk prompts with **0/124** false blocks on genuine questions | **On** (public callers only) |
 | **Answerability gate** (does any retrieved passage *state* the answer?) | reranker-score heuristic: measures relevance, so on-topic questions whose figure is absent get through | golden test set: unanswerable controls refused **2 → 4 of 6** (none left to the LLM), answerables admitted unchanged (33/35); dev set 1/28 → 10/28 refused with 0/26 wrongly vetoed; 0 LLM calls, ~60 ms on GPU | **On** (GPU); off on the 2-core CPU server, where it costs 7–30 s per query |
-| **PII** at ingest | regex (fixed: bare 9-digit numbers and pay pools no longer count) | lower precision, and hid a chunk the golden set needs | **Not adopted** |
+| **PII** at ingest | regex (fixed: bare 9-digit numbers and pay pools no longer count) | lower precision, and hid a chunk the golden set needs | **Not adopted** — the regex was extended instead (dotted SSNs, IBAN, Luhn-checked cards, prose salaries): audit probes found 5/12 → 11/12, 0/18 hard negatives flagged |
 
-The labelled sets are small and single-annotator, so a chunk or two moves F1 by a few points; the details, confusions and sweeps are in [`eval/decisions/results.md`](eval/decisions/results.md), [`eval/results/query_guard.md`](eval/results/query_guard.md) and [`eval/results/answerability_dev.md`](eval/results/answerability_dev.md). Fine-tuning Laya on domain labels is the next step for PII and for risk recall.
+The checkpoint is loaded at a pinned Hub commit (`LAYA_REVISION`), so an upstream weight change cannot move these thresholds without a line of this repository changing. The labelled sets are small and single-annotator, so a chunk or two moves F1 by a few points — every number here now carries a Wilson or bootstrap interval ([`eval/decisions/stats.py`](eval/decisions/stats.py)). Details, confusions and sweeps are in [`eval/decisions/results.md`](eval/decisions/results.md), [`eval/results/query_guard.md`](eval/results/query_guard.md) and [`eval/results/answerability_dev.md`](eval/results/answerability_dev.md). Fine-tuning Laya on domain labels is the next step for risk recall.
 
 ---
 
@@ -188,25 +193,29 @@ The taxonomy is applied in one place, the call wrapper, so every agent gets it: 
 
 ## Evaluation
 
-Validated against a synthetic data room of **9 documents (~66K tokens)** — committed in [`data/sample_deal/`](data/sample_deal) — with a hand-built golden set of **41 questions: 35 answerable** (10 of them multi-hop) plus **6 unanswerable controls** whose answers are absent by construction. The controls are what make the answer rate falsifiable — without them, "always finds the answer" and "never refuses" produce identical numbers.
+Validated against a synthetic data room of **9 documents (~13K tokens, 58K characters)** — committed in [`data/sample_deal/`](data/sample_deal) — with a hand-built golden set of **41 questions: 35 answerable** (10 of them multi-hop) plus **6 unanswerable controls** whose answers are absent by construction. The controls are what make the answer rate falsifiable — without them, "always finds the answer" and "never refuses" produce identical numbers.
 
 ### Retrieval (committed harness, deterministic, zero LLM calls)
 
 [`eval/`](eval) indexes the corpus into an in-memory Qdrant with the real models and runs the production retrieval node. Relevance is derived from the golden facts, so no chunk IDs need hand-labelling; sub-questions were generated once by the real Query Intelligence node and cached, so reruns make no API calls and two runs produce identical numbers. CPU and GPU runs match to 1e-4 on reranker scores.
 
-| ablation | fact coverage@10 | fact coverage (final context) | recall@10 | MRR@10 | nDCG@10 |
-|---|---|---|---|---|---|
-| dense only | 85.6 | — | 68.5 | 58.2 | 56.6 |
-| sparse only (BM25) | 73.1 | — | 46.6 | 52.0 | 45.5 |
-| hybrid RRF, no rerank | 85.3 | — | 61.5 | 60.4 | 54.5 |
-| **production** (hybrid + rerank + expansion) | 90.7 | 91.6 | 76.4 | **78.7** | 71.3 |
-| **production + decomposition** | **91.6** | **92.6** | **77.2** | 77.2 | **72.3** |
+| ablation | fact coverage@10 | fact coverage (final context) | recall@10 | MRR@10 | nDCG@10 | p50 / p95 ms |
+|---|---|---|---|---|---|---|
+| dense only | 88.8 | — | 69.8 | 60.1 | 59.8 | 20 / 25 |
+| sparse only (BM25) | 95.2 | — | 78.0 | 68.7 | 68.9 | 20 / 25 |
+| hybrid RRF, no rerank | 97.1 | — | 80.1 | 69.0 | 69.6 | 21 / 26 |
+| **production** (hybrid + rerank + expansion) | 94.3 | **97.1** | 78.7 | 77.2 | 73.8 | **144 / 182** |
+| **production + decomposition** | 95.2 | **98.1** | **81.2** | **77.7** | **75.7** | 153 / 512 |
 
-*Fact coverage* is the share of a question's expected facts present in the retrieved text; the ceiling on this corpus is 99.0% (one expected figure is a computed multiple that appears in no document). Decomposition helps where evidence is genuinely spread across documents — multi-hop fact coverage 83.3 → 86.7 @10 (86.7 → 90.0 in the final context) — improves one question and regresses none. An earlier, uncommitted measurement credited decomposition with +10pp; that was taken on the old ingestion pipeline, and most of that headroom has since been closed by ingestion itself (real sections, parent context, table siblings). The committed number is the one to trust.
+*Fact coverage* is the share of a question's expected facts present in the retrieved text; the ceiling on this corpus is 99.0% (one expected figure is a computed multiple that appears in no document). Every mean in the harness output carries a 95% bootstrap interval and every difference a paired one — on 35 questions one question is worth up to 2.9 points, so most single-row differences are within noise and are reported as such.
 
-The rerank stage is what moves MRR from ~60 to ~79: the right chunk is usually in the hybrid candidates; the cross-encoder puts it first.
+**Before → after the November 2026 rework**, paired on the same questions: final-context fact coverage 91.6 → 97.1 (+5.5 [0.0, +12.4]), latency p50 943 → 144 ms and p95 1249 → 182 ms (with decomposition, p95 4572 → 512 ms); ranking metrics within noise. The keyword channel was the big fix — BM25-only fact coverage@10 73.1 → 95.2 — but on a corpus this small the reranker had been hiding it.
 
-Run it: `python -m eval.run_retrieval_eval --baseline eval/baseline.json` — exits non-zero on a regression beyond tolerance. It runs in CI on demand and weekly. Details and caveats in [`eval/README.md`](eval/README.md).
+**With realistic noise.** `--distractors 60` adds 60 real commercial contracts (CUAD, CC BY 4.0; ~3,300 chunks, ~1.06M tokens) to the same deal, which is where retrieval quality actually separates. There, the keyword fix alone moves production fact coverage@10 78.9 → 91.6 (+12.7 [+3.4, +23.6]) and MRR@10 67.5 → 77.6 (+10.1 [+1.5, +20.6]); the refusal gate still admits every answerable question it admitted without the noise.
+
+A reference row in the harness output shows that handing the whole ~13K-token corpus to the model reaches the fact-coverage ceiling: on this corpus fact coverage cannot separate a retrieval design from context stuffing — ranking quality, the distractor run and the refusal gate can.
+
+Run it: `python -m eval.run_retrieval_eval --baseline eval/baseline.json` — exits non-zero on a regression beyond tolerance; `--compare <previous.json>` gives paired deltas, `--distractors N` the noise run. It runs in CI on demand and weekly. Details and caveats in [`eval/README.md`](eval/README.md).
 
 ### End-to-end (live, quota-dependent)
 
@@ -235,8 +244,11 @@ The hosted demo runs on free tiers and is open to anyone, so the API assumes it 
 - **Per-IP rate limits** on queries (5/min, 50/day) and uploads, a **concurrency cap** that answers 503 immediately instead of queueing, and a **global daily query cap** as the last guard on the shared Gemini quota.
 - **Visitor sandboxes.** Uploads go to a per-visitor sandbox deal with a TTL; sandboxes are hidden from other visitors, and their creation time is encoded in the ID so the sweeper reclaims orphans even after a restart. The demo deal cannot be written to or deleted without the admin key.
 - **Query guard.** A local decision model screens public questions for off-topic, jailbreak and prompt-injection content before any LLM call is made — measured at 0 false blocks on 124 genuine questions.
+- **Read access is explicit.** Public callers can read only the deals in `PUBLIC_DEAL_IDS` and their own sandbox; any other deal answers 404 without the admin key.
 - **Compliance override is server-side.** `include_pii` is forced off for public callers.
-- **No internal errors leak.** Clients get a generic message and a request ID; the detail goes to the log.
+- **No internal errors leak.** Clients get a generic message and a request ID — on the streaming route too, and in the agent trace, which carries only a failure class; the detail goes to the log. Request bodies are size-capped before they are buffered.
+- **Abandoned work stops.** A client that disconnects cancels its run on both query routes, so a closed tab does not keep spending model quota; runs and nodes have deadlines, and shutdown drains in-flight queries.
+- **The service reports its own state.** `/ready` reflects whether the checkpointer is durable, which Qdrant backend is live and whether any chunk was indexed under an old encoding; `/metrics` (admin) gives per-node p50/p95, LLM calls and tokens. More than one API worker is refused at startup, because rate limits and quota windows are per process.
 
 ---
 
@@ -244,12 +256,12 @@ The hosted demo runs on free tiers and is open to anyone, so the API assumes it 
 
 | Component | Technology | Detail |
 |---|---|---|
-| **Orchestration** | LangGraph | StateGraph + Postgres checkpointer (falls back to in-memory) |
+| **Orchestration** | LangGraph 1.x | StateGraph + Postgres checkpointer (in-memory fallback is reported by `/ready`; `REQUIRE_DURABLE_CHECKPOINTS` refuses it in production) |
 | **Vector Database** | Qdrant | Hybrid (dense + sparse) search; self-hosted, Qdrant Cloud, or in-memory for eval |
 | **LLMs (Cloud)** | Gemini via LiteLLM | Capability-tiered ladders + multi-key rotation |
 | **LLM (Local)** | Ollama / Qwen2.5-14B | Final fallback when all cloud quota is spent (local runs only) |
-| **Embeddings** | BAAI/bge-m3 | 1024-dim dense + FastEmbed BM25 sparse |
-| **Reranker** | BAAI/bge-reranker-v2-m3 | Cross-encoder, sigmoid-normalised |
+| **Embeddings** | BAAI/bge-m3 | 1024-dim dense + FastEmbed BM25 sparse (normalised text, IDF) |
+| **Reranker** | BAAI/bge-reranker-v2-m3 | Cross-encoder, sigmoid-normalised, fp16 on GPU |
 | **Verification** | nli-deberta-v3 (small/xsmall) | Local claim-level entailment |
 | **Decisions** | Laya `typed-decisions` | Local typed yes/no and choice judgments with probabilities |
 | **API** | FastAPI | SSE streaming, structured JSON logging, rate limiting |
@@ -295,7 +307,9 @@ Anything ending `+cpu`, or `False`, means the embedding, reranker and NLI models
 python run_demo.py            # --reindex to rebuild the index from scratch
 ```
 
-Starts Docker Desktop if needed, brings up Postgres and Qdrant, waits for each to be genuinely healthy, starts the API, ingests the sample data room if the index is empty, warms the local models, and opens the UI at `http://localhost:8501`. `--stop` shuts the containers down. After upgrading from an index built before September 2026, run once with `--reindex`.
+Starts Docker Desktop if needed, brings up Postgres and Qdrant, waits for each to be genuinely healthy, starts the API, ingests the sample data room if the index is empty, warms the local models, and opens the UI at `http://localhost:8501`. `--stop` shuts the containers down. **After upgrading from an index built before November 2026, run once with `--reindex`**: the keyword channel's text encoding and the table text both changed, and startup logs how many chunks still carry the old encoding.
+
+Without a Qdrant server (development only), set `QDRANT_MODE=local` to use an embedded on-disk index; the API no longer falls back to one on its own.
 
 <details>
 <summary>Other ways to run</summary>
@@ -312,12 +326,14 @@ Starts Docker Desktop if needed, brings up Postgres and Qdrant, waits for each t
 ### 4. Tests and evaluation
 
 ```bash
-pytest                                                    # offline suite — what CI runs
+pytest                                                    # offline suite (~1,250 tests, ~30 s) — what CI runs
+python -m eval.run_verification_eval --no-nli --baseline eval/verification_baseline.json  # verification gate, no models
 python -m eval.run_retrieval_eval --baseline eval/baseline.json   # retrieval regression gate
 python tests/run_end_to_end_validation.py                 # live 41-question golden set (spends quota)
+cd web && npm test                                        # web unit tests (vitest)
 ```
 
-CI runs ruff and the offline suite on every push, plus `tsc`, eslint and a production build of the web app.
+CI runs ruff, the offline suite with a branch-coverage floor and the verification gate on every push, plus `tsc`, eslint, the web unit tests and a production build of the web app. The offline suite includes a full-graph test that drives the real LangGraph pipeline, routes and stream with only the LLM, Postgres and model weights stubbed.
 
 ---
 
@@ -339,19 +355,25 @@ A few decisions driven by measurement rather than intuition. The full record —
 
 **Guards can be worse than the bug they fix.** A check that rejected uncited answers also rejected *correct refusals*, which have nothing to cite. Three good models declined accurately, all three were scored as failures, and the ladder burned three scarce reasoning slots to land on the weakest model. It now distinguishes an answer that declines from one that asserts.
 
+**The system manufactured a wrong number and then certified it.** The table converter multiplied every cell by the caption's scale, so under "($ in millions, except per share)" EPS 2.74 was indexed as "2,740,000" — and numeric grounding, finding that string in the source text, accepted it. Nothing caught it because the sample corpus is plain text and bypasses the converter. Fixed on the writing side, it reappeared on the reading side only when two independently correct branches were merged: the cross-document registry applied the caption's scale to every row of a table's text, and had been hiding it by keeping whichever copy of a figure arrived first. Both sides are now pinned by tests on generated statements with hand-computed values ([Decision 57](DECISIONS_LOG.md)).
+
+**A verifier needs its own benchmark.** "Most answers end at *warning*" sounded conservative. Measured on 542 labelled claims, the deterministic stages actually let 41% of *wrong* claims through — mostly real figures attached to the wrong metric or year, which a check that only asks "does this number appear somewhere?" cannot see. Grounding now has to find the figure in the row and period the claim names ([Decision 56](DECISIONS_LOG.md)).
+
 ---
 
 ## Limitations
 
-- **The corpus is synthetic and small.** 9 documents is enough that retrieval must discriminate between them, but a real data room is orders of magnitude larger; at ~110 chunks the collection never exercises Qdrant's HNSW index or quantization.
-- **The end-to-end numbers predate the September rework** and move with quota state; the retrieval harness is the reliable signal.
-- **Verification is conservative.** The small NLI model cannot confirm many paraphrased, non-numeric claims, so most answers land at *warning* rather than *passed*. Warnings never trigger a retry; only a confirmed contradiction or an ungrounded figure does.
+- **The corpus is synthetic and small.** 9 documents (~13K tokens) is enough that retrieval must discriminate between them, but it fits in one prompt. The distractor mode adds thousands of real contract chunks, still on the in-memory client: HNSW, int8 quantization and server-side latency remain unmeasured. Every PDF/XLSX/DOCX claim rests on generated fixtures, not real data-room files, and there is no OCR.
+- **The end-to-end numbers predate the September and November reworks** and move with quota state; the retrieval and verification harnesses are the reliable signal.
+- **The local NLI model is now the weak link in verification.** With it in the loop, 9.7% of wrong claims on the benchmark's held-out half still pass — mostly flipped negations and swapped parties (it entails a "termination fee" claim at 0.98 from the sentence giving that figure as the *reverse* fee). Purpose-trained grounding checkers (MiniCheck, FactCG, HHEM) have not been measured. Stricter grounding also sends more claims to the lite-model judge (~65% of claims, up from ~37%).
 - **Arithmetic across documents is model-dependent.** Retrieval supplies the inputs for an implied multiple; whether the model combines them correctly varies by rung. The validator marks such figures as derived or unverified rather than pretending to check them.
-- **PII detection is rule-based.** The decision model did not beat it on the labelled set, so PII stays regex-only, and PII-flagged chunks are excluded from retrieval. Risk-signal recall is still modest (0.52), and `regulatory_risk` is rarely caught.
-- **The answerability gate's margin is thin.** The lowest-scoring answerable golden question sits at 0.39 against a 0.35 veto threshold, and two controls (ctrl_04, ctrl_05) are still admitted because the data room partly answers them. On a CPU-only host it is too slow to run per query and is disabled there.
+- **PII detection is rule-based.** The decision model did not beat it on the labelled set. Hourly rates in prose are still missed. Risk-signal recall is still modest (0.52), and `regulatory_risk` is rarely caught.
+- **The gates are calibrated to one reranker.** The Quality Assessor's floors and the router thresholds sit on bge-reranker-v2-m3's score scale. Measured with the CPU host's ms-marco-MiniLM: two answerable questions move to the LLM branch, and with the answerability gate on, golden question mh_06 is wrongly vetoed — so the gate stays off on the CPU host until it is recalibrated per reranker. MiniLM also needs `RERANKER_MAX_LENGTH=512`.
+- **The answerability gate's margin is thin.** The lowest-scoring answerable golden question sits at 0.39 against a 0.35 veto threshold; ctrl_02 has scored between 0.24 and 0.36 across retrieval changes, and ctrl_04/ctrl_05 are still admitted because the data room partly answers them. Under 60 distractor contracts one control (ctrl_06) goes to the LLM instead of being refused outright. Contextual chunk headers (`CHUNK_CONTEXT_HEADERS`) improve recall@10 by 3.7–6.6 points but weaken the gate on its dev set (11/28 → 7/28 unanswerable caught), so they ship off.
 - **Quota refunds follow a rule, not a measurement.** A unit is returned when the provider explicitly refused the request (503, per-minute 429, rejected key, revoked model) and kept after a timeout or a 5xx, because Google does not document whether those count. An under-count costs one wasted call before the next 429 corrects it; the rule is a single set in `src/llm/failures.py`.
-- **Structured output is JSON mode plus validation, not native schema enforcement.** Agents 1 and 6 read replies through lenient Pydantic models and an unusable reply gets one repair request, but Gemini's response schema is not used: LiteLLM maps it differently per rung and three laddered models are missing from its capability map, which cannot be settled without live calls. The Quality Assessor's LLM branch is still unvalidated.
-- **Rate limits and cooldowns are in-process.** The daily quota counters are shared through Postgres; per-minute request and token windows assume a single API worker.
+- **Structured output is JSON mode plus validation, not native schema enforcement.** Agents 1, 5 and 6 read replies through Pydantic models and an unusable reply gets one repair request, but Gemini's response schema is not used: LiteLLM maps it differently per rung and three laddered models are missing from its capability map, which cannot be settled without live calls.
+- **One API worker.** The daily quota counters are shared through Postgres, but per-minute request and token windows, cooldowns and retired keys are per process, so a second worker is refused at startup rather than allowed to double-spend.
+- **Not yet exercised for real:** an aarch64 image build (the dependency set resolves to wheels on both architectures, checked statically) and the Postgres checkpointer under langgraph-checkpoint-postgres 3.x.
 - **The quota table is a transcription.** Google publishes free-tier limits only in the AI Studio console, so `model_registry.py` cannot be checked against public documentation, and a 429 with no quota id is assumed to be the daily cap.
 
 ---
@@ -359,15 +381,20 @@ A few decisions driven by measurement rather than intuition. The full record —
 ## Roadmap
 
 - [x] One LLM router for every agent: typed LiteLLM exceptions, ladder descent everywhere, quota refunded when the provider refuses a request
-- [x] Pydantic-schema validation for the query-analysis and rewrite agents
-- [ ] Gemini-native response schemas, validated per rung with live calls; schema validation for the Quality Assessor's LLM branch
+- [x] Pydantic-schema validation for the query-analysis, quality-assessment and rewrite agents
+- [x] BM25 with the IDF modifier (and case/punctuation normalisation)
+- [x] A labelled verification benchmark, gated in CI
+- [x] Unblock the ARM image (FastEmbed 0.5+, wheels only) and move to LangGraph 1.x
+- [ ] Measure purpose-trained grounding checkers (MiniCheck, FactCG, HHEM) against `nli-deberta-v3-small` on the verification benchmark
+- [ ] Gemini-native response schemas, validated per rung with live calls
 - [ ] Probe and add `gemini-3.8-flash`; move `gemini-2.5-flash` off the reasoning rungs before it starts routing to a Lite model (1 December 2026)
-- [ ] Recalibrate the Quality Assessor floors per reranker model (the Space runs MiniLM)
-- [ ] Qdrant Query API (server-side prefetch + fusion) and BM25 with the IDF modifier
+- [ ] Recalibrate the quality-gate floors and the answerability threshold per reranker model (the CPU host runs MiniLM)
+- [ ] Qdrant Query API (server-side prefetch + fusion) — evaluated, not adopted: its weighted RRF is a different function, and the candidate stage is ~20 ms of a ~150 ms pass; revisit against a remote cluster
 - [ ] Rerun the end-to-end golden set on the reworked pipeline
 - [ ] Make the answerability gate cheap enough for CPU hosting (fewer facet × passage pairs, ONNX / int8)
-- [ ] Fine-tune Laya on due-diligence labels (PII, risk recall) and calibrate it
-- [ ] A larger corpus with real PDF and XLSX documents, to stress table handling and multi-hop retrieval
+- [ ] Fine-tune Laya on due-diligence labels (risk recall) and calibrate it
+- [ ] Evaluate on real documents: LegalBench-RAG / CUAD for contracts, FinanceBench for filings — the synthetic set cannot separate retrieval designs
+- [ ] Deal-level figure tie-out report and a checklist review grid, built on the cross-source registry and the answerability gate
 
 ---
 
@@ -384,14 +411,14 @@ src/
   data_processing/    Format processors, chunkers, table converter, idempotent ingest pipeline
   verification/       Numeric grounding, claim splitting, local NLI, claim checker
   decisions/          Laya decision layer: risk/category at ingest, query guard, answerability
-  llm/                LiteLLM wrapper, budget tracker, rate limiter, prompt templates
+  llm/                LiteLLM wrapper, failure classifier, budget tracker, schemas, prompt templates
   vector_db/          Qdrant client, hybrid search, RRF fusion, reranker, expansion
   workflow/           LangGraph state machine, orchestrator, conditional edges
-  utils/              Logging, token counting, numerical registry
-eval/                 Deterministic retrieval harness, decision-model evals, labelled sets, baselines
-tests/                Offline test suite + golden Q&A set + live E2E runner
+  utils/              Logging, runtime status, metrics, audit log, token counting, numerical registry
+eval/                 Retrieval and verification harnesses, decision-model evals, labelled sets, baselines
+tests/                Offline test suite (incl. full-graph harness) + golden Q&A set + live E2E runner
 data/sample_deal/     The 9-document synthetic data room
-config/               Qdrant, LiteLLM, and chunking YAML configs
+config/               Reference notes on Qdrant, LiteLLM and chunking settings (not loaded; values live in code)
 ```
 
 ---
