@@ -366,11 +366,18 @@ async def verify_answer(
     for claim in claims:
         nums = numeric[claim.index]
         num_dicts = [
-            {k: v for k, v in n.to_dict().items() if k in ("raw", "status", "formula", "evidence_source") and v}
+            {
+                k: v for k, v in n.to_dict().items()
+                if k in ("raw", "status", "formula", "evidence_source", "binding", "binding_note") and v
+            }
             for n in nums
         ]
         unsupported_nums = [n.raw for n in nums if n.status == "unsupported"]
-        all_grounded = bool(nums) and all(n.status in ("grounded", "derived") for n in nums)
+        # A figure the context contains, attached by the claim to another row or
+        # period — the judge is asked, and NLI entailment is not taken for it.
+        misattributed = [n for n in nums if n.binding == "conflict"]
+        unbound = [n.raw for n in nums if n.binding == "unbound"]
+        all_grounded = bool(nums) and all(n.is_confirmed for n in nums)
         ev = best.get(claim.index) if nli_available else None
         cited = cited_by_claim[claim.index]
         contra = ev["contra"] if ev else 0.0
@@ -394,6 +401,21 @@ async def verify_answer(
                 status="unsupported",
                 method="numeric",
                 reason="figure(s) not found in the retrieved documents: " + ", ".join(unsupported_nums),
+            )
+        elif misattributed:
+            # The value exists, but where the documents put it is not where the
+            # claim puts it ("Revenue was $387.1 million in FY2023" — that is
+            # the FY2022 column). Deterministic evidence of a wrong figure, yet
+            # it rests on reading a table's layout, so like an NLI contradiction
+            # it is confirmed by the judge before it can fail the answer.
+            undecided.append(claim.index)
+            first = misattributed[0]
+            check.update(
+                score=round(entail, 3) if ev else None,
+                reason=f"{first.raw} is in the documents, but {first.binding_note}",
+                evidence=first.evidence_snippet,
+                evidence_source=first.evidence_source,
+                suspected_misattribution=True,
             )
         elif ev and entail >= ENTAIL_THRESHOLD:
             chunk = chunks[ev["entail_chunk"]]
@@ -455,7 +477,12 @@ async def verify_answer(
         else:
             undecided.append(claim.index)
             check["score"] = round(entail, 3) if ev else None
-            if nli_available and ev is None:
+            if unbound:
+                check["reason"] = (
+                    "figure(s) present in the documents but not in a passage this "
+                    "statement names: " + ", ".join(unbound)
+                )
+            elif nli_available and ev is None:
                 check["reason"] = "no retrieved passage shares vocabulary with this claim"
         checks.append(check)
 
