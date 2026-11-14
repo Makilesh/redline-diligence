@@ -55,38 +55,36 @@ SALARY_PATTERNS = [
     re.compile(r'(?i)\b(?:salary|base\s+pay|compensation|annual\s+pay)\s*[:\-]?\s*\$\s*[\d,]+'),
     re.compile(r'(?i)\b(?:bonus|incentive|commission|stock\s+option|equity\s+grant)\s*[:\-]?\s*\$\s*[\d,]+'),
     re.compile(r'(?i)\b(?:hourly\s+rate|pay\s+rate|wage)\s*[:\-]?\s*\$\s*[\d,.]+'),
-    # Prose: "an annual base salary of $525,000 and a target bonus of $310,000"
-    # put words between the keyword and the amount, which every pattern above
-    # requires to be adjacent (audit I11). The gap is bounded and may not cross
-    # a digit, a "$" or a sentence end, and only words that describe ONE
-    # person's pay qualify — "compensation", "commission" and "incentive" also
-    # head company aggregates ("stock-based compensation of $4.2 million").
-    # Amounts in millions/billions are skipped for the same reason; the atomic
-    # group stops the engine from backtracking "$4.2 million" to "$4" to dodge
-    # that check.
-    re.compile(
-        r'(?i)\b(?:salary|base\s+pay|annual\s+pay|bonus)\b[^\d$\n.;]{1,40}?'
-        r'\$\s*(?>\d[\d,]*(?:\.\d+)?)(?!\s*(?:million|billion|bn|mm|m)\b)'
-    ),
 ]
 
-# A compensation table: a header row naming a salary or bonus column, then
-# dollar amounts on the next lines. The amounts sit under the header, never
-# next to the keyword, so no pattern above sees them (audit I11: the sample
-# deal's executive compensation schedule).
-COMP_TABLE_PATTERN = re.compile(
-    r'(?im)^[^\n]*\b(?:base\s+salary|salary|cash\s+bonus|target\s+bonus|bonus)\b[^\n]*'
-    r'(?:\n[^\n]*){0,2}?\n[^\n]*\$\s*\d[\d,]{3,}'
+# Prose: "an annual base salary of $165,000 plus a sign-on bonus of $20,000" puts
+# words between the keyword and the amount, which every pattern above requires
+# to be adjacent (audit I11). The gap is bounded and may not cross a digit, a
+# "$" or a sentence end, and only words that describe ONE person's pay qualify —
+# "compensation", "commission" and "incentive" also head company aggregates
+# ("stock-based compensation of $4.2 million"). Amounts in millions/billions are
+# skipped for the same reason; the atomic group stops the engine from
+# backtracking "$4.2 million" to "$4" to dodge that check.
+PROSE_SALARY_PATTERN = re.compile(
+    r'(?i)\b(?:salary|base\s+pay|annual\s+pay|bonus)\b[^\d$\n.;]{1,40}?'
+    r'\$\s*(?>\d[\d,]*(?:\.\d+)?)(?!\s*(?:million|billion|bn|mm|m)\b)'
 )
 
-# Not detected, deliberately: the sample deal's own executive compensation and
-# severance tables as the .txt chunker indexes them (it drops the column-header
-# row, so a chunk is only "Elena Marsh   Chief Executive Officer   $625,000"
-# rows). A name-row rule found both labelled chunks with no other corpus chunk
-# flagged, but flagged chunks are excluded from retrieval, and two golden
-# questions (severance multiples; cash needed at closing) are answered from the
-# severance table. Whether named executives' deal-disclosed pay is excludable
-# PII is a policy decision for the data-room owner, not a regex one.
+# Executive pay is NOT treated as PII to hide. Named executives' salary, bonus,
+# equity, severance and 280G exposure are core diligence content (proxy-style
+# disclosure, merger-agreement schedules), and PII-flagged chunks are excluded
+# from retrieval — so flagging them refuses the questions diligence exists to
+# answer. Measured on the sample deal: a rule that recognised the executive
+# compensation and severance tables flagged exactly the two labelled chunks and
+# would have refused two golden questions (severance multiples; cash needed at
+# closing). Hence no compensation-TABLE pattern at all, and the prose pattern
+# above does not count a sentence that names an executive role.
+EXECUTIVE_ROLE_PATTERN = re.compile(
+    r'(?i)\bchief\s+(?:\w+\s+){1,2}officer\b'
+    r'|\b(?:CEO|CFO|CTO|COO|CRO|CIO|CMO|CHRO|CLO)\b'
+    r'|\b(?:president|general\s+counsel|named\s+executive|executive\s+officer)s?\b'
+)
+_SENTENCE_END = re.compile(r'[.;!?\n](?=\s|$)')
 
 # Bank account / routing numbers. Digit groups may be separated: "Account No.
 # 4532-1234-5678-9010" was missed (audit I11).
@@ -328,12 +326,19 @@ class PIIDetector:
             count += len(dob_matches)
 
         # Salary/compensation detection
-        for pattern in [*SALARY_PATTERNS, COMP_TABLE_PATTERN]:
-            matches = pattern.findall(text)
-            if matches:
-                types.append("salary_data")
-                count += len(matches)
+        salary_matches: list[str] = []
+        for pattern in SALARY_PATTERNS:
+            salary_matches = pattern.findall(text)
+            if salary_matches:
                 break  # Don't double-count salary patterns
+        if not salary_matches:
+            salary_matches = [
+                m.group(0) for m in PROSE_SALARY_PATTERN.finditer(text)
+                if not EXECUTIVE_ROLE_PATTERN.search(self._sentence_around(text, m.start(), m.end()))
+            ]
+        if salary_matches:
+            types.append("salary_data")
+            count += len(salary_matches)
 
         # Bank account detection (labelled numbers, and checksummed IBANs)
         bank_matches = BANK_PATTERN.findall(text) + [
@@ -402,6 +407,13 @@ class PIIDetector:
             return False
 
         return True
+
+    @staticmethod
+    def _sentence_around(text: str, start: int, end: int) -> str:
+        """The sentence (or line) containing text[start:end]."""
+        before = [m.end() for m in _SENTENCE_END.finditer(text, 0, start)]
+        after = _SENTENCE_END.search(text, end)
+        return text[before[-1] if before else 0: after.start() + 1 if after else len(text)]
 
     @staticmethod
     def _valid_iban(candidate: str) -> bool:

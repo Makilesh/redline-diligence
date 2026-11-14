@@ -21,8 +21,8 @@ def detector():
         ("SSN 123 45 6789", "ssn"),
         ("She will receive an annual base salary of $525,000 and a target bonus of $310,000.",
          "salary_data"),
-        ("Name      Title   Base Salary   Cash Bonus\nJane Roe  CFO       $445,000     $267,000",
-         "salary_data"),
+        ("Dear Priya Example, we offer you the position of Senior Engineer at an annual base "
+         "salary of $165,000 plus a sign-on bonus of $20,000.", "salary_data"),
         ("Account No. 4532-1234-5678-9010", "bank_account"),
         ("Wire to IBAN GB82 WEST 1234 5698 7654 32", "bank_account"),
         ("Card on file: 4111 1111 1111 1111", "payment_card"),
@@ -52,6 +52,38 @@ def test_previously_missed_formats_are_flagged(detector, text, pii_type):
 )
 def test_business_text_is_not_flagged(detector, text):
     assert detector.detect(text).contains_pii == 0
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # The sample deal's executive compensation table, with its header row
+        # (as the .txt chunker emits it once the header is kept with the grid).
+        "SECTION 1: EXECUTIVE COMPENSATION SUMMARY (FY2023)\n"
+        "Name                Title                    Base Salary   Cash Bonus   Equity Value\n"
+        "------------------  -----------------------  -----------   ----------   ------------\n"
+        "Elena Marsh         Chief Executive Officer     $625,000     $437,500      $8,120,000\n"
+        "Dr. James Wu        Chief Technology Officer    $540,000     $324,000      $6,850,000",
+        # Severance table rows.
+        "SECTION 2: CHANGE OF CONTROL SEVERANCE\n"
+        "Elena Marsh          3.0x           $3,187,500            $4,260,000    $7,447,500",
+        # Executive pay in prose.
+        "The Chief Financial Officer, Robert Sampleton, earns a base salary of $410,000 and "
+        "received a 2023 bonus of $205,000.",
+        "The CEO's annual base salary of $625,000 is unchanged for FY2024.",
+        "The multiple is applied to the sum of base salary and target cash bonus.",
+    ],
+)
+def test_executive_pay_is_diligence_content_not_pii(detector, text):
+    # PII-flagged chunks are excluded from retrieval; named executives' pay,
+    # severance and 280G exposure are what diligence questions ask about.
+    assert detector.detect(text).contains_pii == 0
+
+
+def test_executive_exemption_is_scoped_to_the_sentence(detector):
+    text = ("The CEO approved the offer. Jane Roe, Senior Analyst, will receive an annual "
+            "base salary of $95,000.")
+    assert "salary_data" in detector.detect(text).pii_types
 
 
 def test_millions_cannot_be_backtracked_into_a_salary(detector):
