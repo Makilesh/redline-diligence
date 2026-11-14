@@ -147,6 +147,32 @@ def route_after_quality_check(state: AgentState) -> str:
     return "query_rewriter"
 
 
+def route_after_synthesis(state: AgentState) -> str:
+    """
+    Sends a failed synthesis around the validator instead of through it.
+
+    When every model on the ladder fails, the synthesizer degrades to a fixed
+    apology rather than an exception. That apology used to go to the validator
+    like any answer: the LLM judge was called about it while the provider was
+    failing, and if the judge called it "supported" it came back `passed` with
+    confidence 1.0 and `is_refusal` false — an outage reported as a verified
+    answer (audit V7). The synthesizer marks its trace entry `synthesis_failed`;
+    this reads that mark.
+
+    Args:
+        state: Current AgentState.
+
+    Returns:
+        "synthesis_unavailable" or "hallucination_validator".
+    """
+    trace = state.get("agent_trace") or []
+    last = trace[-1] if trace and isinstance(trace[-1], dict) else {}
+    if last.get("synthesis_failed"):
+        logger.info("Synthesis failed; skipping validation")
+        return "synthesis_unavailable"
+    return "hallucination_validator"
+
+
 # Validations allowed per query: the first, plus one after a single re-synthesis.
 # Each retry spends a synthesis call on the scarce reasoning-model quota, so the
 # loop is bounded at one.

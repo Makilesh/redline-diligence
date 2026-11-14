@@ -66,11 +66,20 @@ class FakeQdrant:
     async def get_collections(self):
         return SimpleNamespace(collections=[])
 
+    async def count(self, collection_name, count_filter=None, exact=True):
+        # 131 chunks, of which `stale_points` lack the current BM25 marker.
+        return SimpleNamespace(count=self.stale_points if count_filter else self.count_value)
+
+    stale_points = 0
+
 
 @pytest.fixture
 def qdrant(monkeypatch):
     fake = FakeQdrant([DEMO_DEAL, PRIVATE_DEAL])
     monkeypatch.setattr(qdrant_module, "get_qdrant_client", lambda: fake)
+    # Installed as the singleton too, the way the eval harness swaps a client
+    # in, so get_qdrant_backend() sees it.
+    monkeypatch.setattr(qdrant_module, "_qdrant_client", fake)
     return fake
 
 
@@ -282,6 +291,104 @@ def test_office_archive_bomb_is_rejected_without_decompressing(tmp_path, monkeyp
 
 
 # ==============================================================================
+# Supersession is recorded only when the index applied it
+# ==============================================================================
+
+
+@pytest.fixture
+def stub_indexing(monkeypatch):
+    async def fake_index_document(path, filename, deal_id, category, **kwargs):
+        return {
+            "doc_id": "doc-v2",
+            "document_category": "legal",
+            "chunks_created": 3,
+            "parent_chunks_created": 1,
+            "previously_indexed": False,
+            "warnings": [],
+            "risk_signals": [],
+        }
+
+    monkeypatch.setattr(ingest_routes, "index_document", fake_index_document)
+    retirement = {"result": {"ok": True, "chunks_retired": 4, "error": None}}
+
+    async def fake_mark_superseded(**kwargs):
+        return retirement["result"]
+
+    monkeypatch.setattr(ingest_routes, "mark_superseded", fake_mark_superseded)
+    monkeypatch.setenv("ADMIN_API_KEY", ADMIN_KEY)
+    return retirement
+
+
+def _upload_v2(client):
+    return client.post(
+        "/api/v1/ingest",
+        headers=ADMIN,
+        data={"deal_id": DEMO_DEAL, "supersedes_doc_id": "doc-v1"},
+        files={"file": ("spa_v2.txt", b"Purchase price is $34.50 per share.", "text/plain")},
+    )
+
+
+def test_applied_supersession_is_recorded(client, stub_indexing):
+    response = _upload_v2(client)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert response.json()["notices"] == []
+    assert response.json()["version_candidates"] == []
+    [record] = deals._documents[DEMO_DEAL]
+    assert record["supersedes_doc_id"] == "doc-v1"
+
+
+def test_version_candidates_are_proposed_not_applied(client, stub_indexing, monkeypatch):
+    candidate = {"doc_id": "doc-v1", "source_file": "spa_v1.txt", "relation": "newer"}
+    original = ingest_routes.index_document
+
+    async def with_candidates(*args, **kwargs):
+        return {**(await original(*args, **kwargs)), "version_candidates": [candidate]}
+
+    monkeypatch.setattr(ingest_routes, "index_document", with_candidates)
+    retired: list[dict] = []
+
+    async def record_retirement(**kwargs):
+        retired.append(kwargs)
+        return {"ok": True, "chunks_retired": 1, "error": None}
+
+    monkeypatch.setattr(ingest_routes, "mark_superseded", record_retirement)
+
+    response = client.post(
+        "/api/v1/ingest",
+        headers=ADMIN,
+        data={"deal_id": DEMO_DEAL},
+        files={"file": ("spa_v2.txt", b"Purchase price is $34.50 per share.", "text/plain")},
+    )
+
+    assert response.json()["version_candidates"] == [candidate]
+    assert retired == []  # no supersedes_doc_id sent, so nothing is retired
+    assert deals._documents[DEMO_DEAL][0]["supersedes_doc_id"] == ""
+
+
+def test_failed_supersession_is_partial_and_not_recorded(client, stub_indexing):
+    deals.register_document(DEMO_DEAL, "doc-v1", "spa_v1.txt", "legal", 4, True, None)
+    stub_indexing["result"] = {
+        "ok": False,
+        "chunks_retired": 0,
+        "error": "the superseded document is not indexed in this deal",
+    }
+
+    response = _upload_v2(client)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "partial"
+    assert "doc-v1 is still marked as the current version" in body["notices"][0]
+    records = {r["doc_id"]: r for r in deals._documents[DEMO_DEAL]}
+    # The registry must not claim a retirement the index never applied.
+    assert records["doc-v2"]["supersedes_doc_id"] == ""
+    assert records["doc-v1"]["is_current_version"] is True
+    assert records["doc-v1"]["superseded_by"] == ""
+
+
+# ==============================================================================
 # Sandbox purge completeness
 # ==============================================================================
 
@@ -357,7 +464,20 @@ def test_multiple_workers_are_refused_unless_explicitly_allowed(monkeypatch):
 # ==============================================================================
 
 
-def test_health_and_ready_report_degraded_modes(client, qdrant):
+def test_ready_detail_is_for_the_operator_only(client, qdrant, monkeypatch):
+    monkeypatch.setenv("ADMIN_API_KEY", ADMIN_KEY)
+
+    public = client.get("/ready")
+    assert public.status_code == 200
+    assert set(public.json()) == {"status", "checks"}
+
+    assert "checkpointer" in client.get("/ready", headers=ADMIN).json()
+    monkeypatch.setenv("METRICS_PUBLIC", "1")
+    assert "checkpointer" in client.get("/ready").json()
+
+
+def test_health_and_ready_report_degraded_modes(client, qdrant, monkeypatch):
+    monkeypatch.setenv("METRICS_PUBLIC", "1")  # the /ready detail, without a key
     assert client.get("/health").json()["degraded"] == []
 
     runtime_status.set_checkpointer("memory", error="OperationalError")
@@ -386,6 +506,26 @@ def test_health_and_ready_report_degraded_modes(client, qdrant):
     # Recovery clears the flag.
     runtime_status.set_checkpointer("postgres")
     assert client.get("/health").json()["degraded"] == ["model_warmup_failed:reranker"]
+
+
+def test_ready_reports_the_qdrant_backend_and_stale_sparse_vectors(client, qdrant, monkeypatch):
+    monkeypatch.setenv("METRICS_PUBLIC", "1")
+    body = client.get("/ready").json()
+    # The fake is swapped in for the singleton, so it is reported as such —
+    # never as a server it is not.
+    assert body["qdrant"] == {"mode": "injected", "location": None}
+    assert body["sparse_index"]["total_points"] == 131
+    assert body["sparse_index"]["stale_points"] == 0
+    assert "sparse_index_stale" not in body["degraded"]
+
+    qdrant.stale_points = 40
+    api_main._sparse_status_read_at = float("-inf")  # skip the 60 s cache
+    body = client.get("/ready").json()
+    assert body["sparse_index"]["stale_points"] == 40
+    assert "sparse_index_stale" in body["degraded"]
+    assert "--reindex" in body["degraded_detail"]["sparse_index_stale"]
+    # Degraded, still ready: dense search answers while the index is rebuilt.
+    assert client.get("/ready").status_code == 200
 
 
 def test_ready_fails_while_draining(client, qdrant):

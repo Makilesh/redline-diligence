@@ -886,7 +886,6 @@ class TestKnownDefects:
 
         assert run.state["original_query"] == REVENUE_QUESTION
 
-    @known_defect("V7", "the synthesizer's apology is verified as if it were an answer")
     async def test_failed_synthesis_is_not_verified_as_an_answer(self, offline_pipeline):
         p = offline_pipeline
         await p.load_data_room()

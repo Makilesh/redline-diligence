@@ -41,6 +41,8 @@ class _RuntimeStatus:
     models: dict[str, str] = field(default_factory=dict)
     # reason -> human-readable explanation, for every degraded mode in effect.
     degraded: dict[str, str] = field(default_factory=dict)
+    # Last sparse_index_status() result; None until read.
+    sparse_index: dict | None = None
 
 
 _status = _RuntimeStatus()
@@ -129,6 +131,34 @@ def set_model(name: str, state: str) -> None:
         )
     else:
         clear_degraded(reason)
+
+
+def set_sparse_index(status: dict | None) -> None:
+    """
+    Records how many indexed chunks carry an outdated BM25 encoding.
+
+    Such chunks are invisible to keyword search for many queries while dense
+    search still finds them — a silent recall loss, so it is a degraded mode.
+
+    Args:
+        status: collection_manager.sparse_index_status() output, or None when
+            it could not be read.
+    """
+    _status.sparse_index = status
+    stale = (status or {}).get("stale_points", 0)
+    if stale:
+        mark_degraded(
+            "sparse_index_stale",
+            f"{stale} of {status.get('total_points')} indexed chunks use an older BM25 "
+            "encoding and are missed by keyword search; re-ingest them "
+            "(python run_demo.py --reindex for the demo deal).",
+        )
+    else:
+        clear_degraded("sparse_index_stale")
+
+
+def sparse_index() -> dict | None:
+    return _status.sparse_index
 
 
 def describe() -> dict:

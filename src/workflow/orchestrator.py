@@ -32,6 +32,7 @@ from src.workflow.conditional_edges import (
     _as_score,
     route_to_financial_verifier,
     route_after_quality_check,
+    route_after_synthesis,
     route_after_validation,
 )
 from src.agents.query_intelligence import query_intelligence_node
@@ -241,6 +242,67 @@ async def insufficient_context_node(state: AgentState) -> dict:
     }
 
 
+async def synthesis_unavailable_node(state: AgentState) -> dict:
+    """
+    Terminal node for a run whose synthesis failed on every model.
+
+    The synthesizer has already written its apology as `generated_answer`.
+    This marks the run as declined, so the response cannot present that text
+    as a verified answer: no claim checks, confidence 0, `is_refusal` true.
+    `outcome` ("synthesis_failed", see run_outcome) is what tells it apart from
+    a refusal for lack of context.
+
+    Args:
+        state: Current AgentState.
+
+    Returns:
+        State delta marking the run as declined.
+    """
+    logger.warning("Synthesis unavailable — returning the degraded refusal unverified")
+    return {
+        "force_refusal": True,
+        "confidence_score": 0.0,
+        "hallucination_flags": [],
+        "claim_checks": [],
+        "validation_status": "passed",  # nothing was asserted, so nothing to fail
+        "agent_trace": [{"agent": "synthesis_unavailable", "force_refusal": True}],
+    }
+
+
+# Terminal outcomes, one per way a run can end. The state carries several
+# overlapping signals (force_refusal, an empty answer, validation_status, the
+# synthesizer's failure mark) that callers used to combine themselves — and
+# combined differently. This is the one place they are reduced to a verdict.
+OUTCOME_ANSWERED = "answered"
+OUTCOME_ANSWERED_UNVERIFIED = "answered_unverified"  # failed validation twice; shipped flagged
+OUTCOME_REFUSED = "refused"  # no usable context, or the assessor said so
+OUTCOME_SYNTHESIS_FAILED = "synthesis_failed"  # every model failed; apology returned
+
+
+def run_outcome(final_state: dict) -> str:
+    """
+    Reduces a finished run's state to one terminal outcome.
+
+    Args:
+        final_state: The run's final state.
+
+    Returns:
+        One of the OUTCOME_* values.
+    """
+    agents = {
+        entry.get("agent")
+        for entry in final_state.get("agent_trace") or []
+        if isinstance(entry, dict)
+    }
+    if "synthesis_unavailable" in agents:
+        return OUTCOME_SYNTHESIS_FAILED
+    if final_state.get("force_refusal") or not final_state.get("generated_answer"):
+        return OUTCOME_REFUSED
+    if final_state.get("validation_status") == "failed":
+        return OUTCOME_ANSWERED_UNVERIFIED
+    return OUTCOME_ANSWERED
+
+
 async def retry_synthesis_node(state: AgentState) -> dict:
     """
     Re-runs synthesis after a failed validation, with the failures fed back.
@@ -291,6 +353,7 @@ def build_graph() -> StateGraph:
         ("hallucination_validator", hallucination_validator_node),
         ("insufficient_context", insufficient_context_node),
         ("retry_synthesis", retry_synthesis_node),
+        ("synthesis_unavailable", synthesis_unavailable_node),
     ):
         graph.add_node(name, _instrument(name, fn))
 
@@ -327,8 +390,13 @@ def build_graph() -> StateGraph:
     # CRITICAL: rewriter → executor is EXPLICIT edge (self-correction loop)
     graph.add_edge("query_rewriter", "retrieval_executor")
 
-    # After synthesis → validation
-    graph.add_edge("answer_synthesizer", "hallucination_validator")
+    # After synthesis → validation, unless synthesis failed on every model
+    after_synthesis = {
+        "hallucination_validator": "hallucination_validator",
+        "synthesis_unavailable": "synthesis_unavailable",
+    }
+    graph.add_conditional_edges("answer_synthesizer", route_after_synthesis, after_synthesis)
+    graph.add_edge("synthesis_unavailable", END)
 
     # After validation → conditional: retry or end
     graph.add_conditional_edges(
@@ -340,8 +408,8 @@ def build_graph() -> StateGraph:
         },
     )
 
-    # Retry synthesis → validation again
-    graph.add_edge("retry_synthesis", "hallucination_validator")
+    # Retry synthesis → validation again (same guard as the first synthesis)
+    graph.add_conditional_edges("retry_synthesis", route_after_synthesis, after_synthesis)
 
     # Insufficient context → end (after generating refusal)
     graph.add_edge("insufficient_context", END)
@@ -740,12 +808,14 @@ async def run_query(
         elapsed_ms = (time.monotonic() - start) * 1000
         result["total_latency_ms"] = round(elapsed_ms, 2)
         result["status"] = "completed"
+        result["outcome"] = run_outcome(result)
 
         logger.info(
             "Query pipeline completed",
             extra={
                 "session_id": session_id,
                 "elapsed_ms": round(elapsed_ms, 2),
+                "outcome": result["outcome"],
                 "validation_status": result.get("validation_status"),
                 "confidence_score": result.get("confidence_score"),
                 **_run_summary(result),
@@ -833,6 +903,10 @@ _STAGE_LABELS: dict[str, tuple[str, str]] = {
         "Grounding every claim in retrieved text",
     ),
     "insufficient_context": ("Insufficient Context", "Declining rather than guessing"),
+    "synthesis_unavailable": (
+        "Synthesis Unavailable",
+        "No model returned a usable answer; nothing to verify",
+    ),
 }
 
 # The nodes that always run, in topological order. Sent up-front so the client
@@ -994,6 +1068,11 @@ def _summarize_stage(node: str, delta: dict) -> tuple[str, dict]:
 
     if node == "insufficient_context":
         return "Refused - no passage in the data room supports an answer", {
+            "force_refusal": True,
+        }
+
+    if node == "synthesis_unavailable":
+        return "Declined - the language models did not return a usable answer", {
             "force_refusal": True,
         }
 
@@ -1192,12 +1271,14 @@ async def stream_query(
     elapsed_ms = (time.monotonic() - start) * 1000
     final_state["total_latency_ms"] = round(elapsed_ms, 2)
     final_state["status"] = "completed"
+    final_state["outcome"] = run_outcome(final_state)
 
     logger.info(
         "Streamed query pipeline completed",
         extra={
             "session_id": session_id,
             "elapsed_ms": round(elapsed_ms, 2),
+            "outcome": final_state["outcome"],
             "validation_status": final_state.get("validation_status"),
             **_run_summary(final_state),
         },

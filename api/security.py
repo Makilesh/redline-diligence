@@ -833,6 +833,11 @@ def enforce_single_worker() -> int:
 # ==============================================================================
 
 
+def metrics_public() -> bool:
+    """True when METRICS_PUBLIC=1 opens /metrics and the /ready detail to anyone."""
+    return _env_flag("METRICS_PUBLIC")
+
+
 async def require_metrics_access(request: Request) -> None:
     """
     FastAPI dependency guarding `/metrics`.

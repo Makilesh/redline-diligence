@@ -33,7 +33,9 @@ from api.security import (
     BodySizeLimitMiddleware,
     RequestIdMiddleware,
     enforce_single_worker,
+    is_admin,
     is_development,
+    metrics_public,
     pipelines_in_flight,
     require_metrics_access,
 )
@@ -105,6 +107,34 @@ async def _warm_local_models() -> None:
         )
 
 
+# Two exact counts against Qdrant; cheap at demo scale but not something a
+# healthcheck polling every 30s should repeat each time.
+_SPARSE_STATUS_TTL_SECONDS = 60.0
+_sparse_status_read_at: float = 0.0
+
+
+async def _refresh_sparse_index_status(force: bool = False) -> None:
+    """Re-reads the stale-BM25 count into runtime_status, at most once a minute."""
+    global _sparse_status_read_at
+    loop = asyncio.get_running_loop()
+    if not force and loop.time() - _sparse_status_read_at < _SPARSE_STATUS_TTL_SECONDS:
+        return
+    _sparse_status_read_at = loop.time()
+    try:
+        from src.vector_db.collection_manager import sparse_index_status
+        from src.vector_db import qdrant_client as qdrant_module
+
+        status = await asyncio.wait_for(
+            sparse_index_status(qdrant_module.get_qdrant_client()), timeout=5
+        )
+    except Exception as e:
+        logger.warning(
+            "Could not read the sparse index status", extra={"error_type": type(e).__name__}
+        )
+        status = None
+    runtime_status.set_sparse_index(status)
+
+
 async def _checkpoint_sweeper_loop() -> None:
     """Sweeps expired checkpoint threads at startup and then on an interval."""
     interval = max(60, int(os.getenv("CHECKPOINT_SWEEP_INTERVAL_SECONDS", "3600")))
@@ -142,6 +172,7 @@ async def lifespan(app: FastAPI):
     # while leaving reads and health checks working, so it must stop startup.
     await assert_server_compatible(client)
     await setup_collections(client)
+    await _refresh_sparse_index_status(force=True)
 
     # Initialize budget tracker
     postgres_url = _postgres_url()
@@ -300,7 +331,7 @@ async def health_check():
 
 
 @app.get("/ready")
-async def readiness_check():
+async def readiness_check(request: Request):
     """
     Readiness probe: can this process actually answer a query?
 
@@ -310,13 +341,17 @@ async def readiness_check():
     this rather than on `/health`.
 
     Everything that is degraded-but-working is reported next to them without
-    failing the probe: which checkpointer is in use and whether it is durable,
-    each local model's load state, and the list of active degraded modes with
-    an explanation of each.
+    failing the probe: which Qdrant backend is in use (server or embedded, no
+    credentials), whether indexed chunks carry an outdated BM25 encoding, which
+    checkpointer is in use and whether it is durable, each local model's load
+    state, and the list of active degraded modes with an explanation of each.
 
     Returns:
         JSON with overall status, each check's result, and the degraded detail.
     """
+    from src.vector_db import qdrant_client as qdrant_module
+
+    await _refresh_sparse_index_status()
     status = runtime_status.describe()
     checks = {
         "graph_compiled": _app_graph is not None,
@@ -325,19 +360,23 @@ async def readiness_check():
     }
     try:
         # Looked up at call time so a replaced client (tests, reconnects) is used.
-        from src.vector_db import qdrant_client as qdrant_module
-
         await asyncio.wait_for(qdrant_module.get_qdrant_client().get_collections(), timeout=5)
         checks["qdrant_reachable"] = True
     except Exception as e:
         logger.warning("Readiness check: Qdrant unreachable", extra={"error": str(e)})
 
     ready = all(checks.values())
+    content = {"status": "ready" if ready else "not_ready", "checks": checks}
+    # The detail names internal hosts, models and failure classes. Deploy
+    # tooling only needs the status code; the operator presents the admin key.
+    if not (is_admin(request) or metrics_public()):
+        return JSONResponse(status_code=200 if ready else 503, content=content)
     return JSONResponse(
         status_code=200 if ready else 503,
         content={
-            "status": "ready" if ready else "not_ready",
-            "checks": checks,
+            **content,
+            "qdrant": qdrant_module.get_qdrant_backend(),
+            "sparse_index": runtime_status.sparse_index(),
             "checkpointer": status["checkpointer"],
             "models": status["models"],
             "degraded": status["degraded"],

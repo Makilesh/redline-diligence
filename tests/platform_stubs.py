@@ -46,6 +46,7 @@ def platform_environment(monkeypatch):
         "MAX_REGISTERED_DEALS",
         "MAX_JSON_BODY_KB",
         "MAX_UPLOAD_MB",
+        "AUDIT_LOG_DIR",
     ):
         monkeypatch.delenv(name, raising=False)
     for name in (
@@ -64,6 +65,7 @@ def platform_environment(monkeypatch):
     # the production connect timeout.
     monkeypatch.setenv("CHECKPOINTER_CONNECT_TIMEOUT_SECONDS", "1")
     monkeypatch.setattr(api_main, "_app_graph", object())
+    monkeypatch.setattr(api_main, "_sparse_status_read_at", float("-inf"))
 
     def clean():
         security.reset_limits()

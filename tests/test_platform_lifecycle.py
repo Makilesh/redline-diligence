@@ -13,6 +13,7 @@ import json
 import logging
 
 import pytest
+from langgraph.checkpoint.memory import MemorySaver
 from fastapi.testclient import TestClient
 
 import api.main as api_main
@@ -444,3 +445,70 @@ def test_dead_checkpointer_connection_triggers_a_rebuild(client, graph, monkeypa
     assert response.status_code == 200
     assert len(rebuilt_with) == 1
     assert api_main.get_graph() is graph
+
+
+# ==============================================================================
+# Terminal outcome
+# ==============================================================================
+
+
+def test_failed_synthesis_is_not_verified_and_is_reported_as_such(
+    client, stub_pipeline, monkeypatch
+):
+    async def failing_synthesis(state):
+        stub_pipeline.calls.append("answer_synthesizer")
+        return {
+            "generated_answer": "I could not generate an answer for this question.",
+            "confidence_score": 0.0,
+            "agent_trace": [{"agent": "answer_synthesizer", "synthesis_failed": True}],
+        }
+
+    monkeypatch.setattr(orchestrator, "answer_synthesizer_node", failing_synthesis)
+    compiled = orchestrator.build_graph().compile(checkpointer=MemorySaver())
+    monkeypatch.setattr(api_main, "_app_graph", compiled)
+
+    body = client.post("/api/v1/query", json=QUERY).json()
+
+    assert "hallucination_validator" not in stub_pipeline.calls
+    assert body["outcome"] == "synthesis_failed"
+    assert body["is_refusal"] is True
+    assert body["confidence_score"] == 0.0
+    assert body["claim_checks"] == []
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ({"generated_answer": "A [1].", "validation_status": "passed"}, "answered"),
+        ({"generated_answer": "A [1].", "validation_status": "warning"}, "answered"),
+        ({"generated_answer": "A [1].", "validation_status": "failed"}, "answered_unverified"),
+        ({"generated_answer": "No.", "force_refusal": True}, "refused"),
+        ({"generated_answer": ""}, "refused"),
+        (
+            {"generated_answer": "Sorry.", "agent_trace": [{"agent": "synthesis_unavailable"}]},
+            "synthesis_failed",
+        ),
+    ],
+)
+def test_run_outcome(state, expected):
+    assert orchestrator.run_outcome(state) == expected
+
+
+def test_normal_answer_reports_answered(client, graph, stub_pipeline):
+    body = client.post("/api/v1/query", json=QUERY).json()
+    assert body["outcome"] == "answered" and body["is_refusal"] is False
+
+
+def test_completed_queries_are_appended_to_the_audit_file(
+    client, graph, stub_pipeline, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("AUDIT_LOG_DIR", str(tmp_path / "audit"))
+    first = client.post("/api/v1/query", json=QUERY)
+    client.post("/api/v1/query/stream", json=QUERY)
+
+    [audit_file] = (tmp_path / "audit").iterdir()
+    entries = [json.loads(line) for line in audit_file.read_text().splitlines()]
+    assert [e["transport"] for e in entries] == ["blocking", "stream"]
+    assert entries[0]["event"] == "query_completed"
+    assert entries[0]["request_id"] == first.headers[security.REQUEST_ID_HEADER]
+    assert entries[0]["outcome"] == "answered" and entries[0]["include_pii"] is False

@@ -33,7 +33,7 @@ from src.data_processing.ingest_pipeline import (
     mark_superseded,
     sanitize_filename,
 )
-from src.utils import metrics
+from src.utils import audit_log, metrics
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -249,19 +249,41 @@ async def ingest_document(
         slot.release()
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    metrics.INGESTS.inc(outcome="partial" if result["warnings"] else "indexed")
     doc_id = result["doc_id"]
+    notices: list[str] = []
 
     # Retire the superseded document's chunks so retrieval's is_current_version=1
     # filter stops returning them, and any citation that does surface them
     # carries the pointer forward.
+    retired = True
     if supersedes_doc_id:
-        await mark_superseded(
+        retirement = await mark_superseded(
             deal_id=deal_id,
             superseded_doc_id=supersedes_doc_id,
             superseded_by=doc_id,
         )
+        # The pipeline reports {"ok", "chunks_retired", "error"}. A bare None is
+        # the older best-effort contract, which reported nothing either way.
+        retired = retirement is None or bool(retirement.get("ok"))
+        if not retired:
+            reason = retirement.get("error") or "the version store could not be updated"
+            notices.append(
+                f"The new document is indexed, but {supersedes_doc_id} is still marked as "
+                f"the current version: {reason}."
+            )
+            logger.warning(
+                "Supersession not applied",
+                extra={
+                    "deal_id": deal_id,
+                    "doc_id": doc_id,
+                    "supersedes_doc_id": supersedes_doc_id,
+                    "reason": reason,
+                },
+            )
 
+    # The registry records a supersession only when the index applied it.
+    # Recording one that did not happen would make the version browser show the
+    # older document as retired while retrieval still serves it as current.
     register_document(
         deal_id=deal_id,
         doc_id=doc_id,
@@ -269,14 +291,17 @@ async def ingest_document(
         document_category=result["document_category"],
         chunks_created=result["chunks_created"],
         is_current_version=is_current_version,
-        supersedes_doc_id=supersedes_doc_id,
+        supersedes_doc_id=supersedes_doc_id if retired else None,
         risk_signals=result["risk_signals"],
     )
 
-    logger.info(
-        "AUDIT_LOG",
-        extra={
-            "event": "document_ingested",
+    partial = bool(result["warnings"]) or not retired
+    metrics.INGESTS.inc(outcome="partial" if partial else "indexed")
+
+    audit_log.record(
+        "document_ingested",
+        **{
+            "request_id": client.request_id,
             "doc_id": doc_id,
             "deal_id": deal_id,
             "file_name": filename,
@@ -287,6 +312,7 @@ async def ingest_document(
             "warnings": result["warnings"],
             "risk_signal_types": [s["signal_type"] for s in result["risk_signals"]],
             "supersedes_doc_id": supersedes_doc_id or "",
+            "supersession_applied": retired if supersedes_doc_id else None,
         },
     )
 
@@ -295,6 +321,10 @@ async def ingest_document(
         deal_id=deal_id,
         document_category=result["document_category"],
         chunks_created=result["chunks_created"],
-        # Some sheets failed but others indexed — say so rather than "success".
-        status="partial" if result["warnings"] else "success",
+        # Some sheets failed, or the older version could not be retired — say
+        # so rather than "success".
+        status="partial" if partial else "success",
+        notices=notices,
+        # Passed through, never acted on: superseding stays an explicit choice.
+        version_candidates=result.get("version_candidates") or [],
     )

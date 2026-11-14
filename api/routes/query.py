@@ -45,10 +45,11 @@ from src.decisions.query_guard import BLOCKED_MESSAGE, check_query, query_guard_
 from src.workflow.orchestrator import (
     checkpointer_connection_broken,
     node_timings,
+    run_outcome,
     run_query,
     stream_query,
 )
-from src.utils import metrics, runtime_status
+from src.utils import audit_log, metrics, runtime_status
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -137,6 +138,7 @@ def _build_response(
         agent_trace=diagnostics["agent_trace"],
         is_refusal=is_refusal,
         context_quality_score=result.get("context_quality_score", 0.0),
+        outcome=result.get("outcome") or run_outcome(result),
         node_timings=timings,
         llm_calls=sum(row["llm_calls"] for row in timings),
         request_id=request_id,
@@ -145,17 +147,16 @@ def _build_response(
 
 def _audit(request: QueryRequest, response: QueryResponse, transport: str) -> None:
     """
-    Writes the immutable audit record for a completed query.
+    Writes the audit record for a completed query (see src/utils/audit_log.py).
 
     Args:
         request: The originating request.
         response: The response being returned.
         transport: "blocking" or "stream" — which endpoint served it.
     """
-    logger.info(
-        "AUDIT_LOG",
-        extra={
-            "event": "query_completed",
+    audit_log.record(
+        "query_completed",
+        **{
             "transport": transport,
             "deal_id": request.deal_id,
             "session_id": response.session_id,
@@ -170,6 +171,7 @@ def _audit(request: QueryRequest, response: QueryResponse, transport: str) -> No
             # Compliance: an authorized PII query must be attributable after the fact.
             "include_pii": request.include_pii,
             "is_refusal": response.is_refusal,
+            "outcome": response.outcome,
             "llm_calls": response.llm_calls,
         },
     )
