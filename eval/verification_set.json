@@ -1,0 +1,4638 @@
+{
+ "families": [
+  {
+   "id": "f001",
+   "split": "dev",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED INCOME STATEMENT",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "Revenue $452.8 $387.1"
+    }
+   ],
+   "items": [
+    {
+     "id": "f001.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Revenue was $452.8 million in FY2023 and $387.1 million in FY2022."
+    },
+    {
+     "id": "f001.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Aurora's top line reached $452.8M in fiscal 2023, up from $387.1M the year before."
+    },
+    {
+     "id": "f001.3",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Total revenue grew by $65.7 million, from $387.1 million in FY2022 to $452.8 million in FY2023."
+    },
+    {
+     "id": "f001.4",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Revenue grew 17.0% year over year, from $387.1 million to $452.8 million."
+    },
+    {
+     "id": "f001.5",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Revenue was $458.2 million in FY2023."
+    },
+    {
+     "id": "f001.6",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Revenue was $387.1 million in FY2023."
+    },
+    {
+     "id": "f001.7",
+     "label": "contradicted",
+     "kind": "period",
+     "claim": "Aurora's FY2022 revenue was $452.8 million."
+    },
+    {
+     "id": "f001.8",
+     "label": "contradicted",
+     "kind": "unit",
+     "claim": "Revenue was $452.8 billion in FY2023."
+    },
+    {
+     "id": "f001.9",
+     "label": "contradicted",
+     "kind": "derived",
+     "claim": "Revenue grew 21.0% year over year, from $387.1 million to $452.8 million."
+    }
+   ]
+  },
+  {
+   "id": "f002",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED INCOME STATEMENT",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "SaaS Subscriptions $189.6 $148.2"
+    }
+   ],
+   "items": [
+    {
+     "id": "f002.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "SaaS Subscriptions revenue was $189.6 million in FY2023, compared with $148.2 million in FY2022."
+    },
+    {
+     "id": "f002.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Subscription (SaaS) revenue came in at $189.6M for FY2023 versus $148.2M a year earlier."
+    },
+    {
+     "id": "f002.3",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "SaaS Subscriptions revenue increased by $41.4 million year over year, from $148.2 million to $189.6 million."
+    },
+    {
+     "id": "f002.4",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Software Licenses revenue was $189.6 million in FY2023."
+    },
+    {
+     "id": "f002.5",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "SaaS Subscriptions revenue was $186.9 million in FY2023."
+    },
+    {
+     "id": "f002.6",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "SaaS Subscriptions revenue declined from $189.6 million in FY2022 to $148.2 million in FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f003",
+   "split": "dev",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED INCOME STATEMENT",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "Professional Services $64.8 $66.6"
+    }
+   ],
+   "items": [
+    {
+     "id": "f003.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Professional Services revenue slipped to $64.8 million in FY2023 from $66.6 million in FY2022."
+    },
+    {
+     "id": "f003.2",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Professional Services revenue fell by $1.8 million year over year, from $66.6 million to $64.8 million."
+    },
+    {
+     "id": "f003.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Professional Services revenue rose to $66.6 million in FY2023 from $64.8 million in FY2022."
+    },
+    {
+     "id": "f003.4",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Professional Services revenue was $72.4 million in FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f004",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED INCOME STATEMENT",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "Gross Margin 60.0% 59.1%"
+    }
+   ],
+   "items": [
+    {
+     "id": "f004.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Gross Profit was $271.7 million in FY2023, a gross margin of 60.0%."
+    },
+    {
+     "id": "f004.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Aurora kept 60.0% of its FY2023 revenue as gross profit, or $271.7 million."
+    },
+    {
+     "id": "f004.3",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Gross margin was 59.1% in FY2023."
+    },
+    {
+     "id": "f004.4",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Gross margin was 66.0% in FY2023."
+    },
+    {
+     "id": "f004.5",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Gross profit was $228.8 million in FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f005",
+   "split": "dev",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED INCOME STATEMENT",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "Operating Margin 15.0% 13.3%"
+    }
+   ],
+   "items": [
+    {
+     "id": "f005.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "EBIT rose to $68.0 million in FY2023 from $51.4 million, lifting the operating margin to 15.0% from 13.3%."
+    },
+    {
+     "id": "f005.2",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "The operating margin expanded by 1.7 percentage points, from 13.3% to 15.0%."
+    },
+    {
+     "id": "f005.3",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Operating income (EBIT) was $61.9 million in FY2023."
+    },
+    {
+     "id": "f005.4",
+     "label": "contradicted",
+     "kind": "derived",
+     "claim": "The operating margin expanded by 2.7 percentage points, from 13.3% to 15.0%."
+    },
+    {
+     "id": "f005.5",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The operating margin contracted from 15.0% in FY2022 to 13.3% in FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f006",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED INCOME STATEMENT",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "Earnings Per Share (Diluted) $3.87 $2.86"
+    }
+   ],
+   "items": [
+    {
+     "id": "f006.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Net Income was $46.4 million in FY2023, with diluted earnings per share of $3.87."
+    },
+    {
+     "id": "f006.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The company earned $46.4M after tax in FY2023, which works out to $3.87 per diluted share."
+    },
+    {
+     "id": "f006.3",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Diluted earnings per share were $2.86 in FY2023."
+    },
+    {
+     "id": "f006.4",
+     "label": "contradicted",
+     "kind": "unit",
+     "claim": "Net income was $3.87 million in FY2023."
+    },
+    {
+     "id": "f006.5",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Net income was $64.4 million in FY2023."
+    },
+    {
+     "id": "f006.6",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Net income was $34.3 million in FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f007",
+   "split": "dev",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED INCOME STATEMENT",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "Effective Tax Rate 25.0% 25.1%"
+    }
+   ],
+   "items": [
+    {
+     "id": "f007.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Aurora's effective tax rate was 25.0% in FY2023, essentially flat on 25.1% in FY2022."
+    },
+    {
+     "id": "f007.2",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Income Tax Expense was $15.5 million in FY2023 and $11.5 million in FY2022."
+    },
+    {
+     "id": "f007.3",
+     "label": "contradicted",
+     "kind": "unit",
+     "claim": "The effective tax rate was 15.5% in FY2023."
+    },
+    {
+     "id": "f007.4",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The effective tax rate was 21.0% in FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f008",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED BALANCE SHEET",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "Cash and Cash Equivalents $89.4 $72.1"
+    }
+   ],
+   "items": [
+    {
+     "id": "f008.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Cash and Cash Equivalents were $89.4 million at December 31, 2023."
+    },
+    {
+     "id": "f008.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Aurora closed FY2023 with $89.4M of cash on the balance sheet, against $72.1M a year earlier."
+    },
+    {
+     "id": "f008.3",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Cash and cash equivalents stood at $72.1 million at the end of FY2023."
+    },
+    {
+     "id": "f008.4",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Cash and cash equivalents were $98.4 million at December 31, 2023."
+    }
+   ]
+  },
+  {
+   "id": "f009",
+   "split": "dev",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED BALANCE SHEET",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "Intangible Assets, net $67.8 $78.2"
+    }
+   ],
+   "items": [
+    {
+     "id": "f009.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Goodwill was unchanged at $234.5 million across both year-ends."
+    },
+    {
+     "id": "f009.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Net intangible assets fell to $67.8 million from $78.2 million."
+    },
+    {
+     "id": "f009.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Net intangible assets rose to $78.2 million in FY2023 from $67.8 million in FY2022."
+    },
+    {
+     "id": "f009.4",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Goodwill was $67.8 million at the end of FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f010",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED BALANCE SHEET",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "TOTAL ASSETS $560.4 $532.2"
+    }
+   ],
+   "items": [
+    {
+     "id": "f010.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Total assets were $560.4 million and total liabilities were $288.0 million at the end of FY2023."
+    },
+    {
+     "id": "f010.2",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Total stockholders' equity of $272.4 million equals total assets of $560.4 million less total liabilities of $288.0 million."
+    },
+    {
+     "id": "f010.3",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Total liabilities were $272.4 million at the end of FY2023."
+    },
+    {
+     "id": "f010.4",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Total assets were $506.4 million at December 31, 2023."
+    },
+    {
+     "id": "f010.5",
+     "label": "contradicted",
+     "kind": "unit",
+     "claim": "Total assets were $560.4 thousand at December 31, 2023."
+    }
+   ]
+  },
+  {
+   "id": "f011",
+   "split": "dev",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED BALANCE SHEET",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "Long-Term Debt $98.0 $110.0"
+    }
+   ],
+   "items": [
+    {
+     "id": "f011.1",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Total debt of $110.0 million at FY2023 year-end comprises $98.0 million of long-term debt and a $12.0 million current portion."
+    },
+    {
+     "id": "f011.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Total debt fell from $122.0 million to $110.0 million during FY2023."
+    },
+    {
+     "id": "f011.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Total debt increased from $110.0 million to $122.0 million during FY2023."
+    },
+    {
+     "id": "f011.4",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Long-term debt was $110.0 million at the end of FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f012",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "KEY FINANCIAL METRICS AND NOTES",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "EBITDA Margin 20.5% 19.1%"
+    }
+   ],
+   "items": [
+    {
+     "id": "f012.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "EBITDA was $92.8 million in FY2023, an EBITDA margin of 20.5%."
+    },
+    {
+     "id": "f012.2",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "EBITDA of $92.8 million is operating income of $68.0 million plus depreciation and amortization of $24.8 million."
+    },
+    {
+     "id": "f012.3",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Adding back $24.8 million of D&A to EBIT of $68.0 million gives FY2023 EBITDA of $92.8 million."
+    },
+    {
+     "id": "f012.4",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "EBITDA was $98.2 million in FY2023."
+    },
+    {
+     "id": "f012.5",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "EBITDA was $74.0 million in FY2023."
+    },
+    {
+     "id": "f012.6",
+     "label": "contradicted",
+     "kind": "derived",
+     "claim": "EBITDA of $92.8 million represents a 25.0% margin on revenue of $452.8 million."
+    },
+    {
+     "id": "f012.7",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The EBITDA margin was 19.1% in FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f013",
+   "split": "dev",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "KEY FINANCIAL METRICS AND NOTES",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "Adjusted EBITDA $97.3 $74.0"
+    }
+   ],
+   "items": [
+    {
+     "id": "f013.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Adjusted EBITDA (excluding restructuring) was $97.3 million in FY2023."
+    },
+    {
+     "id": "f013.2",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Adjusted EBITDA of $97.3 million adds back $4.5 million of restructuring charges to EBITDA of $92.8 million."
+    },
+    {
+     "id": "f013.3",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Adjusted EBITDA (excluding restructuring) was $93.7 million in FY2023."
+    },
+    {
+     "id": "f013.4",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Adjusted EBITDA of $97.3 million adds back $5.4 million of restructuring charges to EBITDA of $92.8 million."
+    },
+    {
+     "id": "f013.5",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The Adjusted EBITDA margin was 20.5% in FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f014",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "KEY FINANCIAL METRICS AND NOTES",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "Free Cash Flow $64.2 $49.3"
+    }
+   ],
+   "items": [
+    {
+     "id": "f014.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Free Cash Flow was $64.2 million in FY2023, up from $49.3 million in FY2022."
+    },
+    {
+     "id": "f014.2",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Free cash flow of $64.2 million reflects $78.4 million of cash from operations less $14.2 million of capital expenditures."
+    },
+    {
+     "id": "f014.3",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Capital expenditures were $14.2 million in FY2023."
+    },
+    {
+     "id": "f014.4",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Free cash flow of $64.2 million was 69.2% of EBITDA of $92.8 million."
+    },
+    {
+     "id": "f014.5",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Capital expenditures were $12.8 million in FY2023."
+    },
+    {
+     "id": "f014.6",
+     "label": "contradicted",
+     "kind": "derived",
+     "claim": "Free cash flow of $64.2 million was 80.2% of EBITDA of $92.8 million."
+    },
+    {
+     "id": "f014.7",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Free cash flow fell from $64.2 million in FY2022 to $49.3 million in FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f015",
+   "split": "dev",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "KEY FINANCIAL METRICS AND NOTES",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "Net Debt/EBITDA 0.2x 0.7x"
+    }
+   ],
+   "items": [
+    {
+     "id": "f015.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Net Debt was $20.6 million at FY2023 year-end, or 0.2x EBITDA."
+    },
+    {
+     "id": "f015.2",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Net debt of $20.6 million is total debt of $110.0 million less cash of $89.4 million."
+    },
+    {
+     "id": "f015.3",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Leverage fell to 0.2x net debt to EBITDA in FY2023 from 0.7x in FY2022."
+    },
+    {
+     "id": "f015.4",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Net Debt/EBITDA was 0.7x at the end of FY2023."
+    },
+    {
+     "id": "f015.5",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Net debt was $26.0 million at FY2023 year-end."
+    },
+    {
+     "id": "f015.6",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Net Debt/EBITDA was 2.0x at the end of FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f016",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "KEY FINANCIAL METRICS AND NOTES",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "SaaS ARR Growth: 27.9% YoY (SaaS ARR as of Dec 31, 2023: $210.5M)"
+    }
+   ],
+   "items": [
+    {
+     "id": "f016.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "SaaS ARR was $210.5M as of Dec 31, 2023, with SaaS ARR growth of 27.9% YoY."
+    },
+    {
+     "id": "f016.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Annual recurring revenue from SaaS stood at $210.5 million at year-end 2023, having grown 27.9% over the year."
+    },
+    {
+     "id": "f016.3",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Revenue grew 27.9% year over year in FY2023."
+    },
+    {
+     "id": "f016.4",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "SaaS ARR was $201.5M as of Dec 31, 2023."
+    },
+    {
+     "id": "f016.5",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "SaaS ARR grew 17.0% year over year."
+    }
+   ]
+  },
+  {
+   "id": "f017",
+   "split": "dev",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "KEY FINANCIAL METRICS AND NOTES",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "Total Customers: 2,847 (up from 2,412 in FY2022)"
+    }
+   ],
+   "items": [
+    {
+     "id": "f017.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The customer base expanded to 2,847 from 2,412 in FY2022."
+    },
+    {
+     "id": "f017.2",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Enterprise Customers (>$100K ACV) numbered 284, up from 231 in FY2022."
+    },
+    {
+     "id": "f017.3",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Total customers reached 2,874 in FY2023."
+    },
+    {
+     "id": "f017.4",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Total customers were 2,412 in FY2023."
+    },
+    {
+     "id": "f017.5",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Enterprise customers fell from 284 in FY2022 to 231 in FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f018",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "Note 7 — Debt",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "The Company maintains a $150M senior secured revolving credit facility with JPMorgan Chase, of which $110M was drawn as of December 31, 2023."
+    }
+   ],
+   "items": [
+    {
+     "id": "f018.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "The Company maintains a $150M senior secured revolving credit facility with JPMorgan Chase, of which $110M was drawn as of December 31, 2023."
+    },
+    {
+     "id": "f018.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Aurora's revolver matures on June 30, 2026 and is priced at SOFR plus 225 basis points."
+    },
+    {
+     "id": "f018.3",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The facility's covenants cap Net Debt/EBITDA at 3.5x and require interest coverage of at least 3.0x."
+    },
+    {
+     "id": "f018.4",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Aurora was in compliance with all of its covenants at the end of 2023."
+    },
+    {
+     "id": "f018.5",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "The facility bears interest at SOFR plus 2.25%."
+    },
+    {
+     "id": "f018.6",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "As of December 31, 2023, the Company was not in compliance with all covenants."
+    },
+    {
+     "id": "f018.7",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "The Company maintains a $150M senior secured revolving credit facility with Goldman Sachs."
+    },
+    {
+     "id": "f018.8",
+     "label": "contradicted",
+     "kind": "unit",
+     "claim": "The facility bears interest at SOFR + 225%."
+    },
+    {
+     "id": "f018.9",
+     "label": "contradicted",
+     "kind": "period",
+     "claim": "The facility matures on June 30, 2027."
+    },
+    {
+     "id": "f018.10",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The facility's covenants cap Net Debt/EBITDA at 3.0x."
+    }
+   ]
+  },
+  {
+   "id": "f019",
+   "split": "dev",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "Note 12 — Subsequent Events",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "The Company has retained Goldman Sachs as financial advisor."
+    }
+   ],
+   "items": [
+    {
+     "id": "f019.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Goldman Sachs was engaged as Aurora's financial advisor for the strategic review."
+    },
+    {
+     "id": "f019.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "On February 15, 2024 the Board approved exploring strategic alternatives, including a potential sale of the Company."
+    },
+    {
+     "id": "f019.3",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "The Company has retained JPMorgan Chase as financial advisor."
+    },
+    {
+     "id": "f019.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The Board of Directors rejected the exploration of strategic alternatives on February 15, 2024."
+    },
+    {
+     "id": "f019.5",
+     "label": "contradicted",
+     "kind": "period",
+     "claim": "The Board approved the exploration of strategic alternatives on February 15, 2023."
+    }
+   ]
+  },
+  {
+   "id": "f020",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED FINANCIAL STATEMENTS",
+   "evidence": [
+    {
+     "source": "aurora_financials_fy2023.txt",
+     "excerpt": "(Audited by Deloitte & Touche LLP)"
+    }
+   ],
+   "items": [
+    {
+     "id": "f020.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The consolidated financial statements were audited by Deloitte & Touche LLP."
+    },
+    {
+     "id": "f020.2",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "The consolidated financial statements were audited by Grant Thornton LLP."
+    },
+    {
+     "id": "f020.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The consolidated financial statements for FY2023 are unaudited."
+    }
+   ]
+  },
+  {
+   "id": "f021",
+   "split": "dev",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "SECTION 2: ADJUSTED EBITDA BRIDGE",
+   "evidence": [
+    {
+     "source": "quality_of_earnings_report_fy2023.txt",
+     "excerpt": "Adjusted EBITDA $99.0 $73.8"
+    }
+   ],
+   "items": [
+    {
+     "id": "f021.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "The quality of earnings report shows Adjusted EBITDA of $99.0 million for FY2023 and $73.8 million for FY2022."
+    },
+    {
+     "id": "f021.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Normalization adjustments added a net $6.2 million to FY2023 EBITDA."
+    },
+    {
+     "id": "f021.3",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Adjusted EBITDA of $99.0 million exceeds reported EBITDA of $92.8 million by $6.2 million."
+    },
+    {
+     "id": "f021.4",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "On Grant Thornton's numbers, Adjusted EBITDA rose 34.1% from FY2022 to FY2023."
+    },
+    {
+     "id": "f021.5",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Adjusted EBITDA grew 21.9% from FY2022 to FY2023."
+    },
+    {
+     "id": "f021.6",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Adjusted EBITDA was $99.9 million in FY2023 per the quality of earnings report."
+    },
+    {
+     "id": "f021.7",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Total normalization adjustments were $6.2 million in FY2022."
+    },
+    {
+     "id": "f021.8",
+     "label": "contradicted",
+     "kind": "derived",
+     "claim": "Adjusted EBITDA of $99.0 million exceeds reported EBITDA of $92.8 million by $7.2 million."
+    }
+   ]
+  },
+  {
+   "id": "f022",
+   "split": "test",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "SECTION 2: ADJUSTED EBITDA BRIDGE",
+   "evidence": [
+    {
+     "source": "quality_of_earnings_report_fy2023.txt",
+     "excerpt": "Add: Depreciation $11.4 $10.2"
+    }
+   ],
+   "items": [
+    {
+     "id": "f022.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Depreciation was $11.4 million and amortization of intangibles was $13.4 million in FY2023."
+    },
+    {
+     "id": "f022.2",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Depreciation of $11.4 million and amortization of $13.4 million together make up $24.8 million of D&A in FY2023."
+    },
+    {
+     "id": "f022.3",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Depreciation was $13.4 million in FY2023."
+    },
+    {
+     "id": "f022.4",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Reported EBITDA was $74.2 million in FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f023",
+   "split": "dev",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "Note 1 - Restructuring Charges",
+   "evidence": [
+    {
+     "source": "quality_of_earnings_report_fy2023.txt",
+     "excerpt": "Severance and facility exit costs associated with the closure of the Austin development center in Q3 FY2023. 32 employees were affected."
+    }
+   ],
+   "items": [
+    {
+     "id": "f023.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The $4.5 million restructuring charge covers severance and facility exit costs from closing the Austin development center in Q3 FY2023."
+    },
+    {
+     "id": "f023.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Management has represented that the restructuring program is complete and that no further charges are expected."
+    },
+    {
+     "id": "f023.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Management expects further restructuring charges in future periods."
+    },
+    {
+     "id": "f023.4",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "The restructuring charge relates to the closure of the San Jose development center."
+    },
+    {
+     "id": "f023.5",
+     "label": "contradicted",
+     "kind": "period",
+     "claim": "The Austin development center was closed in Q1 FY2023."
+    },
+    {
+     "id": "f023.6",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Grant Thornton considers the restructuring adjustment inappropriate because the charge is recurring."
+    }
+   ]
+  },
+  {
+   "id": "f024",
+   "split": "test",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "Note 2 - Non-recurring Legal Fees",
+   "evidence": [
+    {
+     "source": "quality_of_earnings_report_fy2023.txt",
+     "excerpt": "External counsel fees relating to the DataFlow Systems patent litigation (Case No. 2023-CV-04821)."
+    }
+   ],
+   "items": [
+    {
+     "id": "f024.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The $2.8 million legal fee add-back relates to the DataFlow Systems patent litigation and is flagged as a qualified adjustment."
+    },
+    {
+     "id": "f024.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Grant Thornton cautions that the legal fee add-back is non-recurring only if the litigation concludes."
+    },
+    {
+     "id": "f024.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The DataFlow litigation has been resolved, so the legal fee add-back is clearly non-recurring."
+    },
+    {
+     "id": "f024.4",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Non-recurring legal fees of $1.6 million were added back in FY2023."
+    },
+    {
+     "id": "f024.5",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Non-recurring legal fees of $3.8 million relating to the DataFlow litigation were added back in FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f025",
+   "split": "dev",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "Note 3 - SOC 2 Remediation",
+   "evidence": [
+    {
+     "source": "quality_of_earnings_report_fy2023.txt",
+     "excerpt": "The FY2023 examination was issued with no exceptions."
+    }
+   ],
+   "items": [
+    {
+     "id": "f025.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The FY2023 SOC 2 Type II examination came back clean, with no exceptions."
+    },
+    {
+     "id": "f025.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Aurora spent $1.6 million on one-time SOC 2 remediation in FY2023."
+    },
+    {
+     "id": "f025.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The FY2023 SOC 2 Type II examination was issued with several exceptions."
+    },
+    {
+     "id": "f025.4",
+     "label": "contradicted",
+     "kind": "period",
+     "claim": "The control gaps were identified in the FY2023 SOC 2 Type II examination."
+    },
+    {
+     "id": "f025.5",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Aurora spent $2.8 million on one-time SOC 2 remediation in FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f026",
+   "split": "test",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "Note 4 - Founder Compensation Above Market",
+   "evidence": [
+    {
+     "source": "quality_of_earnings_report_fy2023.txt",
+     "excerpt": "CEO Elena Marsh and CTO Dr. James Wu receive aggregate cash compensation approximately $1.9 million above the 75th percentile of the peer benchmark set."
+    }
+   ],
+   "items": [
+    {
+     "id": "f026.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The two founders, Elena Marsh and Dr. James Wu, are paid roughly $1.9 million more in cash than the 75th percentile of peers."
+    },
+    {
+     "id": "f026.2",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "CFO Robert Chen and CTO Dr. James Wu receive aggregate cash compensation approximately $1.9 million above the peer benchmark."
+    },
+    {
+     "id": "f026.3",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "CEO Elena Marsh and CTO Dr. James Wu receive aggregate cash compensation approximately $2.9 million above the 75th percentile of the peer benchmark set."
+    },
+    {
+     "id": "f026.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Founder compensation is below the 75th percentile of the peer benchmark set."
+    }
+   ]
+  },
+  {
+   "id": "f027",
+   "split": "dev",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "Note 5 - Capitalized Software Adjustment",
+   "evidence": [
+    {
+     "source": "quality_of_earnings_report_fy2023.txt",
+     "excerpt": "This is a DOWNWARD adjustment and reduces Adjusted EBITDA."
+    }
+   ],
+   "items": [
+    {
+     "id": "f027.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Because peers mostly expense software development, the report reduces EBITDA by the amount Aurora capitalized."
+    },
+    {
+     "id": "f027.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The capitalized software adjustment reduced FY2023 Adjusted EBITDA by $3.2 million."
+    },
+    {
+     "id": "f027.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The capitalized software adjustment is an upward adjustment that increases Adjusted EBITDA."
+    },
+    {
+     "id": "f027.4",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The capitalized software adjustment reduced FY2023 Adjusted EBITDA by $2.7 million."
+    },
+    {
+     "id": "f027.5",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Peer practice in this segment is predominantly to capitalize internally developed software."
+    }
+   ]
+  },
+  {
+   "id": "f028",
+   "split": "test",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "SECTION 4: REVENUE QUALITY",
+   "evidence": [
+    {
+     "source": "quality_of_earnings_report_fy2023.txt",
+     "excerpt": "Total Recurring Revenue $331.7 73.3%"
+    }
+   ],
+   "items": [
+    {
+     "id": "f028.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Total recurring revenue was $331.7 million, or 73.3% of FY2023 revenue."
+    },
+    {
+     "id": "f028.2",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Recurring revenue of $331.7 million combines $189.6 million of SaaS subscriptions and $142.1 million of term licenses."
+    },
+    {
+     "id": "f028.3",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Roughly three quarters (73.3%) of FY2023 revenue was recurring."
+    },
+    {
+     "id": "f028.4",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Perpetual licenses accounted for 31.4% of FY2023 revenue."
+    },
+    {
+     "id": "f028.5",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Total recurring revenue was 77.3% of FY2023 revenue."
+    },
+    {
+     "id": "f028.6",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Professional Services revenue of $64.8 million is classified as recurring."
+    },
+    {
+     "id": "f028.7",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Term software licenses contributed $56.3 million of FY2023 revenue."
+    }
+   ]
+  },
+  {
+   "id": "f029",
+   "split": "dev",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "SECTION 4: REVENUE QUALITY",
+   "evidence": [
+    {
+     "source": "quality_of_earnings_report_fy2023.txt",
+     "excerpt": "Net Revenue Retention (NRR) was 118% in FY2023 and 114% in FY2022. Gross revenue retention was 94% in FY2023."
+    }
+   ],
+   "items": [
+    {
+     "id": "f029.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Net Revenue Retention (NRR) was 118% in FY2023 and 114% in FY2022."
+    },
+    {
+     "id": "f029.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Gross revenue retention came in at 94% for FY2023."
+    },
+    {
+     "id": "f029.3",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Gross revenue retention was 118% in FY2023."
+    },
+    {
+     "id": "f029.4",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Net Revenue Retention was 114% in FY2023."
+    },
+    {
+     "id": "f029.5",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Net revenue retention was 128% in FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f030",
+   "split": "test",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "SECTION 4: REVENUE QUALITY",
+   "evidence": [
+    {
+     "source": "quality_of_earnings_report_fy2023.txt",
+     "excerpt": "We note that perpetual license revenue of $56.3 million declined from $61.2 million in FY2022"
+    }
+   ],
+   "items": [
+    {
+     "id": "f030.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Perpetual license revenue dropped to $56.3 million from $61.2 million as customers moved to subscription pricing."
+    },
+    {
+     "id": "f030.2",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Perpetual license revenue fell by $4.9 million, from $61.2 million to $56.3 million."
+    },
+    {
+     "id": "f030.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The report advises the Buyer to model perpetual license revenue as sustainable."
+    },
+    {
+     "id": "f030.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Perpetual license revenue grew from $56.3 million in FY2022 to $61.2 million in FY2023."
+    },
+    {
+     "id": "f030.5",
+     "label": "contradicted",
+     "kind": "derived",
+     "claim": "Perpetual license revenue fell by $9.4 million, from $61.2 million to $56.3 million."
+    }
+   ]
+  },
+  {
+   "id": "f031",
+   "split": "dev",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "SECTION 5: WORKING CAPITAL",
+   "evidence": [
+    {
+     "source": "quality_of_earnings_report_fy2023.txt",
+     "excerpt": "We recommend a working capital peg of ($55.8) million at closing, with a dollar-for-dollar adjustment."
+    }
+   ],
+   "items": [
+    {
+     "id": "f031.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Grant Thornton recommends a working capital peg of negative $55.8 million at closing, adjusted dollar-for-dollar."
+    },
+    {
+     "id": "f031.2",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Net Working Capital was ($61.3) million in FY2023 and ($50.2) million in FY2022."
+    },
+    {
+     "id": "f031.3",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The recommended working capital peg is ($61.3) million."
+    },
+    {
+     "id": "f031.4",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The recommended working capital peg is ($58.5) million."
+    },
+    {
+     "id": "f031.5",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The report found no material deterioration in collections."
+    },
+    {
+     "id": "f031.6",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The report identified a material deterioration in collections."
+    }
+   ]
+  },
+  {
+   "id": "f032",
+   "split": "test",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "SECTION 1: SCOPE AND BASIS OF PRESENTATION",
+   "evidence": [
+    {
+     "source": "quality_of_earnings_report_fy2023.txt",
+     "excerpt": "This is not an audit. The Company's statutory financial statements were audited by Deloitte & Touche LLP, which issued an unqualified opinion for both periods."
+    }
+   ],
+   "items": [
+    {
+     "id": "f032.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Deloitte & Touche issued an unqualified audit opinion for both FY2022 and FY2023."
+    },
+    {
+     "id": "f032.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The quality of earnings report was prepared by Grant Thornton for Vertex Capital Partners."
+    },
+    {
+     "id": "f032.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Deloitte & Touche issued a qualified opinion on the FY2023 financial statements."
+    },
+    {
+     "id": "f032.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The quality of earnings report constitutes an audit of the Company's financial statements."
+    },
+    {
+     "id": "f032.5",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "The quality of earnings report was prepared by Deloitte & Touche for Vertex Capital Partners."
+    }
+   ]
+  },
+  {
+   "id": "f033",
+   "split": "dev",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "SECTION 6: KEY OBSERVATIONS FOR THE BUYER",
+   "evidence": [
+    {
+     "source": "quality_of_earnings_report_fy2023.txt",
+     "excerpt": "A valuation struck on Adjusted EBITDA rather than reported EBITDA produces a materially lower implied multiple."
+    }
+   ],
+   "items": [
+    {
+     "id": "f033.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Valuing the business on Adjusted rather than reported EBITDA yields a materially lower implied multiple."
+    },
+    {
+     "id": "f033.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The capitalized software adjustment is the largest downward normalization and stems from an accounting policy difference rather than an earnings quality problem."
+    },
+    {
+     "id": "f033.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "A valuation struck on Adjusted EBITDA rather than reported EBITDA produces a materially higher implied multiple."
+    },
+    {
+     "id": "f033.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The capitalized software adjustment reflects an earnings quality concern."
+    },
+    {
+     "id": "f033.5",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "If either founder leaves, the cost of a market-rate replacement could exceed the $1.9 million add-back."
+    }
+   ]
+  },
+  {
+   "id": "f034",
+   "split": "test",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 1.2 — Consideration",
+   "evidence": [
+    {
+     "source": "merger_agreement_v2_final.txt",
+     "excerpt": "converted into the right to receive $58.00 per share in cash"
+    }
+   ],
+   "items": [
+    {
+     "id": "f034.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Each share of Company Common Stock will be converted into the right to receive $58.00 per share in cash."
+    },
+    {
+     "id": "f034.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Aurora shareholders receive $58.00 in cash per share, about a 42% premium to the 90-day VWAP of $40.85."
+    },
+    {
+     "id": "f034.3",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "The aggregate Merger Consideration is approximately $696 million."
+    },
+    {
+     "id": "f034.4",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The Per Share Merger Consideration is $85.00 per share in cash."
+    },
+    {
+     "id": "f034.5",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The Per Share Merger Consideration is $40.85 per share in cash."
+    },
+    {
+     "id": "f034.6",
+     "label": "contradicted",
+     "kind": "unit",
+     "claim": "The aggregate Merger Consideration is approximately $696 billion."
+    },
+    {
+     "id": "f034.7",
+     "label": "contradicted",
+     "kind": "unit",
+     "claim": "The aggregate Merger Consideration is approximately $58.00 million."
+    },
+    {
+     "id": "f034.8",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The merger consideration is payable in a mix of cash and Buyer stock."
+    },
+    {
+     "id": "f034.9",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The per-share price represents a premium of approximately 24% to the 90-day volume-weighted average price."
+    }
+   ]
+  },
+  {
+   "id": "f035",
+   "split": "dev",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 1.1 — The Merger",
+   "evidence": [
+    {
+     "source": "merger_agreement_v2_final.txt",
+     "excerpt": "Merger Sub shall be merged with and into the Company, with the Company surviving the Merger as a wholly owned subsidiary of Buyer."
+    }
+   ],
+   "items": [
+    {
+     "id": "f035.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Aurora survives the merger as a wholly owned subsidiary of Vertex Capital Partners."
+    },
+    {
+     "id": "f035.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The merger agreement was entered into as of March 15, 2024."
+    },
+    {
+     "id": "f035.3",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "Merger Sub survives the Merger and the Company ceases to exist."
+    },
+    {
+     "id": "f035.4",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "Vertex Capital Partners will become a wholly owned subsidiary of Aurora Technologies."
+    },
+    {
+     "id": "f035.5",
+     "label": "contradicted",
+     "kind": "period",
+     "claim": "The merger agreement was entered into as of March 15, 2023."
+    }
+   ]
+  },
+  {
+   "id": "f036",
+   "split": "test",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 1.3 — Treatment of Company Stock Options and RSUs",
+   "evidence": [
+    {
+     "source": "merger_agreement_v2_final.txt",
+     "excerpt": "All outstanding unvested Company stock options and restricted stock units shall fully vest and be cancelled at the Effective Time in exchange for a cash payment"
+    }
+   ],
+   "items": [
+    {
+     "id": "f036.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Unvested options and RSUs accelerate in full and are cashed out at the Effective Time."
+    },
+    {
+     "id": "f036.2",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Unvested stock options and RSUs are forfeited without payment at the Effective Time."
+    },
+    {
+     "id": "f036.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Unvested stock options are rolled over into Buyer equity rather than cashed out."
+    }
+   ]
+  },
+  {
+   "id": "f037",
+   "split": "dev",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 3.8 — Material Contracts",
+   "evidence": [
+    {
+     "source": "merger_agreement_v2_final.txt",
+     "excerpt": "\"Material Contracts\" means any contract involving annual consideration in excess of $5.0 million or having a term longer than three (3) years."
+    }
+   ],
+   "items": [
+    {
+     "id": "f037.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "A Material Contract is one with annual consideration above $5.0 million or a term longer than three years."
+    },
+    {
+     "id": "f037.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The Company represents that it is not in breach or default under any Material Contract."
+    },
+    {
+     "id": "f037.3",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "A Material Contract is one with annual consideration above $7.5 million or a term longer than three years."
+    },
+    {
+     "id": "f037.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The Company is in default under several Material Contracts."
+    }
+   ]
+  },
+  {
+   "id": "f038",
+   "split": "test",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 3.15 — Litigation",
+   "evidence": [
+    {
+     "source": "merger_agreement_v2_final.txt",
+     "excerpt": "The Company's outside counsel has assessed the probable exposure at $3.5 million to $8.0 million."
+    }
+   ],
+   "items": [
+    {
+     "id": "f038.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Outside counsel has assessed the probable exposure in the DataFlow matter at $3.5 million to $8.0 million."
+    },
+    {
+     "id": "f038.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Aurora is the defendant in a patent infringement suit brought by DataFlow Systems in the Northern District of California."
+    },
+    {
+     "id": "f038.3",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "Aurora is the plaintiff in a patent infringement suit against DataFlow Systems."
+    },
+    {
+     "id": "f038.4",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Outside counsel has assessed the probable exposure at $3.5 million to $18.0 million."
+    },
+    {
+     "id": "f038.5",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The Company believes the DataFlow claims have merit and intends to settle."
+    },
+    {
+     "id": "f038.6",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Outside counsel has assessed the probable exposure in the DataFlow matter at $2.0 million."
+    },
+    {
+     "id": "f038.7",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The Company holds 47 issued U.S. patents and 23 pending patent applications."
+    },
+    {
+     "id": "f038.8",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The Company holds 23 issued U.S. patents and 47 pending patent applications."
+    }
+   ]
+  },
+  {
+   "id": "f039",
+   "split": "dev",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 5.1 — Conduct of Business Pending the Merger",
+   "evidence": [
+    {
+     "source": "merger_agreement_v2_final.txt",
+     "excerpt": "(d) incur any indebtedness in excess of $10.0 million;"
+    }
+   ],
+   "items": [
+    {
+     "id": "f039.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Without Buyer's consent, Aurora may not take on more than $10.0 million of new debt or settle litigation above $1.0 million before closing."
+    },
+    {
+     "id": "f039.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Pending closing, capital expenditures are limited to $5.0 million individually and $15.0 million in the aggregate without Buyer's consent."
+    },
+    {
+     "id": "f039.3",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Without Buyer's consent, Aurora may not settle any litigation in excess of $10.0 million."
+    },
+    {
+     "id": "f039.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The Company may declare and pay dividends before closing without the Buyer's consent."
+    },
+    {
+     "id": "f039.5",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Without Buyer's consent, the Company may not hire any employee with annual base compensation in excess of $350,000."
+    }
+   ]
+  },
+  {
+   "id": "f040",
+   "split": "test",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 5.3 — No-Shop Provision",
+   "evidence": [
+    {
+     "source": "merger_agreement_v2_final.txt",
+     "excerpt": "the Company shall not, and shall cause its representatives not to, directly or indirectly: (a) solicit, initiate, or knowingly facilitate any Acquisition Proposal;"
+    }
+   ],
+   "items": [
+    {
+     "id": "f040.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Under the no-shop, Aurora may not solicit or knowingly facilitate competing acquisition proposals."
+    },
+    {
+     "id": "f040.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The Board may still engage with an unsolicited proposal that it determines in good faith could lead to a Superior Proposal."
+    },
+    {
+     "id": "f040.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The agreement includes a go-shop period during which the Company may actively solicit competing proposals."
+    },
+    {
+     "id": "f040.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The Company may not engage with any third party, even one making an unsolicited proposal that could lead to a Superior Proposal."
+    }
+   ]
+  },
+  {
+   "id": "f041",
+   "split": "dev",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 7.2 — Termination Fee",
+   "evidence": [
+    {
+     "source": "merger_agreement_v2_final.txt",
+     "excerpt": "the Company shall pay Buyer a termination fee of $20.88 million (representing 3.0% of the aggregate Merger Consideration)"
+    }
+   ],
+   "items": [
+    {
+     "id": "f041.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "The Company shall pay Buyer a termination fee of $20.88 million (representing 3.0% of the aggregate Merger Consideration)."
+    },
+    {
+     "id": "f041.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "If Aurora walks away for a Superior Proposal it owes Vertex a $20.88 million break fee, 3.0% of deal value."
+    },
+    {
+     "id": "f041.3",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "A termination by Buyer for Company breach triggers a $13.92 million fee, equal to 2.0% of the aggregate Merger Consideration."
+    },
+    {
+     "id": "f041.4",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "If the agreement is terminated for a Superior Proposal, Buyer shall pay the Company a termination fee of $20.88 million."
+    },
+    {
+     "id": "f041.5",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The termination fee payable on a Superior Proposal is $13.92 million."
+    },
+    {
+     "id": "f041.6",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The Company shall pay Buyer a termination fee of $28.08 million on a Superior Proposal."
+    },
+    {
+     "id": "f041.7",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The $20.88 million termination fee represents 2.0% of the aggregate Merger Consideration."
+    }
+   ]
+  },
+  {
+   "id": "f042",
+   "split": "test",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 8.1 — Survival of Representations",
+   "evidence": [
+    {
+     "source": "merger_agreement_v2_final.txt",
+     "excerpt": "shall survive the Closing for a period of eighteen (18) months, except that Fundamental Representations (Sections 3.1, 3.2, 3.5, 3.12) shall survive for thirty-six (36) months."
+    }
+   ],
+   "items": [
+    {
+     "id": "f042.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "General representations survive closing for 18 months; Fundamental Representations survive for 36 months."
+    },
+    {
+     "id": "f042.2",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Fundamental Representations survive for 18 months after Closing."
+    },
+    {
+     "id": "f042.3",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "General representations and warranties survive the Closing for thirty-six (36) months."
+    },
+    {
+     "id": "f042.4",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The representations and warranties of the Company survive the Closing for 24 months."
+    }
+   ]
+  },
+  {
+   "id": "f043",
+   "split": "dev",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 8.2 — Indemnification Cap",
+   "evidence": [
+    {
+     "source": "merger_agreement_v2_final.txt",
+     "excerpt": "shall not exceed $69.6 million (representing 10% of the aggregate Merger Consideration) (the \"General Cap\")."
+    }
+   ],
+   "items": [
+    {
+     "id": "f043.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Indemnification is capped at $69.6 million generally and at $174.0 million for Fundamental Representations."
+    },
+    {
+     "id": "f043.2",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "The General Cap of $69.6 million represents 10% of the aggregate Merger Consideration."
+    },
+    {
+     "id": "f043.3",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The General Cap on indemnification is $174.0 million."
+    },
+    {
+     "id": "f043.4",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The General Cap on indemnification is $96.6 million."
+    },
+    {
+     "id": "f043.5",
+     "label": "contradicted",
+     "kind": "derived",
+     "claim": "The General Cap of $69.6 million is 15% of the approximately $696 million aggregate Merger Consideration."
+    },
+    {
+     "id": "f043.6",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "For Fundamental Representations the cap is 10% of the aggregate Merger Consideration."
+    }
+   ]
+  },
+  {
+   "id": "f044",
+   "split": "test",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 8.3 — Deductible",
+   "evidence": [
+    {
+     "source": "merger_agreement_v2_final.txt",
+     "excerpt": "until the aggregate amount of Losses exceeds $3.48 million (representing 0.5% of the aggregate Merger Consideration) (the \"Deductible\"), after which the Company's stockholders shall be liable for all Losses from the first dollar."
+    }
+   ],
+   "items": [
+    {
+     "id": "f044.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Once losses pass the $3.48 million deductible, stockholders are liable from the first dollar."
+    },
+    {
+     "id": "f044.2",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "After the Deductible is exceeded, the stockholders are liable only for Losses in excess of $3.48 million."
+    },
+    {
+     "id": "f044.3",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The Deductible is $4.38 million."
+    },
+    {
+     "id": "f044.4",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The Deductible represents 5% of the aggregate Merger Consideration."
+    }
+   ]
+  },
+  {
+   "id": "f045",
+   "split": "dev",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 9.2 — Effect on Material Contracts",
+   "evidence": [
+    {
+     "source": "merger_agreement_v2_final.txt",
+     "excerpt": "(b) Technology License Agreement with Pacific Data Corp (annual value $8.7M) — counterparty has right to terminate within 90 days of Change of Control."
+    }
+   ],
+   "items": [
+    {
+     "id": "f045.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The Northstar Defense Systems master services agreement, worth $12.4M a year, requires 60-day notice and consent on a change of control."
+    },
+    {
+     "id": "f045.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Pacific Data Corp may terminate its $8.7M-a-year technology licence within 90 days of the Change of Control."
+    },
+    {
+     "id": "f045.3",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "The Amazon Web Services agreement gives the counterparty a right to terminate within 90 days of a Change of Control."
+    },
+    {
+     "id": "f045.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The Cloud Infrastructure Agreement with Amazon Web Services contains a change of control provision requiring consent."
+    },
+    {
+     "id": "f045.5",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The Technology License Agreement with Pacific Data Corp has an annual value of $12.4M."
+    }
+   ]
+  },
+  {
+   "id": "f046",
+   "split": "test",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 7.1 — Termination",
+   "evidence": [
+    {
+     "source": "merger_agreement_v2_final.txt",
+     "excerpt": "(d) by the Company to accept a Superior Proposal, subject to the payment of the Termination Fee."
+    }
+   ],
+   "items": [
+    {
+     "id": "f046.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The Company may terminate the agreement to accept a Superior Proposal, provided it pays the Termination Fee."
+    },
+    {
+     "id": "f046.2",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The Company may terminate to accept a Superior Proposal without paying any fee."
+    },
+    {
+     "id": "f046.3",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "Only the Buyer may terminate the agreement if the Merger has not closed by the Outside Date."
+    }
+   ]
+  },
+  {
+   "id": "f047",
+   "split": "dev",
+   "source": "board_deck_strategic_review_mar2024.txt",
+   "section": "SLIDE 2: MARKET CONTEXT",
+   "evidence": [
+    {
+     "source": "board_deck_strategic_review_mar2024.txt",
+     "excerpt": "Median EV/Revenue multiple for SaaS companies: 8.2x (down from 12.4x in 2021)"
+    }
+   ],
+   "items": [
+    {
+     "id": "f047.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "The median EV/Revenue multiple for SaaS companies is 8.2x, down from 12.4x in 2021."
+    },
+    {
+     "id": "f047.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Profitable SaaS companies trade at a median 22.5x EV/EBITDA."
+    },
+    {
+     "id": "f047.3",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The median EV/EBITDA multiple for profitable SaaS companies is 8.2x."
+    },
+    {
+     "id": "f047.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The median EV/Revenue multiple for SaaS companies rose from 8.2x in 2021 to 12.4x."
+    },
+    {
+     "id": "f047.5",
+     "label": "contradicted",
+     "kind": "unit",
+     "claim": "Private equity dry powder is at a record $2.6 billion."
+    },
+    {
+     "id": "f047.6",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The median EV/EBITDA multiple for profitable SaaS companies is 25.2x."
+    },
+    {
+     "id": "f047.7",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Private equity dry powder stands at a record $2.6 trillion."
+    }
+   ]
+  },
+  {
+   "id": "f048",
+   "split": "test",
+   "source": "board_deck_strategic_review_mar2024.txt",
+   "section": "SLIDE 2: MARKET CONTEXT",
+   "evidence": [
+    {
+     "source": "board_deck_strategic_review_mar2024.txt",
+     "excerpt": "Market leader: Palantir (18.4%), #2: Snowflake (12.1%)"
+    }
+   ],
+   "items": [
+    {
+     "id": "f048.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Aurora ranks third in enterprise data analytics with an estimated 8.2% share, behind Palantir (18.4%) and Snowflake (12.1%)."
+    },
+    {
+     "id": "f048.2",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "The SaaS mix rose 3.6 percentage points, from 38.3% to 41.9% of revenue."
+    },
+    {
+     "id": "f048.3",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "Snowflake is the market leader with 18.4% share, ahead of Palantir at 12.1%."
+    },
+    {
+     "id": "f048.4",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Aurora holds an estimated 12.1% market share in enterprise data analytics."
+    },
+    {
+     "id": "f048.5",
+     "label": "contradicted",
+     "kind": "derived",
+     "claim": "The SaaS mix rose 5.6 percentage points, from 38.3% to 41.9% of revenue."
+    }
+   ]
+  },
+  {
+   "id": "f049",
+   "split": "dev",
+   "source": "board_deck_strategic_review_mar2024.txt",
+   "section": "SLIDE 3: PRELIMINARY INDICATIONS OF INTEREST",
+   "evidence": [
+    {
+     "source": "board_deck_strategic_review_mar2024.txt",
+     "excerpt": "Party B — Meridian Software Corp (Strategic)"
+    }
+   ],
+   "items": [
+    {
+     "id": "f049.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Vertex Capital Partners offered $55 to $60 per share in cash, the highest range of the three bidders."
+    },
+    {
+     "id": "f049.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Meridian's $50 - $54 per share offer was 60% cash and 40% stock."
+    },
+    {
+     "id": "f049.3",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Atlas Data Holdings' financing was only partially committed, with an equity shortfall of roughly 30%."
+    },
+    {
+     "id": "f049.4",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "Meridian Software Corp offered $55 - $60 per share in cash."
+    },
+    {
+     "id": "f049.5",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Meridian Software Corp's offer was all cash."
+    },
+    {
+     "id": "f049.6",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Atlas Data Holdings offered $50 - $54 per share."
+    },
+    {
+     "id": "f049.7",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "Vertex Capital Partners estimated $45M of annual cost synergies by Year 3."
+    },
+    {
+     "id": "f049.8",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Atlas Data Holdings had fully committed financing."
+    },
+    {
+     "id": "f049.9",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "The Atlas Data Holdings bid carried moderate antitrust risk because of an overlapping customer base."
+    }
+   ]
+  },
+  {
+   "id": "f050",
+   "split": "test",
+   "source": "board_deck_strategic_review_mar2024.txt",
+   "section": "SLIDE 4: VALUATION ANALYSIS (Goldman Sachs)",
+   "evidence": [
+    {
+     "source": "board_deck_strategic_review_mar2024.txt",
+     "excerpt": "DCF (WACC 10.5%, TGR 3.0%) $47.00 $54.00 $63.00"
+    }
+   ],
+   "items": [
+    {
+     "id": "f050.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Goldman Sachs' DCF, using a 10.5% WACC and 3.0% terminal growth, implies $47.00 to $63.00 per share with a $54.00 midpoint."
+    },
+    {
+     "id": "f050.2",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "The Goldman Sachs Reference Range is $50.00 — $60.00 per share."
+    },
+    {
+     "id": "f050.3",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The DCF analysis implies a midpoint of $56.00 per share."
+    },
+    {
+     "id": "f050.4",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The DCF analysis uses a WACC of 9.5%."
+    },
+    {
+     "id": "f050.5",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The 52-week high share price was $41.20."
+    },
+    {
+     "id": "f050.6",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Aurora's shares traded at $41.20 on March 8, 2024, below the 52-week high of $44.12."
+    }
+   ]
+  },
+  {
+   "id": "f051",
+   "split": "dev",
+   "source": "board_deck_strategic_review_mar2024.txt",
+   "section": "SLIDE 4: VALUATION ANALYSIS (Goldman Sachs)",
+   "evidence": [
+    {
+     "source": "board_deck_strategic_review_mar2024.txt",
+     "excerpt": "Current Price (Mar 8, 2024): $41.20"
+    },
+    {
+     "source": "merger_agreement_v2_final.txt",
+     "excerpt": "converted into the right to receive $58.00 per share in cash"
+    }
+   ],
+   "items": [
+    {
+     "id": "f051.1",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "The $58.00 merger price is 40.8% above the March 8, 2024 share price of $41.20."
+    },
+    {
+     "id": "f051.2",
+     "label": "contradicted",
+     "kind": "derived",
+     "claim": "The $58.00 merger price is 48.0% above the March 8, 2024 share price of $41.20."
+    }
+   ]
+  },
+  {
+   "id": "f052",
+   "split": "test",
+   "source": "board_deck_strategic_review_mar2024.txt",
+   "section": "SLIDE 5: MANAGEMENT RECOMMENDATION",
+   "evidence": [
+    {
+     "source": "board_deck_strategic_review_mar2024.txt",
+     "excerpt": "1. PROCEED with Vertex Capital Partners as the preferred bidder"
+    }
+   ],
+   "items": [
+    {
+     "id": "f052.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Management and Goldman Sachs recommended proceeding with Vertex as preferred bidder while keeping Meridian engaged as a backup."
+    },
+    {
+     "id": "f052.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Management recommended declining the Atlas Data Holdings proposal because of its low price and uncommitted financing."
+    },
+    {
+     "id": "f052.3",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "Management recommended proceeding with Meridian Software as the preferred bidder."
+    },
+    {
+     "id": "f052.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Management recommended continuing negotiations with Atlas Data Holdings."
+    }
+   ]
+  },
+  {
+   "id": "f053",
+   "split": "dev",
+   "source": "board_deck_strategic_review_mar2024.txt",
+   "section": "BOARD RESOLUTION",
+   "evidence": [
+    {
+     "source": "board_deck_strategic_review_mar2024.txt",
+     "excerpt": "(4) Authorize management to negotiate within a price floor of $55.00 per share."
+    }
+   ],
+   "items": [
+    {
+     "id": "f053.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The Board unanimously authorized a 60-day exclusivity period for Vertex and a negotiating floor of $55.00 per share."
+    },
+    {
+     "id": "f053.2",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The Board authorized management to negotiate within a price floor of $50.00 per share."
+    },
+    {
+     "id": "f053.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The Board vote on the resolution was split, with two directors dissenting."
+    },
+    {
+     "id": "f053.4",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "The Board granted Meridian Software Corp a 60-day exclusivity period."
+    }
+   ]
+  },
+  {
+   "id": "f054",
+   "split": "test",
+   "source": "board_deck_strategic_review_mar2024.txt",
+   "section": "SPEAKER NOTES",
+   "evidence": [
+    {
+     "source": "board_deck_strategic_review_mar2024.txt",
+     "excerpt": "Board member David Park raised concerns about customer concentration risk"
+    }
+   ],
+   "items": [
+    {
+     "id": "f054.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Director David Park asked management for a sensitivity analysis on losing the top 3 customers."
+    },
+    {
+     "id": "f054.2",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "CFO Sarah Chen raised concerns about customer concentration risk and requested a sensitivity analysis."
+    },
+    {
+     "id": "f054.3",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The CTO retention package is $4.5M."
+    },
+    {
+     "id": "f054.4",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The CTO retention package is $5.4M."
+    }
+   ]
+  },
+  {
+   "id": "f055",
+   "split": "dev",
+   "source": "credit_agreement_summary.txt",
+   "section": "SECTION 1: OUTSTANDING INDEBTEDNESS",
+   "evidence": [
+    {
+     "source": "credit_agreement_summary.txt",
+     "excerpt": "Total Debt $91.4"
+    }
+   ],
+   "items": [
+    {
+     "id": "f055.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Total Debt was $91.4 million as of December 31, 2023, including $85.0 million drawn on the revolving credit facility."
+    },
+    {
+     "id": "f055.2",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Total debt of $91.4 million comprises the $85.0 million revolver balance and $6.4 million of capital lease obligations."
+    },
+    {
+     "id": "f055.3",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Net debt of $20.6 million is total debt of $91.4 million less cash of $70.8 million."
+    },
+    {
+     "id": "f055.4",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Capital lease obligations were $85.0 million as of December 31, 2023."
+    },
+    {
+     "id": "f055.5",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Total Debt was $94.1 million as of December 31, 2023."
+    },
+    {
+     "id": "f055.6",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Aurora voluntarily paid down $25.0 million of the revolver in Q4 FY2023."
+    },
+    {
+     "id": "f055.7",
+     "label": "contradicted",
+     "kind": "period",
+     "claim": "Aurora voluntarily paid down $25.0 million of the revolver in Q2 FY2023."
+    },
+    {
+     "id": "f055.8",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The Company increased its leverage materially during FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f056",
+   "split": "test",
+   "source": "credit_agreement_summary.txt",
+   "section": "SECTION 2: REVOLVING CREDIT FACILITY",
+   "evidence": [
+    {
+     "source": "credit_agreement_summary.txt",
+     "excerpt": "Commitment Fee: 35 basis points on the undrawn portion"
+    }
+   ],
+   "items": [
+    {
+     "id": "f056.1",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Of the $150 million commitment, $85 million is drawn, leaving $65 million available."
+    },
+    {
+     "id": "f056.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Undrawn amounts carry a commitment fee of 35 basis points."
+    },
+    {
+     "id": "f056.3",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "The commitment fee on the undrawn portion is 0.35%."
+    },
+    {
+     "id": "f056.4",
+     "label": "contradicted",
+     "kind": "unit",
+     "claim": "The commitment fee is 35% on the undrawn portion."
+    },
+    {
+     "id": "f056.5",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The commitment fee is 225 basis points on the undrawn portion."
+    },
+    {
+     "id": "f056.6",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "Wells Fargo Bank, N.A. is the Administrative Agent and Lead Arranger."
+    },
+    {
+     "id": "f056.7",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The revolver is secured by a first priority lien on substantially all assets, including a pledge of intellectual property."
+    },
+    {
+     "id": "f056.8",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The revolving credit facility is unsecured."
+    },
+    {
+     "id": "f056.9",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "$65 million of the facility was drawn as of December 31, 2023."
+    }
+   ]
+  },
+  {
+   "id": "f057",
+   "split": "dev",
+   "source": "credit_agreement_summary.txt",
+   "section": "SECTION 2: REVOLVING CREDIT FACILITY",
+   "evidence": [
+    {
+     "source": "credit_agreement_summary.txt",
+     "excerpt": "The Company is currently billed at 225 basis points."
+    }
+   ],
+   "items": [
+    {
+     "id": "f057.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Aurora is still billed at 225 basis points although its leverage may entitle it to 175 basis points, a saving of roughly $425,000 a year."
+    },
+    {
+     "id": "f057.2",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "A re-grid from 225 to 175 basis points would reduce the applicable margin by 50 basis points."
+    },
+    {
+     "id": "f057.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Management has requested a re-grid following the FY2023 deleveraging."
+    },
+    {
+     "id": "f057.4",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The re-grid would represent approximately $452,000 of annual interest saving."
+    },
+    {
+     "id": "f057.5",
+     "label": "contradicted",
+     "kind": "derived",
+     "claim": "A re-grid from 225 to 175 basis points would reduce the applicable margin by 75 basis points."
+    },
+    {
+     "id": "f057.6",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The Company is currently billed at 175 basis points."
+    }
+   ]
+  },
+  {
+   "id": "f058",
+   "split": "test",
+   "source": "credit_agreement_summary.txt",
+   "section": "SECTION 3: FINANCIAL COVENANTS",
+   "evidence": [
+    {
+     "source": "credit_agreement_summary.txt",
+     "excerpt": "Maximum Total Net Leverage Ratio 3.50x"
+    }
+   ],
+   "items": [
+    {
+     "id": "f058.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Net leverage of 0.22x at year-end 2023 sits far below the 3.50x covenant maximum, leaving 3.28x of headroom."
+    },
+    {
+     "id": "f058.2",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Headroom on the leverage covenant is 3.28x, the 3.50x maximum less actual leverage of 0.22x."
+    },
+    {
+     "id": "f058.3",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Liquidity of $135.8 million comfortably exceeds the $25 million minimum."
+    },
+    {
+     "id": "f058.4",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The actual fixed charge coverage ratio at December 31, 2023 was 1.25x."
+    },
+    {
+     "id": "f058.5",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The Company breached the minimum fixed charge coverage covenant at December 31, 2023."
+    },
+    {
+     "id": "f058.6",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Actual liquidity at December 31, 2023 was $153.8 million."
+    },
+    {
+     "id": "f058.7",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "No waiver or amendment has been requested or granted."
+    },
+    {
+     "id": "f058.8",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "A covenant waiver was granted to the Company during FY2023."
+    },
+    {
+     "id": "f058.9",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The maximum total net leverage ratio permitted by the covenant is 6.84x."
+    }
+   ]
+  },
+  {
+   "id": "f059",
+   "split": "dev",
+   "source": "credit_agreement_summary.txt",
+   "section": "SECTION 4: CHANGE OF CONTROL AND THE TRANSACTION",
+   "evidence": [
+    {
+     "source": "credit_agreement_summary.txt",
+     "excerpt": "Consequence for the transaction: the full $85 million drawn balance must be repaid at closing."
+    }
+   ],
+   "items": [
+    {
+     "id": "f059.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The merger is a change of control under the credit agreement, so the $85 million drawn balance must be repaid at closing."
+    },
+    {
+     "id": "f059.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Breakage costs are estimated at under $50,000."
+    },
+    {
+     "id": "f059.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "A prepayment penalty applies when the facility is repaid at closing."
+    },
+    {
+     "id": "f059.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The Company has obtained a waiver from the lending syndicate for the change of control."
+    },
+    {
+     "id": "f059.5",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "An Event of Default is triggered when any person acquires more than 45% of the voting equity of the Company."
+    },
+    {
+     "id": "f059.6",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Acquiring more than 35% of the Company's voting equity is an Event of Default under Section 8.1(k)."
+    }
+   ]
+  },
+  {
+   "id": "f060",
+   "split": "test",
+   "source": "credit_agreement_summary.txt",
+   "section": "SECTION 5: NEGATIVE COVENANTS OF NOTE",
+   "evidence": [
+    {
+     "source": "credit_agreement_summary.txt",
+     "excerpt": "Make restricted payments (including dividends) in excess of $10 million per fiscal year;"
+    }
+   ],
+   "items": [
+    {
+     "id": "f060.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Without lender consent the Company may not incur more than $15 million of additional debt or pay more than $10 million of dividends a year."
+    },
+    {
+     "id": "f060.2",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Restricted payments are capped at $20 million per fiscal year."
+    },
+    {
+     "id": "f060.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The negative covenants prevent the Company from entering into the merger agreement."
+    },
+    {
+     "id": "f060.4",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The negative covenants restrict operations pending closing but not the Company's ability to sign the merger agreement."
+    }
+   ]
+  },
+  {
+   "id": "f061",
+   "split": "dev",
+   "source": "credit_agreement_summary.txt",
+   "section": "SECTION 6: CAPITAL LEASES AND OTHER OBLIGATIONS",
+   "evidence": [
+    {
+     "source": "credit_agreement_summary.txt",
+     "excerpt": "Operating lease commitments (not included in debt) total $34.7 million over the remaining terms"
+    }
+   ],
+   "items": [
+    {
+     "id": "f061.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Operating lease commitments total $34.7 million, mostly the San Jose headquarters lease that runs to 2029."
+    },
+    {
+     "id": "f061.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The lessor has indicated in writing that consent to the change of control will be granted on customary notice."
+    },
+    {
+     "id": "f061.3",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Capital lease obligations total $34.7 million."
+    },
+    {
+     "id": "f061.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Operating lease commitments are included in total debt."
+    },
+    {
+     "id": "f061.5",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The lessor has refused to consent to the change of control."
+    }
+   ]
+  },
+  {
+   "id": "f062",
+   "split": "test",
+   "source": "customer_contracts_schedule.txt",
+   "section": "SECTION 1: TOP TEN CUSTOMERS BY FY2023 REVENUE",
+   "evidence": [
+    {
+     "source": "customer_contracts_schedule.txt",
+     "excerpt": "The single largest customer, Northstar Financial Group, represents 12.0% of total revenue."
+    }
+   ],
+   "items": [
+    {
+     "id": "f062.1",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "The single largest customer, Northstar Financial Group, represents 12.0% of total revenue."
+    },
+    {
+     "id": "f062.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Northstar Financial Group is Aurora's biggest customer at $54.3M of FY2023 revenue (12.0% of the total)."
+    },
+    {
+     "id": "f062.3",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "The top ten customers represent 47.8% of FY2023 revenue."
+    },
+    {
+     "id": "f062.4",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "Pacific Data Systems is the largest customer, with $54.3M of FY2023 revenue."
+    },
+    {
+     "id": "f062.5",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Pacific Data Systems accounted for 12.0% of FY2023 revenue."
+    },
+    {
+     "id": "f062.6",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The top ten customers represent 74.8% of FY2023 revenue."
+    },
+    {
+     "id": "f062.7",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Several customers each exceed 10% of total revenue."
+    },
+    {
+     "id": "f062.8",
+     "label": "contradicted",
+     "kind": "period",
+     "claim": "The Northstar Financial Group contract ends on Dec 31, 2025."
+    }
+   ]
+  },
+  {
+   "id": "f063",
+   "split": "dev",
+   "source": "customer_contracts_schedule.txt",
+   "section": "SECTION 2: CHANGE OF CONTROL PROVISIONS",
+   "evidence": [
+    {
+     "source": "customer_contracts_schedule.txt",
+     "excerpt": "Northstar Financial Group + Pacific Data Systems = $92.8 million (20.5% of FY2023 revenue)."
+    }
+   ],
+   "items": [
+    {
+     "id": "f063.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Northstar's consent has not yet been obtained; it must be given in writing at least 30 days before closing and may not be unreasonably withheld."
+    },
+    {
+     "id": "f063.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Ironbridge's consent requirement does not apply because Vertex is a financial sponsor rather than a competitor."
+    },
+    {
+     "id": "f063.3",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "The two consent-based contracts total $92.8 million: $54.3M from Northstar plus $38.5M from Pacific Data Systems."
+    },
+    {
+     "id": "f063.4",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Cascade Logistics Corp requires only 60 days' written notice and has no termination right."
+    },
+    {
+     "id": "f063.5",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Northstar Financial Group's consent has already been obtained."
+    },
+    {
+     "id": "f063.6",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "Northstar Financial Group has an absolute right to withhold consent in its sole discretion."
+    },
+    {
+     "id": "f063.7",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Vertex Capital Partners is a competitor of Ironbridge Manufacturing, so Ironbridge's consent is required."
+    },
+    {
+     "id": "f063.8",
+     "label": "contradicted",
+     "kind": "derived",
+     "claim": "The two consent-based contracts total $98.2 million: $54.3M from Northstar plus $38.5M from Pacific Data Systems."
+    },
+    {
+     "id": "f063.9",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "Delta Ridge Energy's contract requires written consent to a change of control."
+    }
+   ]
+  },
+  {
+   "id": "f064",
+   "split": "test",
+   "source": "customer_contracts_schedule.txt",
+   "section": "SECTION 3: MOST FAVORED NATION AND PRICING PROVISIONS",
+   "evidence": [
+    {
+     "source": "customer_contracts_schedule.txt",
+     "excerpt": "Pacific Data Systems holds a price protection clause capping annual increases at 3% through the contract term ending June 30, 2025."
+    }
+   ],
+   "items": [
+    {
+     "id": "f064.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Northstar holds an MFN clause entitling it to the lowest per-seat rate given to any comparable-volume customer."
+    },
+    {
+     "id": "f064.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Pacific Data Systems' price increases are capped at 3% a year until its contract ends on June 30, 2025."
+    },
+    {
+     "id": "f064.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Management acknowledges that the MFN clause has been triggered."
+    },
+    {
+     "id": "f064.4",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "Pacific Data Systems holds the most favored nation pricing clause."
+    },
+    {
+     "id": "f064.5",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Pacific Data Systems holds a price protection clause capping annual increases at 5%."
+    },
+    {
+     "id": "f064.6",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The Continental Retail Group arrangement was priced 3% below the Northstar rate."
+    },
+    {
+     "id": "f064.7",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Counsel's position on the MFN clause has been tested with and accepted by the customer."
+    }
+   ]
+  },
+  {
+   "id": "f065",
+   "split": "dev",
+   "source": "customer_contracts_schedule.txt",
+   "section": "SECTION 4: RENEWAL AND CHURN EXPOSURE",
+   "evidence": [
+    {
+     "source": "customer_contracts_schedule.txt",
+     "excerpt": "Total at renewal risk $90.5M (20.0% of FY2023 revenue)"
+    }
+   ],
+   "items": [
+    {
+     "id": "f065.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Contracts worth $90.5M, 20.0% of FY2023 revenue, expire within 18 months of the expected closing."
+    },
+    {
+     "id": "f065.2",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "The $90.5M at renewal risk is the sum of Delta Ridge ($12.2M), Pacific Data Systems ($38.5M), Cascade Logistics ($21.7M) and Ironbridge ($18.1M)."
+    },
+    {
+     "id": "f065.3",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Contracts of this size have historically renewed at 91% by revenue."
+    },
+    {
+     "id": "f065.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Delta Ridge Energy has given written notice of non-renewal."
+    },
+    {
+     "id": "f065.5",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The historical renewal rate for contracts of this size is 81% by revenue."
+    },
+    {
+     "id": "f065.6",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The total at renewal risk is $92.8M."
+    },
+    {
+     "id": "f065.7",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Delta Ridge Energy has said verbally that it plans to run a competitive RFP before renewing."
+    }
+   ]
+  },
+  {
+   "id": "f066",
+   "split": "test",
+   "source": "customer_contracts_schedule.txt",
+   "section": "SECTION 5: SERVICE LEVEL COMMITMENTS AND PENALTIES",
+   "evidence": [
+    {
+     "source": "customer_contracts_schedule.txt",
+     "excerpt": "During FY2023 the Company recorded $0.6 million in service credits, all attributable to a single incident in August 2023 affecting the Meridian Health Networks environment."
+    }
+   ],
+   "items": [
+    {
+     "id": "f066.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Service credits of $0.6 million were recorded in FY2023, all from one August 2023 incident affecting Meridian Health Networks."
+    },
+    {
+     "id": "f066.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The Northstar and Meridian contracts carry a 99.95% monthly uptime commitment, with service credits of up to 15% of monthly fees."
+    },
+    {
+     "id": "f066.3",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The uptime service level agreement is 99.5% measured monthly."
+    },
+    {
+     "id": "f066.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "A customer exercised its termination right as a result of the August 2023 incident."
+    },
+    {
+     "id": "f066.5",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "The August 2023 incident affected the Northstar Financial Group environment."
+    },
+    {
+     "id": "f066.6",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "During FY2023 the Company recorded $6.0 million in service credits."
+    }
+   ]
+  },
+  {
+   "id": "f067",
+   "split": "dev",
+   "source": "employment_and_retention_agreements.txt",
+   "section": "SECTION 1: EXECUTIVE COMPENSATION SUMMARY (FY2023)",
+   "evidence": [
+    {
+     "source": "employment_and_retention_agreements.txt",
+     "excerpt": "Elena Marsh Chief Executive Officer $625,000 $437,500 $8,120,000"
+    }
+   ],
+   "items": [
+    {
+     "id": "f067.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "CEO Elena Marsh earned a base salary of $625,000 and a cash bonus of $437,500 in FY2023."
+    },
+    {
+     "id": "f067.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The five named executives hold equity worth $22.0 million at the $58.00 deal price."
+    },
+    {
+     "id": "f067.3",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Elena Marsh's total cash compensation was $1,062,500, a base salary of $625,000 plus a cash bonus of $437,500."
+    },
+    {
+     "id": "f067.4",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "CTO Dr. James Wu earned a base salary of $625,000 in FY2023."
+    },
+    {
+     "id": "f067.5",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "Robert Chen is the Chief Executive Officer."
+    },
+    {
+     "id": "f067.6",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Elena Marsh's equity value is $8,210,000."
+    },
+    {
+     "id": "f067.7",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Elena Marsh's cash bonus was $324,000 in FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f068",
+   "split": "test",
+   "source": "employment_and_retention_agreements.txt",
+   "section": "SECTION 2: CHANGE OF CONTROL SEVERANCE",
+   "evidence": [
+    {
+     "source": "employment_and_retention_agreements.txt",
+     "excerpt": "Total Potential Parachute Cost $9,065,750 $11,545,000 $20,610,750"
+    }
+   ],
+   "items": [
+    {
+     "id": "f068.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Severance is double trigger: it is paid only on a termination without cause or a good-reason resignation within 24 months of the change of control."
+    },
+    {
+     "id": "f068.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "If all five executives were terminated at closing, the parachute cost would be about $20.6 million."
+    },
+    {
+     "id": "f068.3",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Elena Marsh's total parachute payment of $7,447,500 is the sum of cash severance of $3,187,500 and equity acceleration of $4,260,000."
+    },
+    {
+     "id": "f068.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The severance agreements are single trigger, payable automatically upon the change of control."
+    },
+    {
+     "id": "f068.5",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Dr. James Wu's severance multiple is 3.0x."
+    },
+    {
+     "id": "f068.6",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The total potential parachute cost is $26,010,750."
+    },
+    {
+     "id": "f068.7",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Elena Marsh's total parachute payment of $7,744,500 is the sum of cash severance of $3,187,500 and equity acceleration of $4,260,000."
+    },
+    {
+     "id": "f068.8",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Total cash severance across the five executives is $11,545,000."
+    }
+   ]
+  },
+  {
+   "id": "f069",
+   "split": "dev",
+   "source": "employment_and_retention_agreements.txt",
+   "section": "SECTION 2: CHANGE OF CONTROL SEVERANCE",
+   "evidence": [
+    {
+     "source": "employment_and_retention_agreements.txt",
+     "excerpt": "The Company has NOT obtained a shareholder cleansing vote. Estimated excise tax exposure is $2.4 million."
+    }
+   ],
+   "items": [
+    {
+     "id": "f069.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "No shareholder cleansing vote has been obtained, and the estimated Section 280G excise tax exposure is $2.4 million."
+    },
+    {
+     "id": "f069.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Marsh, Wu and Chen are expected to exceed the Section 280G safe harbour."
+    },
+    {
+     "id": "f069.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The Company has obtained a shareholder cleansing vote under Section 280G."
+    },
+    {
+     "id": "f069.4",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "The merger agreement allocates the excise tax cost to the Buyer."
+    },
+    {
+     "id": "f069.5",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Estimated excise tax exposure is $4.2 million."
+    },
+    {
+     "id": "f069.6",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "Raghavan and Delgado are expected to exceed the Section 280G safe harbour."
+    }
+   ]
+  },
+  {
+   "id": "f070",
+   "split": "test",
+   "source": "employment_and_retention_agreements.txt",
+   "section": "SECTION 3: RETENTION POOL",
+   "evidence": [
+    {
+     "source": "employment_and_retention_agreements.txt",
+     "excerpt": "The Board approved a retention pool of $6,500,000 on March 1, 2024"
+    }
+   ],
+   "items": [
+    {
+     "id": "f070.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "A $6.5 million retention pool for 77 non-executive employees was approved on March 1, 2024."
+    },
+    {
+     "id": "f070.2",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Engineering (41 employees) receives $3,900,000 of the retention pool."
+    },
+    {
+     "id": "f070.3",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "Engineering's $3,900,000 allocation is 60% of the $6,500,000 retention pool."
+    },
+    {
+     "id": "f070.4",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Customer Success receives $3,900,000 of the retention pool."
+    },
+    {
+     "id": "f070.5",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The retention pool is deducted from the merger consideration."
+    },
+    {
+     "id": "f070.6",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Retention payments vest in full at closing."
+    },
+    {
+     "id": "f070.7",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "The retention pool is funded by the Buyer."
+    },
+    {
+     "id": "f070.8",
+     "label": "contradicted",
+     "kind": "derived",
+     "claim": "Engineering's $3,900,000 allocation is 40% of the $6,500,000 retention pool."
+    }
+   ]
+  },
+  {
+   "id": "f071",
+   "split": "dev",
+   "source": "employment_and_retention_agreements.txt",
+   "section": "SECTION 4: KEY PERSON DEPENDENCY",
+   "evidence": [
+    {
+     "source": "employment_and_retention_agreements.txt",
+     "excerpt": "Dr. Wu has NOT executed a post-closing employment agreement with Vertex Capital Partners."
+    }
+   ],
+   "items": [
+    {
+     "id": "f071.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Dr. Wu has not signed a post-closing employment agreement with Vertex, which the Buyer views as a material integration risk."
+    },
+    {
+     "id": "f071.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Elena Marsh plans to leave at closing, so her severance is expected to be triggered."
+    },
+    {
+     "id": "f071.3",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Dr. Wu's willingness to stay for at least 12 months is verbal only and has not been documented."
+    },
+    {
+     "id": "f071.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Dr. Wu has executed a post-closing employment agreement with Vertex Capital Partners."
+    },
+    {
+     "id": "f071.5",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "Dr. James Wu has indicated he intends to depart at closing."
+    },
+    {
+     "id": "f071.6",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Dr. Wu's non-competition covenant is clearly enforceable in California."
+    },
+    {
+     "id": "f071.7",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Dr. Wu is bound by a 12-month non-compete and a 24-month non-solicitation covenant."
+    }
+   ]
+  },
+  {
+   "id": "f072",
+   "split": "test",
+   "source": "employment_and_retention_agreements.txt",
+   "section": "SECTION 5: EQUITY PLAN TREATMENT",
+   "evidence": [
+    {
+     "source": "employment_and_retention_agreements.txt",
+     "excerpt": "Total equity plan cost at closing across all holders: $15,725,000."
+    }
+   ],
+   "items": [
+    {
+     "id": "f072.1",
+     "label": "supported",
+     "kind": "derived",
+     "claim": "The total equity plan cost of $15,725,000 comprises $11,545,000 for named executives and $4,180,000 for all other employees."
+    },
+    {
+     "id": "f072.2",
+     "label": "supported",
+     "kind": "verbatim",
+     "claim": "Total equity plan cost at closing across all holders is $15,725,000."
+    },
+    {
+     "id": "f072.3",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The acceleration cost for all other employees is $11,545,000."
+    },
+    {
+     "id": "f072.4",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Total equity plan cost at closing across all holders is $17,525,000."
+    }
+   ]
+  },
+  {
+   "id": "f073",
+   "split": "dev",
+   "source": "employment_and_retention_agreements.txt",
+   "section": "SECTION 6: WORKFORCE SUMMARY",
+   "evidence": [
+    {
+     "source": "employment_and_retention_agreements.txt",
+     "excerpt": "Voluntary attrition in engineering was 11.4% in FY2023, against a peer benchmark of 13.2%."
+    }
+   ],
+   "items": [
+    {
+     "id": "f073.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Engineering attrition of 11.4% in FY2023 was better than the 13.2% peer benchmark."
+    },
+    {
+     "id": "f073.2",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Voluntary attrition in engineering was 13.2% in FY2023, above the peer benchmark of 11.4%."
+    },
+    {
+     "id": "f073.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Part of the workforce is covered by a collective bargaining agreement."
+    },
+    {
+     "id": "f073.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Further headcount reductions are planned."
+    },
+    {
+     "id": "f073.5",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Aurora has no union or collective bargaining arrangements."
+    }
+   ]
+  },
+  {
+   "id": "f074",
+   "split": "test",
+   "source": "ip_portfolio_and_litigation_schedule.txt",
+   "section": "SECTION 1: PATENT PORTFOLIO",
+   "evidence": [
+    {
+     "source": "ip_portfolio_and_litigation_schedule.txt",
+     "excerpt": "Annual maintenance and prosecution cost: approximately $840,000."
+    }
+   ],
+   "items": [
+    {
+     "id": "f074.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Maintaining and prosecuting the patent portfolio costs about $840,000 a year."
+    },
+    {
+     "id": "f074.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "All 12 patents naming Dr. Wu as sole or first inventor are in the real-time data reconciliation area."
+    },
+    {
+     "id": "f074.3",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Annual maintenance and prosecution cost is approximately $480,000."
+    },
+    {
+     "id": "f074.4",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "The patents naming Dr. Wu as inventor are all within the data visualization area."
+    }
+   ]
+  },
+  {
+   "id": "f075",
+   "split": "dev",
+   "source": "ip_portfolio_and_litigation_schedule.txt",
+   "section": "SECTION 2: THE DATAFLOW SYSTEMS LITIGATION",
+   "evidence": [
+    {
+     "source": "ip_portfolio_and_litigation_schedule.txt",
+     "excerpt": "A licensing settlement in the range of $4 million to $6 million is considered the most likely outcome."
+    }
+   ],
+   "items": [
+    {
+     "id": "f075.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "DataFlow sued on September 14, 2023, alleging that Aurora's real-time data reconciliation engine infringes two of its patents."
+    },
+    {
+     "id": "f075.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The most likely outcome is a licensing settlement of $4 million to $6 million."
+    },
+    {
+     "id": "f075.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Aurora's motion to dismiss was granted in full on January 8, 2024."
+    },
+    {
+     "id": "f075.4",
+     "label": "contradicted",
+     "kind": "period",
+     "claim": "The claim construction (Markman) hearing is scheduled for August 2025."
+    },
+    {
+     "id": "f075.5",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "A trial date has been set for Q3 2025."
+    },
+    {
+     "id": "f075.6",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Counsel assesses the probability of an injunction as high."
+    },
+    {
+     "id": "f075.7",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "A licensing settlement in the range of $3.5 million to $8.0 million is considered the most likely outcome."
+    },
+    {
+     "id": "f075.8",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "Legal fees of $3.8 million were incurred in FY2023 in connection with the DataFlow matter."
+    }
+   ]
+  },
+  {
+   "id": "f076",
+   "split": "test",
+   "source": "ip_portfolio_and_litigation_schedule.txt",
+   "section": "SECTION 3: OTHER LITIGATION AND CLAIMS",
+   "evidence": [
+    {
+     "source": "ip_portfolio_and_litigation_schedule.txt",
+     "excerpt": "approximately EUR 310,000 of disputed commissions"
+    }
+   ],
+   "items": [
+    {
+     "id": "f076.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "A former employee, Hartley, is demanding $450,000 for wrongful termination; counsel puts exposure below $150,000."
+    },
+    {
+     "id": "f076.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "A former EMEA reseller disputes about EUR 310,000 of commissions, against which Aurora has accrued EUR 180,000."
+    },
+    {
+     "id": "f076.3",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Counsel assesses the Hartley exposure at $450,000."
+    },
+    {
+     "id": "f076.4",
+     "label": "contradicted",
+     "kind": "unit",
+     "claim": "A former EMEA reseller disputes approximately $310,000 of commissions."
+    },
+    {
+     "id": "f076.5",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "The Company has accrued EUR 310,000 for the reseller dispute."
+    },
+    {
+     "id": "f076.6",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Proceedings have been commenced by the former reseller."
+    },
+    {
+     "id": "f076.7",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The Company has received a civil investigative demand."
+    },
+    {
+     "id": "f076.8",
+     "label": "contradicted",
+     "kind": "period",
+     "claim": "Mediation in the Hartley matter is scheduled for May 2025."
+    }
+   ]
+  },
+  {
+   "id": "f077",
+   "split": "dev",
+   "source": "ip_portfolio_and_litigation_schedule.txt",
+   "section": "SECTION 4: OPEN SOURCE SOFTWARE",
+   "evidence": [
+    {
+     "source": "ip_portfolio_and_litigation_schedule.txt",
+     "excerpt": "Estimated remediation cost: $340,000, targeted for completion in Q3 2024."
+    }
+   ],
+   "items": [
+    {
+     "id": "f077.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Of 1,847 open source components identified, 1,792 carry permissive licences."
+    },
+    {
+     "id": "f077.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Replacing the AGPL-licensed graph rendering library is expected to cost $340,000 and finish in Q3 2024."
+    },
+    {
+     "id": "f077.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The GPL-licensed database driver is distributed to customers."
+    },
+    {
+     "id": "f077.4",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "The AGPL-licensed component is used only in an internal build tool."
+    },
+    {
+     "id": "f077.5",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The estimated remediation cost for the AGPL component is $430,000."
+    },
+    {
+     "id": "f077.6",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "1,847 of the open source components carry permissive licences."
+    }
+   ]
+  },
+  {
+   "id": "f078",
+   "split": "test",
+   "source": "ip_portfolio_and_litigation_schedule.txt",
+   "section": "SECTION 6: IP ASSIGNMENT COVERAGE",
+   "evidence": [
+    {
+     "source": "ip_portfolio_and_litigation_schedule.txt",
+     "excerpt": "The work performed related to internal tooling, not to any patented technology or customer-facing product."
+    }
+   ],
+   "items": [
+    {
+     "id": "f078.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Assignment agreements could not be located for 3 former contractors, whose work concerned internal tooling rather than patented technology."
+    },
+    {
+     "id": "f078.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "All domain registrations are held in the Company's own name."
+    },
+    {
+     "id": "f078.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The former contractors' work related to patented technology."
+    },
+    {
+     "id": "f078.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Some domain registrations are held in the name of an employee."
+    },
+    {
+     "id": "f078.5",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Every current employee has signed a proprietary information and invention assignment agreement."
+    }
+   ]
+  },
+  {
+   "id": "f079",
+   "split": "dev",
+   "source": "regulatory_and_data_privacy_memo.txt",
+   "section": "HART-SCOTT-RODINO (UNITED STATES)",
+   "evidence": [
+    {
+     "source": "regulatory_and_data_privacy_memo.txt",
+     "excerpt": "The transaction is reportable under the Hart-Scott-Rodino Antitrust Improvements Act."
+    }
+   ],
+   "items": [
+    {
+     "id": "f079.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The deal requires an HSR filing, with a $260,000 filing fee borne entirely by the Buyer."
+    },
+    {
+     "id": "f079.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Vertex has no existing portfolio company in enterprise data analytics, so there is no horizontal overlap."
+    },
+    {
+     "id": "f079.3",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The HSR filing was submitted on March 20, 2024 and the initial waiting period expires on April 19, 2024 absent a Second Request."
+    },
+    {
+     "id": "f079.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The transaction is not reportable under the Hart-Scott-Rodino Act."
+    },
+    {
+     "id": "f079.5",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "The Company pays 100% of the HSR filing fee."
+    },
+    {
+     "id": "f079.6",
+     "label": "contradicted",
+     "kind": "figure",
+     "claim": "The HSR filing fee is $280,000."
+    },
+    {
+     "id": "f079.7",
+     "label": "contradicted",
+     "kind": "period",
+     "claim": "The HSR filing was submitted on March 20, 2023."
+    },
+    {
+     "id": "f079.8",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Counsel assesses the probability of a Second Request as high."
+    }
+   ]
+  },
+  {
+   "id": "f080",
+   "split": "test",
+   "source": "regulatory_and_data_privacy_memo.txt",
+   "section": "FOREIGN MERGER CONTROL",
+   "evidence": [
+    {
+     "source": "regulatory_and_data_privacy_memo.txt",
+     "excerpt": "Aurora's German turnover of EUR 14.2 million is below the EUR 17.5 million domestic threshold."
+    }
+   ],
+   "items": [
+    {
+     "id": "f080.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "No German filing is needed: Aurora's German turnover of EUR 14.2 million falls short of the EUR 17.5 million threshold."
+    },
+    {
+     "id": "f080.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "No foreign investment or national security filing is required."
+    },
+    {
+     "id": "f080.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "A merger control filing is required in Germany."
+    },
+    {
+     "id": "f080.4",
+     "label": "contradicted",
+     "kind": "misattributed",
+     "claim": "Aurora's German turnover is EUR 17.5 million."
+    },
+    {
+     "id": "f080.5",
+     "label": "contradicted",
+     "kind": "unit",
+     "claim": "Aurora's German turnover is $14.2 million."
+    },
+    {
+     "id": "f080.6",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Aurora holds government contracts requiring a facility security clearance."
+    }
+   ]
+  },
+  {
+   "id": "f081",
+   "split": "dev",
+   "source": "regulatory_and_data_privacy_memo.txt",
+   "section": "SECTION 2: DATA PRIVACY POSTURE",
+   "evidence": [
+    {
+     "source": "regulatory_and_data_privacy_memo.txt",
+     "excerpt": "Aurora is NOT self-certified under the Data Privacy Framework and relies on SCCs plus supplementary measures."
+    }
+   ],
+   "items": [
+    {
+     "id": "f081.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Aurora relies on Standard Contractual Clauses rather than Data Privacy Framework self-certification."
+    },
+    {
+     "id": "f081.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "There have been no reportable personal data breaches in the last 3 years."
+    },
+    {
+     "id": "f081.3",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The Business Associate Agreement with Meridian Health Networks has no assignment restriction and survives a change of control."
+    },
+    {
+     "id": "f081.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Aurora is self-certified under the EU-US Data Privacy Framework."
+    },
+    {
+     "id": "f081.5",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "Aurora acts as a controller for the personal data it processes on behalf of customers."
+    },
+    {
+     "id": "f081.6",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Aurora sells personal information as that term is defined under the CCPA."
+    },
+    {
+     "id": "f081.7",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The Business Associate Agreement terminates automatically on a change of control."
+    }
+   ]
+  },
+  {
+   "id": "f082",
+   "split": "test",
+   "source": "regulatory_and_data_privacy_memo.txt",
+   "section": "SECTION 3: SECURITY CERTIFICATIONS AND INCIDENTS",
+   "evidence": [
+    {
+     "source": "regulatory_and_data_privacy_memo.txt",
+     "excerpt": "The environment contained synthetic test data only. No personal data or customer data was exposed."
+    }
+   ],
+   "items": [
+    {
+     "id": "f082.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The August 2023 incident involved a misconfigured non-production storage bucket holding only synthetic test data; no personal or customer data was exposed."
+    },
+    {
+     "id": "f082.2",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "The FY2023 penetration test found 2 medium-severity issues, both fixed within the 30-day SLA, and nothing high or critical."
+    },
+    {
+     "id": "f082.3",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Customer data was exposed in the August 2023 security incident."
+    },
+    {
+     "id": "f082.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The FY2023 penetration test identified critical findings."
+    },
+    {
+     "id": "f082.5",
+     "label": "contradicted",
+     "kind": "period",
+     "claim": "The ISO 27001 certification is valid through October 2026."
+    },
+    {
+     "id": "f082.6",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The August 2023 security incident caused the service credit recorded for Meridian Health Networks."
+    }
+   ]
+  },
+  {
+   "id": "f083",
+   "split": "dev",
+   "source": "regulatory_and_data_privacy_memo.txt",
+   "section": "SECTION 4: CONDITIONS TO CLOSING",
+   "evidence": [
+    {
+     "source": "regulatory_and_data_privacy_memo.txt",
+     "excerpt": "There is no financing condition. There is no condition relating to obtaining customer consents"
+    }
+   ],
+   "items": [
+    {
+     "id": "f083.1",
+     "label": "supported",
+     "kind": "paraphrase",
+     "claim": "Closing is not conditional on financing or on obtaining customer consents, so the Buyer carries the consent risk."
+    },
+    {
+     "id": "f083.2",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "Obtaining the Northstar and Pacific Data consents is a condition to closing."
+    },
+    {
+     "id": "f083.3",
+     "label": "contradicted",
+     "kind": "party",
+     "claim": "The Company's stockholders bear the risk of the customer consents not being obtained."
+    },
+    {
+     "id": "f083.4",
+     "label": "contradicted",
+     "kind": "negation",
+     "claim": "The merger agreement contains a financing condition in favour of the Buyer."
+    }
+   ]
+  },
+  {
+   "id": "f084",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "KEY FINANCIAL METRICS AND NOTES",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f084.1",
+     "label": "unsupported",
+     "kind": "absent_figure",
+     "claim": "Aurora's FY2024 revenue guidance is $520 million."
+    }
+   ]
+  },
+  {
+   "id": "f085",
+   "split": "dev",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "KEY FINANCIAL METRICS AND NOTES",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f085.1",
+     "label": "unsupported",
+     "kind": "absent_figure",
+     "claim": "Capital expenditures are budgeted at $16.0 million for FY2024."
+    }
+   ]
+  },
+  {
+   "id": "f086",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED BALANCE SHEET",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f086.1",
+     "label": "unsupported",
+     "kind": "absent_figure",
+     "claim": "Aurora's largest shareholder holds 22% of the outstanding common stock."
+    }
+   ]
+  },
+  {
+   "id": "f087",
+   "split": "dev",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 1.1 — The Merger",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f087.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "The merger agreement is governed by the laws of the State of Delaware."
+    }
+   ]
+  },
+  {
+   "id": "f088",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED FINANCIAL STATEMENTS",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f088.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "Aurora has offices in London and Singapore."
+    }
+   ]
+  },
+  {
+   "id": "f089",
+   "split": "dev",
+   "source": "employment_and_retention_agreements.txt",
+   "section": "SECTION 6: WORKFORCE SUMMARY",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f089.1",
+     "label": "unsupported",
+     "kind": "absent_figure",
+     "claim": "Engineering headcount grew by 15% in FY2023."
+    }
+   ]
+  },
+  {
+   "id": "f090",
+   "split": "test",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "AGREEMENT AND PLAN OF MERGER",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f090.1",
+     "label": "unsupported",
+     "kind": "absent_figure",
+     "claim": "Vertex Capital Partners manages approximately $12 billion in assets."
+    }
+   ]
+  },
+  {
+   "id": "f091",
+   "split": "dev",
+   "source": "customer_contracts_schedule.txt",
+   "section": "SECTION 4: RENEWAL AND CHURN EXPOSURE",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f091.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "The Northstar contract includes an automatic two-year renewal option."
+    }
+   ]
+  },
+  {
+   "id": "f092",
+   "split": "test",
+   "source": "customer_contracts_schedule.txt",
+   "section": "SECTION 4: RENEWAL AND CHURN EXPOSURE",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f092.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "Customer churn is concentrated in Aurora's mid-market segment."
+    }
+   ]
+  },
+  {
+   "id": "f093",
+   "split": "dev",
+   "source": "board_deck_strategic_review_mar2024.txt",
+   "section": "SLIDE 1: STRATEGIC ALTERNATIVES REVIEW",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f093.1",
+     "label": "unsupported",
+     "kind": "absent_figure",
+     "claim": "Goldman Sachs will receive an advisory fee of 1.2% of the transaction value."
+    }
+   ]
+  },
+  {
+   "id": "f094",
+   "split": "test",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "SECTION 4: REVENUE QUALITY",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f094.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "Aurora's net revenue retention is the highest among its public peers."
+    }
+   ]
+  },
+  {
+   "id": "f095",
+   "split": "dev",
+   "source": "ip_portfolio_and_litigation_schedule.txt",
+   "section": "SECTION 2: THE DATAFLOW SYSTEMS LITIGATION",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f095.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "The DataFlow litigation is covered by the Company's insurance policy."
+    }
+   ]
+  },
+  {
+   "id": "f096",
+   "split": "test",
+   "source": "employment_and_retention_agreements.txt",
+   "section": "SECTION 1: EXECUTIVE COMPENSATION SUMMARY (FY2023)",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f096.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "Elena Marsh has led Aurora as Chief Executive Officer since 2015."
+    }
+   ]
+  },
+  {
+   "id": "f097",
+   "split": "dev",
+   "source": "credit_agreement_summary.txt",
+   "section": "SECTION 2: REVOLVING CREDIT FACILITY",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f097.1",
+     "label": "unsupported",
+     "kind": "absent_figure",
+     "claim": "The credit facility includes an accordion feature permitting an additional $40 million of commitments."
+    }
+   ]
+  },
+  {
+   "id": "f098",
+   "split": "test",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "SECTION 1: SCOPE AND BASIS OF PRESENTATION",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f098.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "Deloitte identified a material weakness in internal controls over revenue recognition."
+    }
+   ]
+  },
+  {
+   "id": "f099",
+   "split": "dev",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED INCOME STATEMENT",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f099.1",
+     "label": "unsupported",
+     "kind": "absent_figure",
+     "claim": "Aurora pays a quarterly dividend of $0.25 per share."
+    }
+   ]
+  },
+  {
+   "id": "f100",
+   "split": "test",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "SECTION 4: REVENUE QUALITY",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f100.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "Aurora's customer acquisition cost payback period has shortened steadily."
+    }
+   ]
+  },
+  {
+   "id": "f101",
+   "split": "dev",
+   "source": "board_deck_strategic_review_mar2024.txt",
+   "section": "SLIDE 3: PRELIMINARY INDICATIONS OF INTEREST",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f101.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "Meridian Software Corp's bid was advised by Morgan Stanley."
+    }
+   ]
+  },
+  {
+   "id": "f102",
+   "split": "test",
+   "source": "employment_and_retention_agreements.txt",
+   "section": "SECTION 4: KEY PERSON DEPENDENCY",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f102.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "The Company holds key-person life insurance on Dr. James Wu."
+    }
+   ]
+  },
+  {
+   "id": "f103",
+   "split": "dev",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED INCOME STATEMENT",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f103.1",
+     "label": "unsupported",
+     "kind": "absent_figure",
+     "claim": "Gross margin is expected to reach 65% by FY2025."
+    }
+   ]
+  },
+  {
+   "id": "f104",
+   "split": "test",
+   "source": "regulatory_and_data_privacy_memo.txt",
+   "section": "SECTION 3: SECURITY CERTIFICATIONS AND INCIDENTS",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f104.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "The SOC 2 remediation work was performed by KPMG."
+    }
+   ]
+  },
+  {
+   "id": "f105",
+   "split": "dev",
+   "source": "regulatory_and_data_privacy_memo.txt",
+   "section": "HART-SCOTT-RODINO (UNITED STATES)",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f105.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "The HSR filing was prepared by Skadden Arps."
+    }
+   ]
+  },
+  {
+   "id": "f106",
+   "split": "test",
+   "source": "customer_contracts_schedule.txt",
+   "section": "SECTION 2: CHANGE OF CONTROL PROVISIONS",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f106.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "Pacific Data Systems has informed Aurora that it will withhold its consent."
+    }
+   ]
+  },
+  {
+   "id": "f107",
+   "split": "dev",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "SECTION 5: WORKING CAPITAL",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f107.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "Aurora's days sales outstanding are in line with the SaaS industry average."
+    }
+   ]
+  },
+  {
+   "id": "f108",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED INCOME STATEMENT",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f108.1",
+     "label": "unsupported",
+     "kind": "absent_figure",
+     "claim": "Interest expense is expected to fall to $6.0 million in FY2024."
+    }
+   ]
+  },
+  {
+   "id": "f109",
+   "split": "dev",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "CONSOLIDATED INCOME STATEMENT",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f109.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "Aurora's effective tax rate benefits from research and development tax credits."
+    }
+   ]
+  },
+  {
+   "id": "f110",
+   "split": "test",
+   "source": "credit_agreement_summary.txt",
+   "section": "SECTION 4: CHANGE OF CONTROL AND THE TRANSACTION",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f110.1",
+     "label": "unsupported",
+     "kind": "absent_figure",
+     "claim": "The purchase price will be funded with $400 million of new term loans."
+    }
+   ]
+  },
+  {
+   "id": "f111",
+   "split": "dev",
+   "source": "board_deck_strategic_review_mar2024.txt",
+   "section": "SLIDE 2: MARKET CONTEXT",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f111.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "Aurora's EBITDA margin compares favourably with Palantir's."
+    }
+   ]
+  },
+  {
+   "id": "f112",
+   "split": "test",
+   "source": "aurora_financials_fy2023.txt",
+   "section": "Note 12 — Subsequent Events",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f112.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "Aurora completed two acquisitions during FY2022."
+    }
+   ]
+  },
+  {
+   "id": "f113",
+   "split": "dev",
+   "source": "ip_portfolio_and_litigation_schedule.txt",
+   "section": "SECTION 4: OPEN SOURCE SOFTWARE",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f113.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "The AGPL finding has been disclosed to the affected customers."
+    }
+   ]
+  },
+  {
+   "id": "f114",
+   "split": "test",
+   "source": "credit_agreement_summary.txt",
+   "section": "SECTION 6: CAPITAL LEASES AND OTHER OBLIGATIONS",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f114.1",
+     "label": "unsupported",
+     "kind": "absent_figure",
+     "claim": "Terminating the Austin lease resulted in a $1.2 million penalty."
+    }
+   ]
+  },
+  {
+   "id": "f115",
+   "split": "dev",
+   "source": "credit_agreement_summary.txt",
+   "section": "SECTION 2: REVOLVING CREDIT FACILITY",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f115.1",
+     "label": "unsupported",
+     "kind": "absent_figure",
+     "claim": "Wells Fargo holds 20% of the revolving commitments."
+    }
+   ]
+  },
+  {
+   "id": "f116",
+   "split": "test",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 8.2 — Indemnification Cap",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f116.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "The Buyer has purchased a representations and warranties insurance policy."
+    }
+   ]
+  },
+  {
+   "id": "f117",
+   "split": "dev",
+   "source": "merger_agreement_v2_final.txt",
+   "section": "Section 8.2 — Indemnification Cap",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f117.1",
+     "label": "unsupported",
+     "kind": "absent_figure",
+     "claim": "An escrow of $10.4 million will be held back from the merger consideration for 18 months."
+    }
+   ]
+  },
+  {
+   "id": "f118",
+   "split": "test",
+   "source": "board_deck_strategic_review_mar2024.txt",
+   "section": "SLIDE 6: TIMELINE AND NEXT STEPS",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f118.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "Vertex intends to take Aurora public again within five years."
+    }
+   ]
+  },
+  {
+   "id": "f119",
+   "split": "dev",
+   "source": "employment_and_retention_agreements.txt",
+   "section": "SECTION 3: RETENTION POOL",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f119.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "Retention payments are subject to clawback if the employee joins a competitor."
+    }
+   ]
+  },
+  {
+   "id": "f120",
+   "split": "test",
+   "source": "regulatory_and_data_privacy_memo.txt",
+   "section": "SECTION 2: DATA PRIVACY POSTURE",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f120.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "Aurora's Data Protection Officer is based in Frankfurt."
+    }
+   ]
+  },
+  {
+   "id": "f121",
+   "split": "dev",
+   "source": "ip_portfolio_and_litigation_schedule.txt",
+   "section": "SECTION 1: PATENT PORTFOLIO",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f121.1",
+     "label": "unsupported",
+     "kind": "absent",
+     "claim": "Several of Aurora's patents have been licensed to Snowflake."
+    }
+   ]
+  },
+  {
+   "id": "f122",
+   "split": "test",
+   "source": "customer_contracts_schedule.txt",
+   "section": "SECTION 1: TOP TEN CUSTOMERS BY FY2023 REVENUE",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f122.1",
+     "label": "unsupported",
+     "kind": "absent_figure",
+     "claim": "Northstar Financial Group's contract grew 9.3% year over year."
+    }
+   ]
+  },
+  {
+   "id": "f123",
+   "split": "dev",
+   "source": "quality_of_earnings_report_fy2023.txt",
+   "section": "SECTION 2: ADJUSTED EBITDA BRIDGE",
+   "evidence": [],
+   "items": [
+    {
+     "id": "f123.1",
+     "label": "unsupported",
+     "kind": "absent_figure",
+     "claim": "Stock-based compensation of $7.9 million was added back in FY2023."
+    }
+   ]
+  }
+ ]
+}
