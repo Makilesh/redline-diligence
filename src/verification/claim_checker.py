@@ -13,41 +13,51 @@ Pipeline, cheapest first:
    call, and only when at least one such claim exists. The common case makes
    zero LLM calls; the previous validator made one on every query.
 
-Per-claim decision (first matching rule wins):
+Per-claim decision (first matching rule wins; "figure" = amount or ratio,
+"quantity" = "24 months", "45 days"; see numeric_grounding for "confirmed" —
+found at a unit the document states AND tied to the row and period the claim
+names):
 
-    any figure unsupported                         -> unsupported   (numeric)
-    NLI entailment >= ENTAIL_THRESHOLD             -> supported     (nli)
-    every figure grounded/derived                  -> supported     (numeric)
+    an amount or ratio not in the context          -> unsupported   (numeric)
+    beyond the checking budget (MAX_CLAIMS claims
+      the figures do not settle)                   -> unverified ("not checked")
+    a statement of absence ("X is not disclosed")  -> LLM judge only
+    a figure the context gives for another row
+      or period                                    -> LLM judge
+    a quantity the context does not state          -> LLM judge
+    NLI entailment >= ENTAIL_THRESHOLD and no
+      figure merely present elsewhere              -> supported     (nli)
+    every figure confirmed                         -> supported     (numeric)
     NLI contradiction >= CONTRADICTION_THRESHOLD
       and entailment < 0.1                         -> LLM judge (suspected
-                                                      contradiction; "unverified"
-                                                      if no judge answers)
+                                                      contradiction)
     NLI clearly neutral (entailment below
       CLEAR_NEUTRAL_MAX_ENTAIL, contradiction low,
       no figures)                                  -> unsupported   (nli)
-    otherwise                                      -> LLM judge, or "unverified"
-                                                      when no judge is available
+    otherwise                                      -> LLM judge
 
-So "contradicted" is only ever an LLM judge's verdict, confirmed against the
-documents; the NLI model raises the question (see the calibration note at the
-rule).
+A claim sent to the judge stays "unverified" when no judge answers. So
+"contradicted" is only ever an LLM judge's verdict, confirmed against the
+documents; the NLI model and the figure binding raise the question.
 
 Answer-level outcome:
 
     failed   any contradicted claim, or any figure not found in the context
-    warning  any non-numeric unsupported claim, unverifiable calculation, or
-             a verification step that was unavailable
+    warning  any unsupported or unverified claim, or an unverifiable
+             calculation
     passed   otherwise
 
 Confidence (shown to users) is COMPUTED, not self-reported by a model:
 
-    claim_support   = (supported + 0.5 * unverified) / checked claims
-    numeric_support = (grounded + derived + 0.5 * derived_unverified) / figures
-    confidence      = claim_support                      if no figures
-                    = (claim_support + numeric_support)/2 otherwise
+    claim_support   = (supported + 0.5 * unverified) / claims
+    figure_support  = figures confirmed, or in a claim the NLI model or the
+                      judge supported / figures
+    confidence      = claim_support                       if no figures
+                    = (claim_support + figure_support) / 2 otherwise
 
-An answer with no checkable claims (a pure decline) scores 0.0 — there is
-nothing it asserts that could be verified — and passes.
+Nothing is exempt: a statement that the documents lack something is a claim
+like any other (it is the designed way to decline, and it can be false). An
+answer with no claims at all — only headings and fragments — scores 0.0.
 """
 
 from __future__ import annotations
@@ -497,7 +507,16 @@ async def verify_answer(
                 reason="not stated in the retrieved documents: " + ", ".join(missing_quantities),
                 suspected_misattribution=True,
             )
-        elif ev and entail >= ENTAIL_THRESHOLD:
+        elif ev and entail >= ENTAIL_THRESHOLD and not unbound:
+            # Not when a figure of the claim sits in the context only somewhere
+            # the claim does not name. The entailment model reads a window that
+            # holds the value and calls the claim entailed whatever the value is
+            # attached to there: "The termination fee payable on a Superior
+            # Proposal is $13.92 million" scored 0.98 against the sentence that
+            # gives $13.92 million as the REVERSE fee. Measured on the dev half of
+            # eval/verification_set.json with nli-deberta-v3-small: wrong claims
+            # passed 22/167 -> 15/167, supported claims passed locally 68.8% ->
+            # 66.1% (three more go to the judge), false alarms unchanged.
             chunk = chunks[ev["entail_chunk"]]
             check.update(
                 status="supported",

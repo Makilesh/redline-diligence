@@ -346,9 +346,31 @@ class TestV2FiguresAreBound:
         assert report.confidence < 1.0
 
     @pytest.mark.asyncio
-    async def test_an_unbound_paraphrase_is_supported_when_nli_entails(self):
+    async def test_entailment_does_not_settle_a_claim_whose_figure_is_unbound(self):
+        # The value is in the context, but nothing ties it to "top line"; a
+        # small NLI model entails the window holding the value whatever the
+        # value is attached to there, so the judge decides.
+        asked = []
+
+        async def judge(query, claims, documents):
+            asked.extend(c["claim"] for c in claims)
+            return {c["id"]: {"status": "supported", "document": 1} for c in claims}, "judge"
+
+        answer = f"Aurora's top line reached $452.8 million [📄 {FIN} | Income Statement]."
         report = await verify_answer(
-            f"Aurora's top line reached $452.8 million [📄 {FIN} | Income Statement].",
+            answer, self.TABLES, "q", scorer=_scorer(entail=0.97), use_nli=True,
+        )
+        assert report.validation_status == "warning"
+        assert "$452.8 million" in report.claim_checks[0]["reason"]
+        report = await verify_answer(
+            answer, self.TABLES, "q", scorer=_scorer(entail=0.97), use_nli=True, judge=judge,
+        )
+        assert len(asked) == 1 and report.validation_status == "passed"
+
+    @pytest.mark.asyncio
+    async def test_entailment_still_settles_a_claim_without_unbound_figures(self):
+        report = await verify_answer(
+            f"The income statement reports revenue and gross profit [📄 {FIN} | Income Statement].",
             self.TABLES, "q", scorer=_scorer(entail=0.97), use_nli=True,
         )
         assert report.validation_status == "passed"
