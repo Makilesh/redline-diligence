@@ -4,6 +4,7 @@ Retrieval evaluation harness — golden QA set against the real retrieval path.
     python -m eval.run_retrieval_eval
     python -m eval.run_retrieval_eval --k 5 10 --ablations production production_decomp
     python -m eval.run_retrieval_eval --baseline eval/baseline.json
+    python -m eval.run_retrieval_eval --compare eval/results/retrieval_<date>.json
     python -m eval.run_retrieval_eval --update-baseline
 
 Indexes data/sample_deal into an in-memory Qdrant with the production models,
@@ -12,7 +13,7 @@ then runs every golden question through five retrieval configurations:
     dense              bge-m3 dense list from hybrid_search
     sparse             BM25 sparse list from hybrid_search
     hybrid_rrf         weighted RRF of the two (the reranker's candidate pool)
-    production         retrieval_executor_node: RRF -> cross-encoder -> threshold
+    production         retrieval_executor_node: RRF -> cross-encoder -> expansion
     production_decomp  the same node with Agent 1's cached sub-questions
 
 Makes ZERO LLM calls. Sub-questions come from eval/sub_questions.json, produced
@@ -97,11 +98,31 @@ def _node_state(question: dict, sub_questions: list[str]) -> dict:
     }
 
 
-def _decision(verdict: dict | None) -> str:
-    """admitted / refused / llm_fallback for an assessment (None = ambiguous band)."""
+def _decision(state: dict, verdict: dict | None) -> str:
+    """
+    admitted / refused / llm_fallback for an assessment (None = ambiguous band).
+
+    Decided by the graph's own edge, route_after_quality_check, on the state the
+    assessor would have written — not by reading force_refusal. The two are
+    separate decisions and can disagree: the heuristic passes on relevance alone
+    while the router also applies the per-type precision and completeness
+    thresholds. On the committed 2026-09-25 results that was one question of 41
+    (comp_02 with decomposition: precision 0.241 < 0.25, reported "admitted",
+    routed to the rewriter). Calling the edge means the two cannot drift.
+
+    "refused" therefore means "not sent to synthesis on this retrieval": the
+    router's next step is the rewrite loop, and refusal only if that fails too.
+    """
     if verdict is None:
         return "llm_fallback"
-    return "refused" if verdict.get("force_refusal") else "admitted"
+    from src.workflow.conditional_edges import route_after_quality_check
+
+    route = route_after_quality_check({
+        **state,
+        **verdict,
+        "answerability_veto": bool(verdict.get("answerability_veto", False)),
+    })
+    return "admitted" if route == "answer_synthesizer" else "refused"
 
 
 async def gate_decision(state: dict, reranked: list[dict], laya: bool = True) -> dict:
@@ -115,10 +136,11 @@ async def gate_decision(state: dict, reranked: list[dict], laya: bool = True) ->
     """
     from src.agents.quality_assessor import _heuristic_assessment
 
-    verdict = _heuristic_assessment({**state, "reranked_results": reranked})
+    full_state = {**state, "reranked_results": reranked}
+    verdict = _heuristic_assessment(full_state)
     scores = [float(c.get("reranker_score", 0.0)) for c in reranked]
     out = {
-        "decision": _decision(verdict),
+        "decision": _decision(full_state, verdict),
         "max_reranker_score": round(max(scores), 4) if scores else None,
         "context_quality_score": None if verdict is None else verdict["context_quality_score"],
     }
@@ -154,7 +176,7 @@ async def add_laya_gate(gate: dict, state: dict, reranked: list[dict]) -> None:
         return
     combined = combine_with_answerability(full_state, verdict, answerability)
     gate["laya"] = {
-        "decision": _decision(combined),
+        "decision": _decision(full_state, combined),
         "consulted": True,
         "vetoed": bool(answerability and answerability.vetoed),
         "answerability": None if answerability is None else round(answerability.score, 4),
@@ -368,6 +390,11 @@ def aggregate(questions: list[dict], ablation: str, ks: list[int]) -> dict:
     latencies = [q["runs"][ablation]["latency_ms"] for q in questions if ablation in q["runs"]]
     result = {
         "overall": _means(answerable),
+        # 95% bootstrap interval of each overall mean, questions resampled.
+        "ci95": {
+            name: m.bootstrap_ci(q["runs"][ablation]["metrics"].get(name) for q in answerable)
+            for name in names
+        },
         "by_type": by_type,
         "latency_ms": {
             "p50": m.percentile(latencies, 50),
@@ -429,6 +456,111 @@ def decomposition_delta(questions: list[dict], metric: str = "fact_coverage@cont
     return {"metric": metric, "improved": improved, "regressed": regressed,
             "unchanged": unchanged, "decomposed": decomposed,
             "compared": len(improved) + len(regressed) + unchanged}
+
+
+# Stage-to-stage comparisons reported with a paired interval: what the keyword
+# channel adds to dense, what reranking adds to the fused candidates, and what
+# decomposition adds to production.
+STAGE_PAIRS = (
+    ("dense", "hybrid_rrf"),
+    ("hybrid_rrf", "production"),
+    ("production", "production_decomp"),
+)
+
+
+def _paired(questions_before: list[dict], questions_after: list[dict], ablation_before: str,
+            ablation_after: str, names: list[str]) -> dict:
+    """
+    Paired per-question deltas between two (run, ablation) columns.
+
+    Questions are matched by id; controls and questions missing from either side
+    are left out. Returns {metric: paired_delta dict} plus "changed": the
+    questions whose value moved on the first metric that has any movement.
+    """
+    after_by_id = {q["id"]: q for q in questions_after}
+    pairs = []
+    for q in questions_before:
+        other = after_by_id.get(q["id"])
+        if (q["is_control"] or other is None or ablation_before not in q["runs"]
+                or ablation_after not in other["runs"]):
+            continue
+        pairs.append((q["id"], q["runs"][ablation_before]["metrics"],
+                      other["runs"][ablation_after]["metrics"]))
+    out: dict = {}
+    for name in names:
+        delta = m.paired_delta([b.get(name) for _, b, _ in pairs],
+                               [a.get(name) for _, _, a in pairs])
+        if delta is not None:
+            delta["changed"] = [
+                {"id": qid, "before": b.get(name), "after": a.get(name)}
+                for qid, b, a in pairs
+                if b.get(name) is not None and a.get(name) is not None
+                and abs(a[name] - b[name]) > 1e-9
+            ]
+            out[name] = delta
+    return out
+
+
+def stage_comparisons(questions: list[dict], ablations: list[str], ks: list[int]) -> list[dict]:
+    """Paired deltas for each STAGE_PAIRS entry whose two ablations both ran."""
+    comparisons = []
+    for before, after in STAGE_PAIRS:
+        if before not in ablations or after not in ablations:
+            continue
+        names = metric_names(ks, before in NODE_ABLATIONS and after in NODE_ABLATIONS)
+        comparisons.append({"before": before, "after": after,
+                            "metrics": _paired(questions, questions, before, after, names)})
+    return comparisons
+
+
+def compare_with_previous(report: dict, previous: dict) -> dict:
+    """
+    Paired deltas between a previous results file and this run, per ablation.
+
+    This is the before/after of a code change: the same questions through the
+    same harness, so each question is its own control.
+    """
+    ks = report["config"]["k"]
+    per_ablation = {}
+    for ablation in report["aggregates"]:
+        if ablation not in previous.get("aggregates", {}):
+            continue
+        names = metric_names(ks, ablation in NODE_ABLATIONS)
+        per_ablation[ablation] = _paired(
+            previous["questions"], report["questions"], ablation, ablation, names)
+    latency = {
+        ablation: {"before": previous["aggregates"][ablation]["latency_ms"],
+                   "after": report["aggregates"][ablation]["latency_ms"]}
+        for ablation in per_ablation
+    }
+    return {
+        "previous_generated_at": previous.get("generated_at"),
+        "previous_command": previous.get("command"),
+        "same_golden_set": previous.get("golden_set", {}).get("sha256")
+        == report["golden_set"]["sha256"],
+        "ablations": per_ablation,
+        "latency_ms": latency,
+    }
+
+
+def corpus_reference(retrievable: list[dict]) -> dict:
+    """
+    Size of the whole corpus, for the "hand over everything" reference row.
+
+    The sample data room is small enough to fit in one prompt many times over.
+    On such a corpus the fact-coverage ceiling is what context stuffing would
+    score, and a retrieval change can only be distinguished from it by ranking
+    quality and context size — which is why the row is shown next to the
+    ablations rather than left implicit.
+    """
+    from src.utils.token_counter import count_tokens_batch
+
+    texts = [c.get("text", "") for c in retrievable]
+    return {
+        "chunks": len(texts),
+        "chars": sum(len(t) for t in texts),
+        "tokens": sum(count_tokens_batch(texts)),
+    }
 
 
 # ==============================================================================
@@ -516,7 +648,22 @@ def render_markdown(report: dict) -> str:
         cells = [_pct(overall.get(c)) for c in cols]
         lines.append(f"| {ABLATION_LABELS[ablation]} | " + " | ".join(cells)
                      + f" | {_ms(lat['p50'])} | {_ms(lat['p95'])} |")
+    corpus = report.get("corpus")
+    if corpus:
+        ceiling = _pct(report["fact_coverage_ceiling"])
+        cells = [ceiling if c.startswith("fact_coverage") else "—" for c in cols]
+        lines.append("| *whole corpus in the prompt (reference)* | " + " | ".join(cells) + " | — | — |")
     lines.append("")
+    if corpus:
+        lines += [
+            f"Reference row: the retrievable corpus is {corpus['tokens']:,} tokens "
+            f"({corpus['chars']:,} characters in {corpus['chunks']} chunks) and fits in one prompt, "
+            "so handing over everything scores the fact-coverage ceiling. On a corpus this "
+            "small, fact coverage cannot separate a retrieval design from context stuffing; "
+            "ranking quality (recall/MRR/nDCG at a fixed depth) and the refusal gate can.",
+            "",
+        ]
+    lines += render_uncertainty(report)
 
     for ablation in (a for a in NODE_ABLATIONS if a in aggs):
         lines += [f"## {ABLATION_LABELS[ablation]} — by query type", ""]
@@ -554,6 +701,9 @@ def render_markdown(report: dict) -> str:
                   f"({report['sub_questions']['path']}).", ""]
 
     lines += ["## Refusal gate (Quality Assessor heuristic, no LLM)", "",
+              "Decided by the graph's own edge (route_after_quality_check) on the heuristic "
+              "assessment. *refused* = not sent to synthesis on this retrieval; in the full "
+              "pipeline the rewrite loop runs next and refusal follows only if it fails too.", "",
               "| ablation | group | admitted | ambiguous → LLM | refused |",
               "|---|---|---|---|---|"]
     for ablation in (a for a in NODE_ABLATIONS if a in aggs):
@@ -580,6 +730,91 @@ def render_markdown(report: dict) -> str:
         if gate["failures"]:
             lines.append("")
     return "\n".join(lines)
+
+
+def _signed(value: float) -> str:
+    return f"{value * 100:+.1f}"
+
+
+def _delta_rows(label: str, metrics: dict) -> list[str]:
+    """Table rows (label | metric | delta | interval | improved | regressed | verdict)."""
+    rows = []
+    for name, d in metrics.items():
+        verdict = "yes" if d["clears_zero"] else "no — within noise"
+        rows.append(
+            f"| {label} | {name.replace('fact_coverage', 'fact_cov')} | {_signed(d['mean'])} | "
+            f"[{_signed(d['low'])}, {_signed(d['high'])}] | {d['improved']} | {d['regressed']} | "
+            f"{verdict} |")
+    return rows
+
+
+_DELTA_HEADER = [
+    "| comparison | metric | Δ points | 95% CI | improved | regressed | clears zero |",
+    "|---|---|---|---|---|---|---|",
+]
+
+
+def render_uncertainty(report: dict) -> list[str]:
+    """Intervals for the overall means, paired stage effects, and the before/after."""
+    aggs = report["aggregates"]
+    ks = report["config"]["k"]
+    n = report["golden_set"]["answerable"]
+    lines = [
+        "## Uncertainty",
+        "",
+        f"95% percentile-bootstrap intervals over the {n} answerable questions "
+        f"({m.BOOTSTRAP_RESAMPLES:,} resamples, fixed seed). A difference between two rows "
+        "of the table above means something only if its paired interval below excludes zero.",
+        "",
+    ]
+    shown = [f"fact_coverage@{ks[-1]}", "fact_coverage@context", f"recall@{ks[-1]}",
+             f"mrr@{RANK_DEPTH}", f"ndcg@{RANK_DEPTH}"]
+    lines += ["| ablation | " + " | ".join(c.replace("fact_coverage", "fact_cov") for c in shown) + " |",
+              "|---|" + "---|" * len(shown)]
+    for ablation in (a for a in ABLATIONS if a in aggs):
+        cells = []
+        for name in shown:
+            mean, ci = aggs[ablation]["overall"].get(name), (aggs[ablation].get("ci95") or {}).get(name)
+            cells.append("—" if mean is None or ci is None
+                         else f"{_pct(mean)} [{_pct(ci[0])}, {_pct(ci[1])}]")
+        lines.append(f"| {ABLATION_LABELS[ablation]} | " + " | ".join(cells) + " |")
+    lines.append("")
+
+    stages = report.get("stage_comparisons") or []
+    if stages:
+        lines += ["Paired per-question effect of each stage (same questions, so each is its "
+                  "own control):", "", *_DELTA_HEADER]
+        for stage in stages:
+            label = f"{ABLATION_LABELS[stage['before']]} → {ABLATION_LABELS[stage['after']]}"
+            lines += _delta_rows(label, {k: v for k, v in stage["metrics"].items() if k in shown})
+        lines.append("")
+
+    comparison = report.get("comparison")
+    if comparison:
+        lines += [
+            f"## Against the previous run ({comparison['previous_generated_at']})",
+            "",
+            "Paired per-question deltas, this run minus the previous one"
+            + ("" if comparison["same_golden_set"] else " — **the golden set differs**") + ".",
+            "", *_DELTA_HEADER,
+        ]
+        for ablation, metrics in comparison["ablations"].items():
+            lines += _delta_rows(ABLATION_LABELS[ablation],
+                                 {k: v for k, v in metrics.items() if k in shown})
+        lines.append("")
+        lines += ["| ablation | p50 ms before → after | p95 ms before → after |", "|---|---|---|"]
+        for ablation, lat in comparison["latency_ms"].items():
+            lines.append(
+                f"| {ABLATION_LABELS[ablation]} | {_ms(lat['before']['p50'])} → {_ms(lat['after']['p50'])} | "
+                f"{_ms(lat['before']['p95'])} → {_ms(lat['after']['p95'])} |")
+        lines.append("")
+        for ablation in (a for a in NODE_ABLATIONS if a in comparison["ablations"]):
+            changed = (comparison["ablations"][ablation].get("fact_coverage@context") or {}).get("changed")
+            if changed:
+                lines.append(f"Changed on fact_cov@context ({ABLATION_LABELS[ablation]}): " + ", ".join(
+                    f"{c['id']} {_pct(c['before'])}→{_pct(c['after'])}" for c in changed))
+        lines.append("")
+    return lines
 
 
 def render_laya_gate(report: dict) -> list[str]:
@@ -805,6 +1040,8 @@ async def run(args: argparse.Namespace) -> dict:
         q["fact_coverage_ceiling"] for q in report_questions if not q["is_control"])
     if "production" in ablations and "production_decomp" in ablations:
         report["decomposition_delta"] = decomposition_delta(report_questions)
+    report["stage_comparisons"] = stage_comparisons(report_questions, ablations, args.k)
+    report["corpus"] = corpus_reference(retrievable)
     report["total_seconds"] = round(time.perf_counter() - started, 1)
     return report
 
@@ -825,6 +1062,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tolerance", type=float,
                         help="allowed absolute drop, e.g. 0.02 = 2pp "
                              "(default: the baseline file's, else 0.02)")
+    parser.add_argument("--compare", metavar="RESULTS_JSON",
+                        help="a previous retrieval_<date>.json: report paired per-question "
+                             "deltas (with bootstrap intervals) between that run and this one")
     parser.add_argument("--update-baseline", action="store_true",
                         help=f"write this run's gated metrics to {DEFAULT_BASELINE.name}")
     parser.add_argument("--output-dir", default=str(RESULTS_DIR))
@@ -862,6 +1102,10 @@ def main(argv: list[str] | None = None) -> int:
         report["baseline_check"] = {"baseline": args.baseline, "tolerance": tolerance,
                                     "failures": failures}
         exit_code = 1 if failures else 0
+
+    if args.compare:
+        previous = json.loads(Path(args.compare).read_text(encoding="utf-8"))
+        report["comparison"] = compare_with_previous(report, previous)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
