@@ -17,6 +17,7 @@ import time
 
 import litellm
 
+from src.llm.failures import FailureKind, classify_failure
 from src.llm.model_registry import AGENT_LADDER, LOCAL_MODEL
 from src.utils.logger import setup_logger
 
@@ -180,18 +181,12 @@ def is_quota_error(exc: Exception) -> bool:
 
     Distinguishing this from a generic failure is what lets a caller move down
     the model ladder instead of retrying a model the provider will keep refusing
-    all day. A per-minute limit and a per-day limit both surface as 429; the
-    caller treats them the same because in either case another rung is a better
-    bet than waiting.
+    all day. A per-minute limit and a per-day limit both surface as 429 and both
+    answer True here — another slot is the better bet either way. What differs
+    is how long the refused slot stays out, and that is decided by
+    BudgetTracker.mark_slot_exhausted from the quota the provider named.
     """
-    name = type(exc).__name__.lower()
-    text = str(exc).lower()
-    return (
-        "ratelimit" in name
-        or "429" in text
-        or "resource_exhausted" in text
-        or "quota" in text
-    )
+    return classify_failure(exc).kind is FailureKind.QUOTA
 
 
 def is_service_unavailable(exc: Exception) -> bool:
@@ -212,15 +207,14 @@ def is_service_unavailable(exc: Exception) -> bool:
     Deliberately NOT treated as quota exhaustion: marking the slot spent would
     retire that model for the rest of the day over a blip that typically clears
     in minutes.
+
+    Also True for ProseAgentFailed — a model whose same-model retries all came
+    back empty or errored. The repair is identical (try another model), and
+    without it that case matched no classifier and ended the caller's ladder.
     """
-    name = type(exc).__name__.lower()
-    text = str(exc).lower()
-    return (
-        "serviceunavailable" in name
-        or "overloaded" in name
-        or "503" in text
-        or "unavailable" in text
-        or "experiencing high demand" in text
+    return classify_failure(exc).kind in (
+        FailureKind.SERVICE_UNAVAILABLE,
+        FailureKind.MODEL_FAILED,
     )
 
 
@@ -240,14 +234,7 @@ def is_model_unavailable_for_key(exc: Exception) -> bool:
     "this key may never use this model", which is permanent and affects one
     slot.
     """
-    text = str(exc).lower()
-    if "404" not in text and "notfound" not in type(exc).__name__.lower():
-        return False
-    return (
-        "no longer available" in text
-        or "not found for api version" in text
-        or "is not supported for generatecontent" in text
-    )
+    return classify_failure(exc).kind is FailureKind.MODEL_UNAVAILABLE_FOR_KEY
 
 
 def is_timeout_error(exc: Exception) -> bool:
@@ -264,9 +251,7 @@ def is_timeout_error(exc: Exception) -> bool:
     budget expired before the ladder was ever allowed to try a healthy model, so
     the query returned nothing at all rather than a slightly worse answer.
     """
-    name = type(exc).__name__.lower()
-    text = str(exc).lower()
-    return "timeout" in name or "timed out" in text or "timeout passed" in text
+    return classify_failure(exc).kind is FailureKind.TIMEOUT
 
 
 def is_auth_error(exc: Exception) -> bool:
@@ -283,16 +268,7 @@ def is_auth_error(exc: Exception) -> bool:
     entry in GEMINI_API_KEYS had been split by a stray comma into two fragments —
     and every request routed to it died instead of moving to a working key.
     """
-    name = type(exc).__name__.lower()
-    text = str(exc).lower()
-    return (
-        "authentication" in name
-        or "api key not valid" in text
-        or "api_key_invalid" in text
-        or "access_token_type_unsupported" in text
-        or "unauthenticated" in text
-        or "permission_denied" in text
-    )
+    return classify_failure(exc).kind is FailureKind.AUTH
 
 
 async def call_structured_agent(
