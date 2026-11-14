@@ -422,6 +422,36 @@ class TestProseAgent:
         assert not isinstance(raised.value, ProseAgentFailed), "the ladder needs the real class"
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("streaming", [False, True])
+    async def test_a_429_costs_the_same_on_the_blocking_and_streaming_paths(
+        self, tracker, monkeypatch, streaming
+    ):
+        """
+        Blocking /query slept 2s + 4s on the key that had said 429 before the
+        ladder could rotate (36s with every rung refusing); the streaming path
+        raised at once. A 429 is a property of the slot — rotate, don't sleep.
+        """
+        slept = []
+
+        async def no_sleep(seconds):
+            slept.append(seconds)
+
+        monkeypatch.setattr(wrapper.asyncio, "sleep", no_sleep)
+        provider = _install(monkeypatch, lambda m, k, n, kw: "429-day")
+        choice = await tracker.get_model_for_synthesis()
+
+        with pytest.raises(litellm.RateLimitError):
+            if streaming:
+                await wrapper.stream_prose_agent(
+                    "s", "u", model=choice.model, on_token=lambda _t: None,
+                    api_key=choice.api_key)
+            else:
+                await wrapper.call_prose_agent(
+                    "s", "u", model=choice.model, api_key=choice.api_key)
+
+        assert len(provider.calls) == 1 and slept == []
+
+    @pytest.mark.asyncio
     async def test_in_place_retries_are_charged(self, tracker, monkeypatch):
         provider = _install(monkeypatch, lambda m, k, n, kw: "500", good="answer")
         with pytest.raises(ProseAgentFailed):
