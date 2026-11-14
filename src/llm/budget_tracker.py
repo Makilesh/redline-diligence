@@ -22,6 +22,7 @@ RATE LIMITERS:
 
 import asyncio
 import os
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
@@ -62,6 +63,21 @@ MAX_SERVICE_COOLDOWN_SECONDS = 1800.0
 # times to sit at the 720s maximum gets two chances to recover within this
 # window before the run is abandoned.
 PIN_MAX_WAIT_SECONDS = float(os.getenv("SYNTHESIS_PIN_MAX_WAIT_SECONDS", "1800"))
+
+# How long a (key, model) slot sits out after a per-MINUTE 429 when the provider
+# did not say how long to wait. Per-minute limits are enforced over a rolling
+# minute, so a full minute is the longest the refusal can remain true.
+RATE_LIMIT_COOLDOWN_SECONDS = 60.0
+# Bounds on a provider-supplied retry delay, so a malformed or hostile value can
+# neither spin the selector nor park a slot for hours.
+MIN_RATE_LIMIT_COOLDOWN_SECONDS = 1.0
+MAX_RATE_LIMIT_COOLDOWN_SECONDS = 300.0
+
+# A note about which quota a 429 tripped is only trusted for this long. It is
+# written by the call wrapper at the moment of failure and read by
+# mark_slot_exhausted a few statements later; anything older belongs to some
+# other request.
+QUOTA_HINT_TTL_SECONDS = 30.0
 
 
 def _utc_today() -> date:
@@ -386,6 +402,184 @@ class BudgetTracker:
         """True if this (key, model) pair has been found permanently unusable."""
         return slot in getattr(self, "_unavailable_slots", ())
 
+    def key_index_of(self, api_key: str | None) -> int:
+        """
+        Position of a live API key, or -1 if it is unknown, retired or absent.
+
+        Lets the call wrapper settle accounts for a request knowing only the
+        credential it was sent with — the agents pass `model` and `api_key`
+        down, not the ModelChoice they came from.
+
+        Args:
+            api_key: Credential a request was sent with.
+
+        Returns:
+            Index into the key list, or -1.
+        """
+        if not api_key:
+            return -1
+        try:
+            return self._api_keys.index(api_key)
+        except ValueError:
+            return -1
+
+    # ── Per-minute refusals ──────────────────────────────────────────────────
+    #
+    # A 429 does not always mean the day is spent. Gemini names the quota that
+    # tripped, and a per-minute one (RPM drift between processes, or TPM, which
+    # is not metered here at all) clears within the minute. Marking the slot
+    # exhausted for that — the only response the tracker used to have — set
+    # used_today to the limit: measured in the scenario harness, one 429 on a
+    # volume slot recorded 475 units against a single request the provider had
+    # not even served.
+
+    def note_quota_refusal(
+        self,
+        key_index: int,
+        model: str,
+        per_minute: bool,
+        retry_after: float | None = None,
+    ) -> None:
+        """
+        Records which quota a 429 tripped, for the mark_slot_exhausted call that
+        follows it.
+
+        The split exists because the two facts arrive in different places: the
+        call wrapper sees the exception (and so the quota id), while the ladder
+        loops in the agents call mark_slot_exhausted(key_index, model) with no
+        exception in hand. The note carries the detail across without changing
+        that call's signature.
+
+        Args:
+            key_index: Position of the API key.
+            model: Upstream model that refused.
+            per_minute: True if the provider attributed the 429 to a per-minute
+                limit.
+            retry_after: Seconds the provider asked for, when it said.
+        """
+        if key_index < 0 or is_local(model):
+            return
+        if not hasattr(self, "_quota_hints"):
+            self._quota_hints = {}
+        self._quota_hints[self._slot(key_index, model)] = (
+            per_minute, retry_after, time.monotonic()
+        )
+
+    def _take_quota_hint(self, slot: str) -> tuple[bool, float | None] | None:
+        """Pops a fresh note left by note_quota_refusal, if there is one."""
+        hints = getattr(self, "_quota_hints", None)
+        if not hints:
+            return None
+        hint = hints.pop(slot, None)
+        if hint is None:
+            return None
+        per_minute, retry_after, noted_at = hint
+        if time.monotonic() - noted_at > QUOTA_HINT_TTL_SECONDS:
+            return None
+        return per_minute, retry_after
+
+    def _cool_slot(self, slot: str, seconds: float | None) -> float:
+        """Sidelines one (key, model) slot for a bounded time; returns the time."""
+        wait = RATE_LIMIT_COOLDOWN_SECONDS if seconds is None else seconds
+        wait = max(MIN_RATE_LIMIT_COOLDOWN_SECONDS, min(wait, MAX_RATE_LIMIT_COOLDOWN_SECONDS))
+        if not hasattr(self, "_slot_cooldowns"):
+            self._slot_cooldowns = {}
+        self._slot_cooldowns[slot] = time.monotonic() + wait
+        return wait
+
+    def _slot_in_cooldown(self, slot: str) -> bool:
+        """True while a slot is sitting out a per-minute refusal."""
+        cooldowns = getattr(self, "_slot_cooldowns", None)
+        if not cooldowns:
+            return False
+        until = cooldowns.get(slot)
+        if until is None:
+            return False
+        if until <= time.monotonic():
+            del cooldowns[slot]
+            return False
+        return True
+
+    # ── Keeping the daily counter equal to what the provider served ──────────
+
+    async def refund_slot(self, key_index: int, model: str) -> None:
+        """
+        Returns one daily unit for a request the provider did not serve.
+
+        The unit is debited at selection, before the call, because that is the
+        only point where the debit can be atomic with the capacity check. So a
+        request the provider then refuses — 503, a rejected key, a revoked
+        model, a per-minute 429 — has already been charged. On a 20-RPD
+        reasoning slot that is 5% of the day per refusal, and a 503 spell
+        produces them in runs.
+
+        Never refunds a slot the provider itself has declared spent today: a
+        concurrent request's refund must not reopen a rung the provider has
+        closed.
+
+        Args:
+            key_index: Position of the API key, or -1 for local (ignored).
+            model: Upstream model the request was sent to.
+        """
+        if key_index < 0 or is_local(model):
+            return
+        slot = self._slot(key_index, model)
+        today = _utc_today()
+        if getattr(self, "_provider_exhausted", {}).get(slot) == today:
+            return
+
+        if getattr(self, "_is_mock", False):
+            b = self._mock_budgets.get(slot)
+            if b and b["reset_date"] == today.isoformat() and b["used_today"] > 0:
+                b["used_today"] -= 1
+            return
+
+        try:
+            async with self._pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE api_budget SET used_today = used_today - 1 "
+                    "WHERE model_key = $1 AND used_today > 0 AND reset_date = $2::date",
+                    slot, today,
+                )
+        except Exception as e:
+            # A lost refund over-counts by one; never worth failing the request.
+            logger.error("Failed to refund slot", extra={"slot": slot, "error": str(e)})
+
+    async def charge_extra_request(self, key_index: int, model: str) -> bool:
+        """
+        Accounts for one more provider request on a slot already selected.
+
+        Selection pays for exactly one request. A same-slot retry (a JSON repair
+        request, a prose retry after an empty completion) is a second request
+        the provider counts against RPM and RPD, and it used to be free: up to
+        three requests went out against one debited unit, so the local counter
+        ran behind the provider's precisely when calls were failing.
+
+        Never blocks. If the slot has no window or no daily allowance left the
+        answer is False and the caller should move on rather than retry here.
+
+        Args:
+            key_index: Position of the API key, or -1 for local.
+            model: Upstream model.
+
+        Returns:
+            True if the request is accounted for and may be sent.
+        """
+        if key_index < 0 or is_local(model):
+            return True
+        if key_index >= len(self._api_keys) or not self._api_keys[key_index]:
+            return False
+        slot = self._slot(key_index, model)
+        if self._slot_is_unavailable(slot) or self._slot_in_cooldown(slot):
+            return False
+        limiter = self._get_rate_limiter(slot)
+        if not await limiter.try_acquire():
+            return False
+        if await self._try_consume(slot):
+            return True
+        await limiter.release()
+        return False
+
     def skip_model_for_request(self, model: str) -> None:
         """
         Marks a model as provider-side unavailable for a short cooldown.
@@ -456,7 +650,12 @@ class BudgetTracker:
             del cooldowns[m]
         return set(cooldowns)
 
-    async def _select_from_ladder(self, ladder: list[str], purpose: str) -> ModelChoice:
+    async def _select_from_ladder(
+        self,
+        ladder: list[str],
+        purpose: str,
+        exclude: frozenset[str] | tuple[str, ...] = (),
+    ) -> ModelChoice:
         """
         Walks a model ladder and the configured keys to find capacity.
 
@@ -481,6 +680,10 @@ class BudgetTracker:
         Args:
             ladder: Models in preference order.
             purpose: "synthesis" or "agent", for logging.
+            exclude: Models to pass over for THIS request only — rungs that
+                already returned unusable output to the caller. Unlike a
+                cooldown this says nothing about the model's health, so it
+                must not affect any other request.
 
         Returns:
             ModelChoice naming the model and the key to bill it to.
@@ -491,32 +694,42 @@ class BudgetTracker:
         for model in ladder:
             if is_local(model):
                 break
-            if model in cooled:
+            if model in cooled or model in exclude:
                 continue
             for key_index, api_key in enumerate(self._api_keys):
                 if not api_key:  # retired by mark_key_unusable
                     continue
                 slot = self._slot(key_index, model)
-                if self._slot_is_unavailable(slot):
+                if self._slot_is_unavailable(slot) or self._slot_in_cooldown(slot):
                     continue
                 if not await self._budget_available(slot):
                     continue
-                if not await self._get_rate_limiter(slot).try_acquire():
+                limiter = self._get_rate_limiter(slot)
+                if not await limiter.try_acquire():
                     continue
                 if await self._try_consume(slot):
                     return ModelChoice(model=model, api_key=api_key, key_index=key_index)
+                # Lost the race for the slot's last daily unit: the request is
+                # going elsewhere, so the window entry taken for it goes back.
+                await limiter.release()
 
         # Pass 2 — everything is rate-limited; wait rather than degrade quality.
         # Cooldowns are ignored here: if the only remaining capacity is on a
         # model the provider just 503'd, trying it beats degrading to local.
+        #
+        # A slot the PROVIDER rate-limited is different from one our own window
+        # says is full: its wait is not ours to measure, so it is passed over
+        # here rather than slept on.
         for model in ladder:
             if is_local(model):
                 break
+            if model in exclude:
+                continue
             for key_index, api_key in enumerate(self._api_keys):
                 if not api_key:  # retired by mark_key_unusable
                     continue
                 slot = self._slot(key_index, model)
-                if self._slot_is_unavailable(slot):
+                if self._slot_is_unavailable(slot) or self._slot_in_cooldown(slot):
                     continue
                 if not await self._budget_available(slot):
                     continue
@@ -524,9 +737,11 @@ class BudgetTracker:
                     "All slots rate-limited; waiting for capacity",
                     extra={"purpose": purpose, "model": model, "key_index": key_index},
                 )
-                await self._get_rate_limiter(slot).acquire()
+                limiter = self._get_rate_limiter(slot)
+                await limiter.acquire()
                 if await self._try_consume(slot):
                     return ModelChoice(model=model, api_key=api_key, key_index=key_index)
+                await limiter.release()
 
         logger.warning(
             "All cloud quota exhausted, falling back to local model",
@@ -657,7 +872,9 @@ class BudgetTracker:
                 return True
         return False
 
-    async def get_model_for_agent(self) -> ModelChoice:
+    async def get_model_for_agent(
+        self, exclude: frozenset[str] | tuple[str, ...] = ()
+    ) -> ModelChoice:
         """
         Picks a model for the high-volume agent calls.
 
@@ -668,9 +885,15 @@ class BudgetTracker:
         drained by five queries and then be unavailable to synthesis, which is
         where that quality actually matters.
 
+        Args:
+            exclude: Models to pass over for this request only (see
+                _select_from_ladder).
+
         Returns:
             ModelChoice with the model and the API key to bill it to.
         """
+        if exclude:
+            return await self._select_from_ladder(AGENT_LADDER, "agent", exclude)
         return await self._select_from_ladder(AGENT_LADDER, "agent")
 
     async def mark_slot_exhausted(self, key_index: int, model: str) -> None:
@@ -694,6 +917,13 @@ class BudgetTracker:
         Burning the local counter makes the provider's 429 authoritative, so the
         next selection skips this rung immediately.
 
+        That is the right response to a per-DAY refusal only. When the call
+        wrapper has noted (note_quota_refusal) that this 429 was a per-minute
+        limit, the slot is rested for the provider's retry delay instead and the
+        day's allowance is left alone. With no note the refusal is treated as
+        daily, as it always was: on the free tier the daily cap is the one that
+        binds, and guessing "per-minute" would re-offer a spent slot each time.
+
         Args:
             key_index: Position of the API key, or -1 for local (ignored).
             model: Upstream model the provider refused.
@@ -704,6 +934,20 @@ class BudgetTracker:
         slot = self._slot(key_index, model)
         limit = self._slot_limit(slot)
         today = _utc_today()
+
+        hint = self._take_quota_hint(slot)
+        if hint is not None and hint[0]:
+            wait = self._cool_slot(slot, hint[1])
+            logger.warning(
+                "Provider rate-limited this slot per minute; resting it",
+                extra={"model": model, "key_index": key_index,
+                       "cooldown_seconds": round(wait, 1)},
+            )
+            return
+
+        if not hasattr(self, "_provider_exhausted"):
+            self._provider_exhausted = {}
+        self._provider_exhausted[slot] = today
 
         logger.warning(
             "Provider refused further calls; marking slot exhausted for today",
