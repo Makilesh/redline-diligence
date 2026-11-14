@@ -64,8 +64,14 @@ RERANKER_FP16 = os.getenv("RERANKER_FP16", "auto").strip().lower()
 
 # Pairs per forward pass. Pairs are sorted by length before batching (see
 # _score_pairs), so a batch is padded to the length of its own longest member
-# rather than to the longest passage in the whole candidate set.
-RERANKER_BATCH_SIZE = int(os.getenv("RERANKER_BATCH_SIZE", "16"))
+# rather than to the longest passage in the whole candidate set — which is why
+# small batches win here: fewer short pairs are padded up to a long neighbour.
+# Measured on an RTX 5070 Ti laptop GPU in fp16, p50 over the eval questions,
+# 20 pairs per pass (one pass / every pass of a decomposed question in one call):
+#   batch 4: 116 / 412 ms   batch 8: 137 / 397 ms
+#   batch 16: 187 / 414 ms  batch 32: 210 / 534 ms
+# A GPU with more headroom may prefer a larger value.
+RERANKER_BATCH_SIZE = int(os.getenv("RERANKER_BATCH_SIZE", "8"))
 
 # ==============================================================================
 # Model singletons — lazily loaded on first use
