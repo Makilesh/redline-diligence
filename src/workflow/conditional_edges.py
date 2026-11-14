@@ -103,7 +103,14 @@ def route_after_quality_check(state: AgentState) -> str:
     # The thresholds read reranker relevance; an answerability veto says the
     # relevant passages still do not state what was asked, so it overrides them.
     vetoed = bool(state.get("answerability_veto", False))
-    if score >= 0.3 and _meets_type_threshold(state) and not vetoed:
+    # So does the assessor's own refusal. This edge is THE admit/refuse
+    # decision (the retrieval harness calls it too); it used to ignore
+    # force_refusal, so an LLM assessment of "refuse" with passing scores was
+    # routed to the synthesizer, which then returned the canned refusal while
+    # the trace reported the gate as passed (audit W3/C2). Every assessor pass
+    # writes force_refusal, so it is never left over from an earlier pass.
+    refused = bool(state.get("force_refusal", False))
+    if score >= 0.3 and _meets_type_threshold(state) and not vetoed and not refused:
         logger.info(
             "Quality check passed, routing to synthesizer",
             extra={"score": score, "iteration": iteration},
@@ -121,7 +128,12 @@ def route_after_quality_check(state: AgentState) -> str:
 
     logger.info(
         "Quality insufficient, routing to rewriter",
-        extra={"score": score, "iteration": iteration, "answerability_veto": vetoed},
+        extra={
+            "score": score,
+            "iteration": iteration,
+            "answerability_veto": vetoed,
+            "force_refusal": refused,
+        },
     )
     return "query_rewriter"
 

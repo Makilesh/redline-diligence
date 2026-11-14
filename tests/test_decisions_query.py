@@ -172,7 +172,10 @@ async def test_ambiguous_band_still_asks_llm_when_not_vetoed(monkeypatch):
 
     async def fake_llm(**kwargs):
         seen["called"] = True
-        return {"context_quality_score": 0.5, "quality_breakdown": {"relevance": 0.5},
+        # All three dimensions: a reply missing one is now treated as unusable
+        # (test_quality_assessor_llm_output.py).
+        return {"context_quality_score": 0.5,
+                "quality_breakdown": {"relevance": 0.5, "completeness": 0.5, "precision": 0.5},
                 "missing_aspects": [], "force_refusal": False}
 
     monkeypatch.setattr(qa.BudgetTracker, "get_instance", staticmethod(get_instance))

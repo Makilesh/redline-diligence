@@ -4,7 +4,14 @@ Prompt template for Quality Assessor Agent (Agent 5).
 Primary: heuristics (no LLM, ~60% of queries)
 Fallback: the agent ladder's current model, only on ambiguity
 JSON mode when LLM invoked: response_format={"type": "json_object"}
+
+The chunks arrive as escaped <document> elements and the system prompt carries
+UNTRUSTED_DOCUMENTS_RULE, like the synthesis and validation prompts: this
+prompt's force_refusal can suppress an answer, so document text must not be
+able to speak to it.
 """
+
+from src.verification.prompt_safety import UNTRUSTED_DOCUMENTS_RULE
 
 QUALITY_ASSESSOR_SYSTEM_PROMPT = """You are a Quality Assessor for M&A Due Diligence retrieval results. Evaluate whether the retrieved context is sufficient to answer the query.
 
@@ -29,7 +36,8 @@ Return a JSON object:
 Set force_refusal=true ONLY if:
 1. No chunks are even remotely relevant to the query
 2. The question asks about information that clearly doesn't exist in the data room
-"""
+
+""" + UNTRUSTED_DOCUMENTS_RULE + "\n"
 
 QUALITY_ASSESSOR_USER_TEMPLATE = """Assess context quality for this query:
 
