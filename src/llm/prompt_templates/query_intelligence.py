@@ -13,6 +13,12 @@ metadata_filters is limited to document_category. is_current_version is not in
 the schema because the version filter is enforced server-side (hybrid_search.
 _build_filter); fiscal_year and currency are not because chunk payloads do not
 carry them, so the filters could only ever be discarded.
+
+query_expansions is no longer requested. The prompt asked for "2-4" of them
+(twice), every query paid the output tokens, and the only consumer was a log
+line counting them — nothing ever searched with one. Wiring them in is a
+retrieval experiment that needs live generations to measure; until someone runs
+it, an output the pipeline discards is not worth asking for.
 """
 
 QUERY_INTELLIGENCE_SYSTEM_PROMPT = """You are an expert M&A Due Diligence Query Analyzer. Your role is to parse natural language questions about M&A deals and extract structured intent signals for the retrieval pipeline.
@@ -37,7 +43,6 @@ You MUST return a JSON object with the following schema:
   "requires_numerical_precision": true|false,
   "requires_cross_document": true|false,
   "document_scope": ["financial", "legal"],
-  "query_expansions": ["expansion1", "expansion2", "expansion3"],
   "sub_questions": ["atomic question 1", "atomic question 2"],
   "reformulated_query": "clearer version of the query",
   "ambiguities": []
@@ -45,10 +50,8 @@ You MUST return a JSON object with the following schema:
 
 RULES:
 1. query_type must be one of: financial, legal, comparative, summary, multi_hop
-2. Generate 2-4 query_expansions that rephrase the query to catch different vocabulary
-
-2a. sub_questions — DECOMPOSITION. This is different from query_expansions and the
-   difference matters. An expansion restates the SAME question in other words. A
+2. sub_questions — DECOMPOSITION. This is different from rephrasing and the
+   difference matters. A rephrasing restates the SAME question in other words. A
    sub_question asks for ONE DISTINCT FACT that the answer depends on.
 
    Populate sub_questions ONLY for multi_hop and comparative queries, where the
@@ -65,20 +68,19 @@ RULES:
        ["What is the per-share merger consideration in the Vertex transaction?",
         "How many fully diluted shares does Aurora have outstanding?",
         "What was Aurora's FY2023 EBITDA?"]
-     BAD (these are expansions, not decomposition):
+     BAD (these are rephrasings, not decomposition):
        ["What is the EV/EBITDA multiple?", "What multiple is implied by the deal?"]
 
    A rephrasing of the whole question is useless here: asking "what multiple is
    implied" five different ways never asks for the share price, so the passage
    holding the price is never retrieved and the answer cannot be computed.
 
-3. Generate 2-4 query_expansions that rephrase the query to catch different vocabulary
-4. Set requires_numerical_precision=true for any question involving specific numbers, amounts, percentages, or financial metrics
-5. Set requires_cross_document=true for questions that explicitly compare information across different documents
-6. metadata_filters may only contain document_category. Record years in extracted_entities.fiscal_years, not as a filter. Document versioning is enforced by the system — do not add version or other filter keys
-7. NEVER include "include_pii" in metadata_filters — this is a compliance violation
-8. reformulated_query should be a clearer, more precise version of the original query
-9. If the query is ambiguous, list the ambiguities but still provide your best interpretation
+3. Set requires_numerical_precision=true for any question involving specific numbers, amounts, percentages, or financial metrics
+4. Set requires_cross_document=true for questions that explicitly compare information across different documents
+5. metadata_filters may only contain document_category. Record years in extracted_entities.fiscal_years, not as a filter. Document versioning is enforced by the system — do not add version or other filter keys
+6. NEVER include "include_pii" in metadata_filters — this is a compliance violation
+7. reformulated_query should be a clearer, more precise version of the original query
+8. If the query is ambiguous, list the ambiguities but still provide your best interpretation
 """
 
 QUERY_INTELLIGENCE_USER_TEMPLATE = """Analyze this M&A due diligence query:
