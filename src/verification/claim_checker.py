@@ -285,6 +285,11 @@ class _FigureView:
             n.raw for n in nums if n.kind == "quantity" and n.status != "grounded"
         ]
         self.unbound = [n.raw for n in figures if n.binding == "unbound"]
+        # Of those, results of a written-out equation whose inputs are not all
+        # tied to what the claim names (numeric_grounding, Decision 73).
+        self.computed_unbound = [
+            n.raw for n in figures if n.binding == "unbound" and n.status == "derived"
+        ]
         self.confirmed = (
             bool(figures)
             and all(n.is_confirmed for n in figures)
@@ -829,10 +834,19 @@ async def verify_answer(
             undecided.append(claim.index)
             check["score"] = round(entail, 3) if ev else None
             if unbound:
-                check["reason"] = (
-                    "figure(s) present in the documents but not in a passage this "
-                    "statement names: " + ", ".join(unbound)
-                )
+                present = [raw for raw in unbound if raw not in view.computed_unbound]
+                reasons = []
+                if present:
+                    reasons.append(
+                        "figure(s) present in the documents but not in a passage this "
+                        "statement names: " + ", ".join(present)
+                    )
+                if view.computed_unbound:
+                    reasons.append(
+                        "computed as written, from figures this statement does not tie "
+                        "to a line of the documents: " + ", ".join(view.computed_unbound)
+                    )
+                check["reason"] = "; ".join(reasons)
             elif nli_available and ev is None:
                 check["reason"] = "no retrieved passage shares vocabulary with this claim"
         checks.append(check)
