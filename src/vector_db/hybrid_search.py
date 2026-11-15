@@ -302,6 +302,7 @@ async def hybrid_search(
     top_k_sparse: int = 40,
     client: AsyncQdrantClient | None = None,
     include_superseded: bool = False,
+    extra_conditions: list | None = None,
 ) -> tuple[list[ScoredPoint], list[ScoredPoint]]:
     """
     Executes dense and sparse searches in parallel with metadata constraints
@@ -320,6 +321,10 @@ async def hybrid_search(
         client: AsyncQdrantClient instance.
         include_superseded: Trusted override to also search superseded
                             document versions. Never derived from LLM output.
+        extra_conditions: Trusted, code-built conditions added to the filter
+                          (filing_period's same-registrant lookup). Never
+                          derived from LLM output, which goes through the
+                          metadata_filters whitelist instead.
 
     Returns:
         Tuple of (dense_results, sparse_results) as ScoredPoint lists.
@@ -333,6 +338,8 @@ async def hybrid_search(
     qdrant_filter = _build_filter(
         deal_id, metadata_filters, include_superseded=include_superseded
     )
+    if extra_conditions:
+        qdrant_filter.must.extend(extra_conditions)
 
     start = time.monotonic()
 

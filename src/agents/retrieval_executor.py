@@ -10,6 +10,8 @@ import time
 
 from src.vector_db.reranker import embed_texts_async, get_embed_executor, rerank_pairs_async
 from src.vector_db.hybrid_search import hybrid_search, compute_sparse_bm25
+from src.vector_db.filing_period import prefer_named_period
+from src.vector_db.representation_cap import cap_table_representations
 from src.vector_db.rrf_fusion import reciprocal_rank_fusion
 from src.vector_db.parent_child_retrieval import expand_context
 from src.agents.retrieval_strategy import clamp_retrieval_config, get_retrieval_config
@@ -69,6 +71,16 @@ async def _candidates_for_query(
         top_k_dense=config.get("top_k_dense", 40),
         top_k_sparse=config.get("top_k_sparse", 40),
     )
+    # Another year's filing of the same company is set aside when the question
+    # names a period that one of that company's filings covers (filing_period.py;
+    # a no-op for documents without filing metadata).
+    dense_results, sparse_results, _ = await prefer_named_period(
+        query, dense_results, sparse_results,
+        query_vector=query_vector, query_sparse=query_sparse, deal_id=deal_id,
+        metadata_filters=metadata_filters,
+        top_k_dense=config.get("top_k_dense", 40),
+        top_k_sparse=config.get("top_k_sparse", 40),
+    )
 
     fused = reciprocal_rank_fusion(
         dense_results=dense_results,
@@ -79,11 +91,9 @@ async def _candidates_for_query(
     )
 
     payloads = {p.payload["chunk_id"]: p.payload for p in (*dense_results, *sparse_results)}
-    return [
-        payloads[cid]
-        for cid, _ in fused[: config.get("reranker_top_k", 20)]
-        if cid in payloads
-    ]
+    # One converter table holds one of the reranker's slots (representation_cap.py).
+    ranked = cap_table_representations([cid for cid, _ in fused if cid in payloads], payloads)
+    return [payloads[cid] for cid in ranked[: config.get("reranker_top_k", 20)]]
 
 
 async def _retrieve_for_queries(
