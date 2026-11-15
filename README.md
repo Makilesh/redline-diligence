@@ -221,23 +221,23 @@ Run it: `python -m eval.run_retrieval_eval --baseline eval/baseline.json` — ex
 
 ### End-to-end (live, quota-dependent)
 
-`tests/run_end_to_end_validation.py` drives the whole pipeline through the API against a freshly re-indexed data room. The latest run (2026-11-15, after the November rework) next to the run previously committed in [`RESULTS.md`](RESULTS.md) (2026-08-25):
+`tests/run_end_to_end_validation.py` drives the whole pipeline through the API against a freshly re-indexed data room. The run committed in August, the first run after the November rework, and the run after rounds 2–3 (figure veto, real-document parser fixes, round-2 routing deadlines and the 8,192-token synthesis budget of Decision 66), now in [`RESULTS.md`](RESULTS.md):
 
-| Metric | 2026-08-25 | **2026-11-15** |
-|---|---|---|
-| Completed without an unhandled exception | 41/41 | 41/41 |
-| Answerable questions answered | 35/35 | 35/35 |
-| Mean fact recall | 80.1% | **90.5%** |
-| Answers containing every expected fact | 20/35 | **27/35** |
-| Citation-source match | 31/35 | **33/35** |
-| Controls where the engine did **not** fabricate | 6/6 | 6/6 |
-| Latency p50 / p90 | 27.0 s / 63.6 s | **14.6 s / 33.5 s** |
-| Verification: passed / warning / failed | 36 / 5 / 0 | 8 / 26 / 7 |
-| Synthesis model mix | `3.6-flash` ×33, `3.5-flash` ×4, `3-flash-preview` ×1 | `3-flash-preview` ×46, `2.5-flash` ×5 |
+| Metric | 2026-08-25 | 2026-11-15 am | **2026-11-15 pm** |
+|---|---|---|---|
+| Completed without an unhandled exception | 41/41 | 41/41 | 41/41 |
+| Answerable questions answered | 35/35 | 35/35 | 34/35 |
+| Mean fact recall | 80.1% | 90.5% | 88.0% |
+| Answers containing every expected fact | 20/35 | 27/35 | 26/35 |
+| Citation-source match | 31/35 | 33/35 | 31/35 |
+| Controls where the engine did **not** fabricate | 6/6 | 6/6 | 6/6 |
+| Latency p50 / p90 | 27.0 s / 63.6 s | 14.6 s / 33.5 s | 27.8 s / 73.7 s |
+| Verification: passed / warning / failed | 36 / 5 / 0 | 8 / 26 / 7 | 10 / 27 / 4 |
+| Synthesis model mix | `3.6-flash` ×33, `3.5-flash` ×4, `3-flash-preview` ×1 | `3-flash-preview` ×46, `2.5-flash` ×5 | `3-flash-preview` ×31, `3.6-flash` ×27 |
 
 Two things to read before comparing. **The November run was served by a lower rung**: during it, `gemini-3.7-flash` timed out and `3.6`/`3.5-flash` returned 503 "high demand"; each was cooled model-wide and synthesis moved down the ladder with no answer lost (the slowest query is one 120 s timeout before that happened). The gains above came despite that, but the runs are not controlled for model. **The verification mix moved because the checker got stricter, not because answers got worse**: the August validator passed 36 of 41 answers while the benchmark later showed it let 41% of wrong claims through. Of the seven November failures, one is a clear catch (mh_06: a computed closing-cash total that appears in no document, 0% recall), one flags a percentage column the model invented, and five are judge-confirmed contradictions where an answer mis-stated or embellished a detail.
 
-Runs before Decision 66 gave synthesis 3,000 tokens, shared with thinking. In the 2026-11-15 evening run, 29 of 54 synthesis calls ran out. mh_05 and mh_04 shipped as ~500-character fragments, and mh_06 was lost when three rungs were cut off before their first citation. Those runs understate multi-hop recall.
+**The evening runs found two defects, both fixed.** Runs before Decision 66 gave synthesis 3,000 tokens, shared with thinking. A first evening run, mostly on `gemini-3.6-flash`, which thinks longer, had 29 of 54 synthesis calls run out: mh_05 and mh_04 shipped as ~500-character fragments, mh_06 was lost when three rungs were cut off before their first citation, and recall fell to 84.9%. With the 8,192-token budget, the run in the table had no truncated answer (57 of 58 calls stopped on their own, and one used its single retry), and mh_04, mh_05, mh_06, legal_05 and comp_04 recovered. Its one unanswered question, fin_06, was lost to a quota error: LiteLLM reported a daily-quota 429 as HTTP 400, and the classifier took it for an invalid request instead of moving down the ladder. That is fixed too, but not yet rerun live. Latency rose because answers are now finished rather than cut, on a slower-thinking model mix. Runs before Decision 66 understate multi-hop recall.
 
 **One caveat matters enough to state up front.** End-to-end recall on this set moves with *which synthesis model served the run*, and that depends on daily quota and provider health rather than on anything in this repository. Runs of identical questions against an identical index have scored 86.6%, 73.9%, 71.0%, 85.9%, 62.1%, 86.3% and 80.1% on the earlier pipelines — the 62.1% run coincided with a Gemini incident that truncated a third of its answers, and 86.3% and 80.1% are both clean runs with zero answers lost upstream ([Decision 48](DECISIONS_LOG.md)) — and 90.5% on the November pipeline, with zero answers lost despite three reasoning models being down during the run. [`RESULTS.md`](RESULTS.md) therefore records the synthesis model mix and upstream-failure count with every report, and retrieval changes are measured with the deterministic harness above instead.
 
