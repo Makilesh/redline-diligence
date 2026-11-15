@@ -38,6 +38,16 @@ _SINGLE_DASH_RULE = re.compile(r"^\s*-{2,}\s*$")
 
 MAX_HEADING_CHARS = 100
 
+# A cell of more words than this is running prose, not a table cell. Contracts
+# filed as text (EDGAR exhibits, the LegalBench-RAG corpora) put a whole
+# clause on one line and pad the enumeration with spaces — "(e)    'Affiliated
+# Group' means an affiliated group as defined in Section 1504 of the Code ..."
+# — which has two "cells" and a digit, so it read as a table row: 110 of the
+# 202 sections of one merger agreement were indexed as tables, with no parent
+# section and table-sibling expansion over whole articles. The longest real
+# cell in the sample data room's tables is 12 words (a wrapped key/value row).
+MAX_TABLE_CELL_WORDS = 15
+
 # Share of control characters above which a decoded file is treated as binary.
 _MAX_CONTROL_SHARE = 0.02
 
@@ -99,9 +109,14 @@ def _is_table_line(line: str) -> bool:
     if _COLUMN_RULE.match(line):
         return True
     cells = re.split(r"\s{2,}", line.strip())
-    if len(cells) < 2:
+    if len(cells) < 2 or _has_prose_cell(cells):
         return False
     return any(re.search(r"\d", c) for c in cells[1:])
+
+
+def _has_prose_cell(cells: list[str]) -> bool:
+    """True when one of the space-separated "cells" is a run of prose."""
+    return any(len(cell.split()) > MAX_TABLE_CELL_WORDS for cell in cells)
 
 
 def _is_heading_line(line: str, prev_line: str | None) -> bool:
@@ -253,8 +268,10 @@ def parse_text_sections(text: str) -> list[dict]:
                 and any(ch.islower() for ch in stripped)
             )
             # Key/value rows without digits ("Security:     First priority lien")
-            # continue a table once one is open.
-            is_multi_cell = len(re.split(r"\s{2,}", stripped)) >= 2
+            # continue a table once one is open; a paragraph whose sentences
+            # are separated by two spaces does not.
+            row_cells = re.split(r"\s{2,}", stripped)
+            is_multi_cell = len(row_cells) >= 2 and not _has_prose_cell(row_cells)
             # Deeply indented lines are a wrapped cell from the row above.
             is_wrapped_cell = len(line) - len(line.lstrip()) >= 8
             if (
