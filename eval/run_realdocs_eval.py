@@ -1029,12 +1029,11 @@ def parse_args(argv=None):
     parser.add_argument("--max-documents", type=int, help="FinanceBench: seeded sample of N filings")
     parser.add_argument("--documents", nargs="+", metavar="DOC_NAME", help="FinanceBench: exactly these filings")
     parser.add_argument("--split", choices=("dev", "test"),
-                        help="FinanceBench: the questions of one half of the companies (fixed seed); "
+                        help="tuning half. LegalBench-RAG: the queries about one half of each "
+                             "sub-corpus's documents (--split-seed); the whole corpus is still indexed. "
+                             "FinanceBench: the questions of one half of the companies (fixed seed); "
                              "with --store the other half's filings stay in the index as distractors")
     parser.add_argument("--seed", type=int, default=20261115, help="FinanceBench sampling seed")
-    parser.add_argument("--split", choices=("dev", "test"),
-                        help="LegalBench-RAG: ask only the queries about this half of the documents "
-                             "(split_legalbench_documents); the whole corpus is still indexed")
     parser.add_argument("--retrieval-config", metavar="JSON",
                         help="LegalBench-RAG: overrides merged into the legal retrieval config, "
                              '(JSON), e.g. {"dense_weight": 0.6, "sparse_weight": 0.4}')

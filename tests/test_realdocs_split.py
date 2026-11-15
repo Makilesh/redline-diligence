@@ -40,3 +40,13 @@ def test_the_recorded_split_has_not_drifted():
 
 
 RECORDED_MAUD4_DEV = ["maud/doc_01.txt", "maud/doc_03.txt"]
+
+
+def test_the_cli_accepts_split_for_both_benchmarks():
+    # Both benchmarks' tuning splits share one --split flag; defining it twice
+    # made argparse refuse to start the harness at all.
+    from eval.run_realdocs_eval import parse_args
+
+    for benchmark in ("legalbench", "financebench"):
+        args = parse_args([benchmark, "--split", "test"])
+        assert args.split == "test"
