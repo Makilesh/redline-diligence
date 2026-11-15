@@ -7,14 +7,17 @@ something about the documents and drops what does not:
 
 - headings, horizontal rules, table header/separator rows;
 - lines that are only citation markers;
-- list lead-ins ("Key adjustments:") that carry no figure;
+- list lead-ins ("Key adjustments:", "Atlas Data Holdings (Private Equity
+  Consortium)") and "[Sources: ...]" lines that carry no figure;
 - fragments too short to assert anything.
 
 A statement of absence ("the data room does not disclose X", "the indemnity
 cap is not specified") is kept, and marked: it is the designed way to decline,
 but it is also a claim that can be false, and a false one tells the reviewer a
 term or a risk does not exist. An entailment model cannot confirm an absence,
-so these are put to the judge only (see claim_checker).
+so these are put to the judge only (see claim_checker). The items of a list
+under a lead-in that says what the evidence lacks ("The data room lacks:")
+are statements of absence too.
 
 Each claim remembers the citation markers that support it: its own, or — when
 a sentence has none — the nearest marker in the same paragraph, which is how
@@ -59,11 +62,24 @@ _EVIDENCE_NOUN = (
 )
 _INFO_VERB = (
     r"(?:contain|include|state|specify|disclose|provide|mention|address|give|identify"
-    r"|quantify|break\s+out|itemi[sz]e|report|indicate|show)"
+    r"|quantify|break\s+out|itemi[sz]e|report|indicate|show|list|discuss|detail)"
 )
+# "does not explicitly state", "are not fully detailed".
+_HEDGE = r"(?:(?:explicitly|expressly|specifically|directly|clearly|fully|separately)\s+)?"
 DECLINES_TO_ANSWER = re.compile(
     # The evidence does not contain / state / disclose …
-    rf"\b{_EVIDENCE_NOUN}\b[^.;]{{0,120}}\b(?:do(?:es)?|did)\s+not\s+{_INFO_VERB}"
+    rf"\b{_EVIDENCE_NOUN}\b[^.;]{{0,120}}\b(?:do(?:es)?|did)\s+not\s+{_HEDGE}{_INFO_VERB}"
+    # "The provided agreement contains no provision …", "The data room lacks:".
+    # Phrasings measured on the dev half of the live-answer replay
+    # (eval/run_answer_replay.py, Decision 72), where correct declines written
+    # this way were scored as ordinary claims and flagged "not supported".
+    # Only the copy in front of the model or the room as a whole: "The BAA has
+    # no assignment restriction" is a term of the contract, not a gap in the
+    # evidence, and stays an ordinary claim.
+    rf"|\b(?:(?:provided|retrieved|available)\s+{_EVIDENCE_NOUN}|data\s+room|documents"
+    rf"|context|materials|excerpts|passages)\b[^.;]{{0,60}}\b(?:contains?|includes?|provides?)\s+no\b"
+    rf"|\b{_EVIDENCE_NOUN}\s+(?:currently\s+)?lack(?:s|ed)?\b"
+    rf"|\bnone\s+of\s+the\s+(?:provided\s+|retrieved\s+|available\s+)?{_EVIDENCE_NOUN}\b"
     # Neither X nor Y is included in the provided context.
     rf"|\b(?:neither|none|no)\b[^.;]{{0,160}}\b(?:included|contained|found|provided|present"
     rf"|available|disclosed|stated)\s+in\s+(?:the|any|all)\s+(?:provided\s+|retrieved\s+"
@@ -72,15 +88,26 @@ DECLINES_TO_ANSWER = re.compile(
     rf"|\b{_EVIDENCE_NOUN}\s+(?:is\s+|are\s+)?(?:missing|absent|unavailable|insufficient)\b"
     r"|:\s*undisclosed\b"
     # … is not disclosed / stated / available: information availability.
-    r"|\b(?:is|are|was|were)\s+not\s+(?:disclosed|provided|available|specified|stated|given"
-    r"|quantified|itemi[sz]ed|broken\s+out|reported|identified|detailed)\b"
+    rf"|\b(?:is|are|was|were)\s+not\s+{_HEDGE}(?:disclosed|provided|available|specified|stated"
+    r"|given|quantified|itemi[sz]ed|broken\s+out|reported|identified|detailed|mentioned"
+    r"|addressed|discussed)\b"
+    # "Aurora has not disclosed any …", "no figure has been specified": the
+    # disclosure is what is negated, not the fact. Narrower than the line
+    # above on purpose — "has not been reported to regulators" is a finding.
+    r"|\b(?:has|have|had)\s+not\s+(?:been\s+)?(?:disclosed|specified|quantified|itemi[sz]ed)\b"
     r"|\bnot\s+(?:disclosed|provided|stated|specified|available|found|present|included"
     r"|contained|mentioned)\s+in\s+the\b"
     r"|\b(?:cannot|can\s+not|could\s+not)\s+be\s+(?:calculated|computed|determined"
     r"|established|verified|confirmed|derived|quantified)\b"
     r"|\bunable\s+to\s+(?:find|determine|calculate|compute|confirm|verify|locate)\b"
-    r"|\bno\s+(?:information|mention|disclosure|reference|record|data|details?|breakdown)"
-    r"\s+(?:on|of|about|regarding|for|is|are|was|were|has|have)\b"
+    # "no information on …", "There is no information available regarding …",
+    # "There are no mentions of …", "There are no figures provided for …".
+    r"|\bno\s+(?:information|mentions?|disclosures?|references?|records?|data|details?"
+    r"|breakdowns?|figures)\s+(?:(?:is|are|was|were)\s+)?(?:(?:available|provided|given)\s+)?"
+    r"(?:on|of|about|regarding|for|to|is|are|was|were|has|have)\b"
+    # "No churn rates or retention figures are provided for Palantir."
+    r"|\bno\b[^.;:]{0,80}\b(?:is|are|was|were)\s+(?:provided|disclosed)\s+(?:for|on|about"
+    r"|regarding)\b"
     r"|\b(?:insufficient|not\s+sufficient)\s+(?:information|data|context|evidence|detail)s?\b"
     rf"|\bno\s+evidence\b[^.;]{{0,40}}\bin\s+the\s+(?:provided\s+|retrieved\s+|available\s+)?"
     rf"{_EVIDENCE_NOUN}\b"
@@ -115,8 +142,34 @@ _HRULE = re.compile(r"^\s*(?:-{3,}|\*{3,}|_{3,}|={3,})\s*$")
 _WORD = re.compile(r"[A-Za-z]{2,}")
 
 # Below this many words a line with no figure does not assert anything worth
-# checking ("Key risks", "In summary").
+# checking ("Key risks", "In summary"). Words are counted with _WORD, not
+# str.split: "Deductible / Basket Threshold" is three words, not four, and was
+# checked — and flagged "not supported" — as a claim (Decision 72). A
+# "Label: value" pair keeps the old whitespace count ("Maturity: June 30,
+# 2026", "Certainty Level: HIGH ."): counted with _WORD alone these fell under
+# the line on the replay's dev half, and a wrong value would never have been
+# checked.
 _MIN_WORDS = 4
+_LABEL_VALUE = re.compile(r"^[^:]{2,60}:\s*\S")
+
+# "Atlas Data Holdings (Private Equity Consortium — DECLINE)": a name and a
+# descriptor in brackets, written as the lead-in of the bullets under it. With
+# no figure and a title-case name (no lower-case word, so no verb outside the
+# brackets) it asserts nothing the bullets do not; "Northstar requires consent
+# (not yet obtained)" has a lower-case verb and stays a claim.
+_NAME_WITH_DESCRIPTOR = re.compile(r"^(?P<name>[^()]{2,80}?)\s*\([^()]{1,80}\)\s*:?$")
+_TITLE_SMALL_WORDS = {"of", "and", "the", "for", "to", "in", "on", "at", "by", "a", "an", "&"}
+# "[Sources: 📄 a.txt; 📄 b.txt]" — a list of files, not a statement.
+_SOURCES_LINE = re.compile(r"^\[\s*(?:sources?|citations?|references?)\s*:[^\[\]]*\]$", re.IGNORECASE)
+
+
+def _is_name_lead_in(text: str) -> bool:
+    """True for "Name (descriptor)" with a title-case name and no figure."""
+    m = _NAME_WITH_DESCRIPTOR.match(text)
+    if not m:
+        return False
+    words = re.findall(r"[A-Za-z][A-Za-z'.-]*", m.group("name"))
+    return bool(words) and all(w[0].isupper() or w.lower() in _TITLE_SMALL_WORDS for w in words)
 
 
 @dataclass
@@ -221,13 +274,15 @@ def _sentence_role(text: str) -> str:
         evidence does not say; "skip" — a fragment or lead-in that asserts
         nothing.
     """
-    if not text or not _WORD.search(text):
+    if not text or not _WORD.search(text) or _SOURCES_LINE.match(text):
         return "skip"
     if extract_numbers(text):
         return "claim"
-    if len(text.split()) < _MIN_WORDS:
+    if len(text.split()) < _MIN_WORDS or (
+        len(_WORD.findall(text)) < _MIN_WORDS and not _LABEL_VALUE.match(text)
+    ):
         return "skip"
-    if text.endswith(":"):
+    if text.endswith(":") or _is_name_lead_in(text):
         return "skip"
     if DECLINES_TO_ANSWER.search(text):
         return "absence"
@@ -251,15 +306,24 @@ def split_claims(answer: str) -> list[Claim]:
     claims: list[Claim] = []
     lines = answer.splitlines()
     table_header: list[str] | None = None
+    # True while reading the list under a lead-in that states what the
+    # evidence lacks ("The data room currently lacks:"). Each item is then a
+    # statement of absence even though it reads as a bare noun phrase
+    # ("- Quarterly financial statements for FY2024."): scored on its own it
+    # is entailed by nothing and was flagged "not supported" (Decision 72).
+    absence_list = False
 
     for li, line in enumerate(lines):
         stripped = line.strip()
         if not stripped or _HRULE.match(stripped) or _is_heading(stripped):
             table_header = None if not stripped.startswith("|") else table_header
+            if stripped:
+                absence_list = False
             continue
 
         # ── Markdown tables ────────────────────────────────────────────────
         if stripped.startswith("|"):
+            absence_list = False
             if _TABLE_SEPARATOR.match(stripped):
                 continue
             nxt = lines[li + 1].strip() if li + 1 < len(lines) else ""
@@ -301,12 +365,20 @@ def split_claims(answer: str) -> list[Claim]:
         if not strip_citations(stripped).strip(" .,;*-"):
             continue
 
+        # Only a paragraph opens or closes the list; a bullet that ends with a
+        # colon does not, so an unrelated sibling bullet never inherits it.
+        is_item = bool(_BULLET.match(stripped))
+        lead_in = False
         line_markers = CITATION_MARKER.findall(stripped)
         for sentence in _split_sentences(stripped):
             text = _clean(sentence)
             role = _sentence_role(text)
+            lead_in = role == "skip" and text.endswith(":") and bool(DECLINES_TO_ANSWER.search(text))
             if role == "skip":
                 continue
+            # A figure is never folded into an absence: it is grounded as usual.
+            if role == "claim" and is_item and absence_list and not extract_numbers(text):
+                role = "absence"
             markers = CITATION_MARKER.findall(sentence)
             if not markers and line_markers:
                 # Inherit the nearest marker in the paragraph: the next one if
@@ -322,6 +394,8 @@ def split_claims(answer: str) -> list[Claim]:
                 has_numbers=bool(extract_numbers(text)),
                 is_absence=role == "absence",
             ))
+        if not is_item:
+            absence_list = lead_in
 
     return claims
 
