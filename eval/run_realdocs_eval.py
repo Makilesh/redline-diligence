@@ -633,6 +633,8 @@ async def run_financebench(args) -> dict:
     questions = data.load_financebench()
     if args.documents:
         names = sorted(args.documents)
+    elif args.split:
+        names = data.select_financebench_split(questions, args.split)
     else:
         names = data.select_financebench_documents(questions, args.max_documents, seed=args.seed)
     chosen = set(names)
@@ -709,7 +711,7 @@ async def run_financebench(args) -> dict:
                                  top=[{"file": c.get("source_file"), "pages": sorted(chunk_pages(c)),
                                        "content_type": c.get("content_type"),
                                        "reranker_score": round(float(c.get("reranker_score", 0.0)), 4)}
-                                      for c in run["ranking"][:5]])
+                                      for c in run["ranking"][:RANK_DEPTH]])
                 scored[ablation] = entry
             report_questions.append({
                 "id": question.id, "document": question.doc_name, "question": question.question,
@@ -733,6 +735,9 @@ async def run_financebench(args) -> dict:
             "revision": data.FINANCEBENCH_REVISION, "licence": data.FINANCEBENCH_LICENCE,
             "documents": names, "selection": (
                 "explicit --documents" if args.documents else
+                f"{args.split} split by company (seed {data.FINANCEBENCH_SPLIT_SEED}): "
+                + ", ".join(data.financebench_company_split(data.load_financebench())[args.split])
+                if args.split else
                 "all" if args.max_documents is None else
                 f"seeded random sample of {args.max_documents} filings (seed {args.seed}); every "
                 "question whose evidence is in the sample"),
@@ -1023,6 +1028,9 @@ def parse_args(argv=None):
     parser.add_argument("--max-queries", type=int, help="LegalBench-RAG: first N mini queries per subset (debugging)")
     parser.add_argument("--max-documents", type=int, help="FinanceBench: seeded sample of N filings")
     parser.add_argument("--documents", nargs="+", metavar="DOC_NAME", help="FinanceBench: exactly these filings")
+    parser.add_argument("--split", choices=("dev", "test"),
+                        help="FinanceBench: the questions of one half of the companies (fixed seed); "
+                             "with --store the other half's filings stay in the index as distractors")
     parser.add_argument("--seed", type=int, default=20261115, help="FinanceBench sampling seed")
     parser.add_argument("--split", choices=("dev", "test"),
                         help="LegalBench-RAG: ask only the queries about this half of the documents "

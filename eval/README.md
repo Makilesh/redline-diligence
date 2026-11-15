@@ -54,6 +54,7 @@ python -m eval.run_realdocs_eval legalbench
 python -m eval.run_realdocs_eval financebench --max-documents 15
 python -m eval.run_realdocs_eval financebench --store ~/.cache/redline-eval/fb_store --ingest-only --max-new-documents 14   # repeat
 python -m eval.run_realdocs_eval financebench --store ~/.cache/redline-eval/fb_store                                     # questions
+python -m eval.run_realdocs_eval financebench --store ~/.cache/redline-eval/fb_store --split dev --ablations production   # tuning half
 python -m eval.run_realdocs_eval legalbench --compare eval/results/realdocs_legalbench_<date>.json                # paired before/after
 python -m eval.run_realdocs_eval legalbench --store <dir> --ingest-only     # index the 72 documents once (~6 min)
 python -m eval.run_realdocs_eval legalbench --store <dir> --split dev       # tune on dev; --split test once
@@ -63,6 +64,8 @@ python -m eval.run_realdocs_eval legalbench --store <dir> --split dev --retrieva
 For tuning, `--split` divides each LegalBench-RAG sub-corpus's documents in half with a seed (`--split-seed`, default 20261115). That gives dev 37 documents / 420 queries and test 35 / 356. The whole corpus is always indexed; the split only chooses which queries are asked. Choose settings on `dev`, run `test` once. `--retrieval-config` merges JSON overrides into `RETRIEVAL_CONFIGS["legal"]`, so a query-side candidate is measured through the production node unchanged. An ingestion-side change, such as `CHUNK_CONTEXT_HEADERS`, needs its own `--store` directory.
 
 Each run writes `eval/results/realdocs_<benchmark>_<date>.{json,md}`.
+
+**Tuning split.** `--split dev|test` asks only the questions of half the companies: the 32 company labels are sorted, shuffled with seed 20261115 and cut in two (`realdocs_data.financebench_company_split`; dev 16 companies / 73 questions / 44 filings, test 16 / 77 / 40). A company's filings stay on one side, because the failure being tuned is confusing one year's filing with the next. With `--store` the other half's filings stay in the index as distractors, as in a data room. Settings are chosen on dev; test is run once (Decision 68). The named-period preference and the one-slot-per-table cap act inside `production` only; the `dense`, `sparse` and `hybrid_rrf` rows show the first search as before. A store indexed before Decision 68 has no `filing_*` fields, so on it the preference does nothing until the filings are re-ingested.
 
 **Limits.** LegalBench-RAG has no unanswerable queries, so the refusal gate is only tested for false refusals. FinanceBench's evidence extracts come from a different PDF parser, so token recall is a lower bound; its page numbers are the PDF's, which the pipeline uses too. Local-mode Qdrant searches exactly and slowly (about 0.2 s a search at 5K points, over 1.5 s at 45K); latencies here are not the server's.
 
