@@ -78,6 +78,10 @@ class AgentState(TypedDict):
 
     # ==================== Answer ====================
     generated_answer: str
+    # The streamed answer stopped at the synthesis output budget, not where the
+    # model ended it. Only /query/stream can produce it (its tokens are already
+    # on the client's screen); the validator then never reports it "passed".
+    answer_truncated: bool
     citations: list[dict]
     # Every figure the answer states, grounded against the context:
     # [{raw, value, kind, status: grounded|derived|derived_unverified|unsupported,

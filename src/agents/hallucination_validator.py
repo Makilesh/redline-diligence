@@ -113,6 +113,26 @@ def _synthesis_failed(state: AgentState, answer: str) -> bool:
     return False
 
 
+# Shown with an answer the synthesizer streamed and the model cut off at its
+# output budget (state["answer_truncated"]). What is there can be checked; what
+# is missing cannot, so such an answer is never reported as "passed".
+TRUNCATED_ANSWER_FLAG = (
+    "The answer was cut off at the model's output limit and may be incomplete: "
+    "statements after the cut were never written."
+)
+
+
+def _mark_truncation(state: AgentState, status: str, flags: list[str]) -> tuple[str, list[str]]:
+    """
+    Downgrades a cut-off answer's verdict: "passed" becomes "warning", and the
+    flag says why. "warning" and "failed" are kept — a cut answer whose claims
+    also failed should still be revised.
+    """
+    if not state.get("answer_truncated"):
+        return status, flags
+    return ("warning" if status == "passed" else status), [*flags, TRUNCATED_ANSWER_FLAG]
+
+
 async def hallucination_validator_node(state: AgentState) -> dict:
     """
     LangGraph node — verifies the answer claim by claim.
@@ -186,9 +206,12 @@ async def hallucination_validator_node(state: AgentState) -> dict:
             "Agent 8: verification failed; keeping the answer with a warning",
             extra={"error": str(e), "error_type": type(e).__name__},
         )
+        _, flags = _mark_truncation(
+            state, "warning", [f"validation unavailable: {type(e).__name__}: {e}"]
+        )
         return {
             "confidence_score": 0.0,
-            "hallucination_flags": [f"validation unavailable: {type(e).__name__}: {e}"],
+            "hallucination_flags": flags,
             "claim_checks": [],
             "validation_status": "warning",
             "validation_attempt": attempt,
@@ -220,12 +243,13 @@ async def hallucination_validator_node(state: AgentState) -> dict:
     # that scored claims and, only if one was needed, the LLM that judged the
     # rest — never a guess at the first rung of the ladder.
     models = [m for m in (report.nli_model, report.llm_model) if m]
+    status, flags = _mark_truncation(state, report.validation_status, report.flags)
 
     return {
         "confidence_score": report.confidence,
-        "hallucination_flags": report.flags,
+        "hallucination_flags": flags,
         "claim_checks": report.claim_checks,
-        "validation_status": report.validation_status,
+        "validation_status": status,
         "validation_attempt": attempt,
         "agent_trace": [
             {
@@ -235,9 +259,10 @@ async def hallucination_validator_node(state: AgentState) -> dict:
                 "nli_enabled": nli_enabled(),
                 "llm_model": report.llm_model,
                 "llm_calls": report.llm_calls,
-                "validation_status": report.validation_status,
+                "validation_status": status,
+                "answer_truncated": bool(state.get("answer_truncated")),
                 "confidence_score": report.confidence,
-                "flags_count": len(report.flags),
+                "flags_count": len(flags),
                 "claims_checked": len(report.claim_checks),
                 "status_counts": report.status_counts,
                 "method_counts": report.method_counts,
