@@ -46,7 +46,7 @@ import os
 import time
 from dataclasses import dataclass, field
 
-from src.decisions.laya_client import adecide_batch, noul
+from src.decisions.laya_client import adecide_batch, laya_device, noul
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -72,6 +72,31 @@ def laya_gate_enabled() -> bool:
     return os.getenv("LAYA_GATE", "1").strip().lower() not in ("0", "false", "no", "off")
 
 
+def early_exit_enabled() -> bool:
+    """
+    Whether pairs are scored one at a time, stopping at the first one that clears the veto.
+
+    The veto asks only whether ANY (facet, passage) pair reaches the threshold,
+    so once one does the verdict is fixed and the remaining pairs cannot change
+    it. On a GPU all pairs go in one batched forward pass (~50 ms) and stopping
+    early saves nothing. On a CPU each pair is a full ModernBERT-large pass and
+    batching is a loss — pairs are padded to the longest, so the dev set's
+    three pairs took p50 4.3 s in one batch against 2.8 s one at a time (2
+    threads, x86). Scored best passage first, 41 of 58 dev assessments stop
+    after one pair: p50 1.1 s, p95 3.6 s. Golden set, MiniLM contexts, 2
+    threads: p50 3.3 s / p95 6.4 s batched -> 0.9 s / 1.9 s (decomposed: 5.8 s
+    / 26.7 s -> 1.0 s / 2.1 s), every decision and every vetoed P identical.
+    LAYA_GATE_EARLY_EXIT "1"/"0" forces it on/off; the default follows the
+    Laya device.
+    """
+    configured = os.getenv("LAYA_GATE_EARLY_EXIT", "auto").strip().lower()
+    if configured in ("1", "true", "yes", "on"):
+        return True
+    if configured in ("0", "false", "no", "off"):
+        return False
+    return laya_device() == "cpu"
+
+
 @dataclass
 class Answerability:
     """
@@ -79,11 +104,15 @@ class Answerability:
 
     Attributes:
         facet_scores: facet text -> max P(stated) over the scored passages.
-        score: max over facets; the number the veto compares.
+        score: max over facets; the number the veto compares. After an early
+            exit it is the first score that cleared the threshold, so a lower
+            bound on the max — the verdict is the same either way.
         vetoed: score < threshold — no facet is stated in the best passages.
         unanswered: facets scoring below the threshold, for missing_aspects.
         passages_scored: number of passages each facet was scored against.
         latency_ms: wall time of the Laya call.
+        pairs_scored: (facet, passage) pairs actually scored.
+        early_exit: True when scoring stopped before every pair was scored.
     """
 
     facet_scores: dict[str, float]
@@ -92,6 +121,8 @@ class Answerability:
     unanswered: list[str] = field(default_factory=list)
     passages_scored: int = 0
     latency_ms: float = 0.0
+    pairs_scored: int = 0
+    early_exit: bool = False
 
     def as_breakdown(self) -> dict:
         """Compact, JSON-safe form for quality_breakdown and the agent trace."""
@@ -208,18 +239,32 @@ async def assess_answerability(
         return None
 
     question_spec = {"stated": {"type": "noul", "instructions": ANSWERABILITY_INSTRUCTION}}
-    requests = [
-        ({"question": facet, "passage": passage}, question_spec)
-        for facet in facets
-        for passage in passages
-    ]
-    start = time.perf_counter()
-    answers = await adecide_batch(requests)
-    latency_ms = (time.perf_counter() - start) * 1000
+    early_exit = early_exit_enabled()
+    if early_exit:
+        # Best passage first, the question before its sub-questions: the pair
+        # most likely to clear the threshold is scored first.
+        order = [(facet, passage) for passage in passages for facet in facets]
+    else:
+        order = [(facet, passage) for facet in facets for passage in passages]
+    requests = [({"question": facet, "passage": passage}, question_spec) for facet, passage in order]
 
-    per_facet: dict[str, list[float]] = {f: [] for f in facets}
-    for (state, _), answer in zip(requests, answers):
-        per_facet[state["question"]].append(noul(answer.get("stated", {})))
+    per_facet: dict[str, list[float]] = {}
+    start = time.perf_counter()
+    if early_exit:
+        scored = 0
+        for request in requests:
+            (answer,) = await adecide_batch([request])
+            p = noul(answer.get("stated", {}))
+            per_facet.setdefault(request[0]["question"], []).append(p)
+            scored += 1
+            if p >= threshold:
+                break
+    else:
+        answers = await adecide_batch(requests)
+        for (state, _), answer in zip(requests, answers):
+            per_facet.setdefault(state["question"], []).append(noul(answer.get("stated", {})))
+        scored = len(requests)
+    latency_ms = (time.perf_counter() - start) * 1000
 
     facet_scores, score, vetoed, unanswered = aggregate(per_facet, threshold)
     return Answerability(
@@ -229,4 +274,6 @@ async def assess_answerability(
         unanswered=unanswered,
         passages_scored=len(passages),
         latency_ms=round(latency_ms, 1),
+        pairs_scored=scored,
+        early_exit=scored < len(requests),
     )

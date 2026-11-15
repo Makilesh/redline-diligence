@@ -60,9 +60,14 @@ services:
       - TRUST_PROXY_HEADERS=1
       - CORS_ORIGINS=${CORS_ORIGINS:?set CORS_ORIGINS to the Vercel URL}
       - WARM_MODELS=1
-      # The Laya answerability gate measured 6.6 s per facet on 2 CPU threads —
-      # up to ~30 s added per query. Off here by default; set LAYA_GATE=1 in .env
-      # on a host with a GPU or more cores. The query guard (~1.3 s) stays on.
+      # The Laya answerability gate. On a CPU it scores one (question, passage)
+      # pair at a time and stops at the first that clears the veto: measured at
+      # 2 threads (x86, not this ARM host) p50 0.9 s / p95 1.9 s per assessment
+      # on the golden set, down from 4.3 s / 6.5 s batched on the dev set. Cheap
+      # enough now, but still off by default: with MiniLM's ranking it vetoes
+      # one answerable golden question (mh_06) that bge admits. Set LAYA_GATE=1
+      # in .env to trade that for two controls refused without an LLM call.
+      # The query guard (~1.3 s) stays on.
       - LAYA_GATE=${LAYA_GATE:-0}
       # Postgres runs next to the API here, so failing to reach it is a fault,
       # not a reason to fall back to in-memory checkpoints and carry on.

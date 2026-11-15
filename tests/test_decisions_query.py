@@ -61,6 +61,9 @@ def _stub_laya(monkeypatch, p_by_facet: dict[str, float] | float):
 def gate_on(monkeypatch):
     monkeypatch.setenv("LAYA_GATE", "1")
     monkeypatch.setenv("LAYA_QUERY_GUARD", "1")
+    # One batched call, whatever device the suite runs on; the CPU early exit
+    # is covered in test_reranker_calibration.py.
+    monkeypatch.setenv("LAYA_GATE_EARLY_EXIT", "0")
 
 
 # ==============================================================================

@@ -126,6 +126,11 @@ def _pinned_checkpoint(model: str) -> tuple[str, str | None] | None:
     return directory, subfolder
 
 
+def laya_device() -> str:
+    """The device Laya runs on (or will, once loaded): LAYA_DEVICE, else CUDA when available."""
+    return _device()
+
+
 def _device() -> str:
     configured = os.getenv("LAYA_DEVICE", "").strip()
     if configured:
