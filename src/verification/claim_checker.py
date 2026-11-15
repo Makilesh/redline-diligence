@@ -30,6 +30,9 @@ names):
     a quantity the context does not state          -> LLM judge
     NLI entailment >= entail threshold and no
       figure merely present elsewhere              -> supported     (nli)
+    every figure confirmed, but the model's support
+      from the passages holding them is below its
+      figure-veto line (models that have one)      -> LLM judge
     every figure confirmed                         -> supported     (numeric)
     NLI contradiction >= contradiction threshold
       and entailment < 0.1                         -> LLM judge (suspected
@@ -94,6 +97,24 @@ CLEAR_NEUTRAL_MAX_CONTRADICTION = 0.5
 
 
 @dataclass(frozen=True)
+class FigureVeto:
+    """
+    How a model second-guesses a claim its figures alone confirmed.
+
+    Attributes:
+        line: Below this best support score the claim goes to the judge.
+        evidence: "figure" — windows of the passage each figure was found in;
+            "claim" — the windows an unsettled claim gets; "union" — both.
+        cues_only: Only claims with wording the figure check cannot see
+            (negation, a quantifier, a direction, a party).
+    """
+
+    line: float
+    evidence: str = "figure"
+    cues_only: bool = False
+
+
+@dataclass(frozen=True)
 class Thresholds:
     """Where the decision rules draw their lines on one model's scores."""
 
@@ -101,6 +122,8 @@ class Thresholds:
     contradiction: float
     clear_neutral_entail: float
     clear_neutral_contradiction: float
+    # None: figure-confirmed claims are not scored by this model.
+    figure_veto: FigureVeto | None = None
 
 
 # The values above are the cross-encoders'. A grounding checker's support
@@ -133,9 +156,18 @@ MODEL_THRESHOLDS = {
     # correct claim passed locally and 4.5% more claims sent to the judge;
     # -small 16/165 -> 14/165, false alarms unchanged (5/101), two fewer
     # correct claims passed locally.
+    # -xsmall also second-guesses figure-confirmed claims that carry wording
+    # the figures cannot check (FigureVeto), against the passages the figures
+    # were found in. Chosen on the dev half by a rule fixed before any of these
+    # pairs was scored; on the test half wrong claims passed 18/165 -> 16/165
+    # (both swapped parties), false alarms unchanged (1/101), one more correct
+    # claim sent to the judge. FactCG's veto failed the same rule (on test 11
+    # -> 7 wrong claims passed, but 3 fewer correct claims passed locally,
+    # mostly table rows read without their column headers), so it has none.
     "cross-encoder/nli-deberta-v3-xsmall": Thresholds(
         entail=0.858, contradiction=CONTRADICTION_THRESHOLD,
         clear_neutral_entail=0.002, clear_neutral_contradiction=CLEAR_NEUTRAL_MAX_CONTRADICTION,
+        figure_veto=FigureVeto(line=0.0031, evidence="figure", cues_only=True),
     ),
     "cross-encoder/nli-deberta-v3-small": Thresholds(
         entail=0.853, contradiction=CONTRADICTION_THRESHOLD,
@@ -166,6 +198,26 @@ CONTRADICTION_MIN_OVERLAP = 0.5
 CITED_WINDOWS_PER_CLAIM = 2
 OTHER_WINDOWS_PER_CLAIM = 2
 FALLBACK_TOP_K = 6
+# Figure-veto evidence: best windows holding each confirmed figure, per figure
+# and per claim.
+WINDOWS_PER_FIGURE = 2
+FIGURE_WINDOWS_PER_CLAIM = 4
+
+# Wording a figure match cannot check: negation, quantifiers, direction words,
+# and the parties a term binds. Fixed before the veto was scored (FigureVeto
+# .cues_only).
+_VETO_CUE = re.compile(
+    r"n't\b|\b(?:not|no|never|none|neither|nor|without|cannot|unless|except|only"
+    r"|each|every|all|several|both|any|either|most|majority|multiple"
+    r"|increas\w*|decreas\w*|grew|grow\w*|rose|rise\w*|fell|fall\w*|declin\w*"
+    r"|higher|lower|more|less|fewer|greater|exceed\w*|above|below|up|down"
+    r"|improv\w*|worsen\w*|larger|smaller"
+    r"|(?:buyer|seller|purchaser|acquirer|parent|merger sub|company|target|lender"
+    r"|borrower|agent|licensor|licensee|customer|supplier|vendor|landlord|tenant"
+    r"|employee|executive|officer|director|shareholder|stockholder|holder"
+    r"|guarantor|counterparty)s?)\b",
+    re.IGNORECASE,
+)
 
 # Bounds on work per answer.
 MAX_CLAIMS = 40
@@ -342,6 +394,67 @@ def _best_windows(
     return scored[:limit]
 
 
+def _claim_windows(
+    claim_tokens: set[str],
+    cited: list[int],
+    n_chunks: int,
+    windows: dict[int, list[tuple[str, set[str]]]],
+) -> list[tuple[int, str, float]]:
+    """
+    A claim's evidence windows: the best from the chunks it cites, then the
+    best from the rest.
+
+    Uncited evidence is searched across ALL retrieved chunks: lexical ranking
+    is cheap, and a correct claim with a wrong or missing citation should still
+    find its passage.
+    """
+    others = [ci for ci in range(n_chunks) if ci not in cited]
+    chosen = _best_windows(claim_tokens, cited, windows, CITED_WINDOWS_PER_CLAIM)
+    chosen += _best_windows(
+        claim_tokens, others, windows,
+        OTHER_WINDOWS_PER_CLAIM + (0 if cited else 1),
+    )
+    return chosen
+
+
+def _figure_windows(
+    claim_tokens: set[str],
+    nums: list,
+    windows: dict[int, list[tuple[str, set[str]]]],
+) -> list[tuple[int, str, float]]:
+    """
+    The windows each of a claim's figures was found in.
+
+    A window qualifies when it holds the figure exactly as the document prints
+    it, in the chunk numeric grounding matched — the passage the number came
+    from. Per figure, the best WINDOWS_PER_FIGURE by token overlap with the
+    claim; at most FIGURE_WINDOWS_PER_CLAIM in all.
+
+    Returns:
+        (chunk index, window text, overlap) tuples; empty when no window holds
+        any of the figures as printed.
+    """
+    chosen: list[tuple[int, str, float]] = []
+    seen: set[str] = set()
+    for n in nums:
+        printed = " ".join(n.evidence_figure.split())
+        ci = n.evidence_chunk
+        if not printed or ci < 0:
+            continue
+        # Not inside a longer number: "$452.8" must not match "$452.85".
+        pattern = re.compile(r"(?<![\d.])" + re.escape(printed) + r"(?![\d])")
+        scored = []
+        for w, toks in windows.get(ci, []):
+            if w in seen or not pattern.search(w):
+                continue
+            scored.append((ci, w, len(claim_tokens & toks) / max(len(claim_tokens), 1)))
+        scored.sort(key=lambda t: t[2], reverse=True)
+        for entry in scored[:WINDOWS_PER_FIGURE]:
+            seen.add(entry[1])
+            chosen.append(entry)
+    return chosen[:FIGURE_WINDOWS_PER_CLAIM]
+
+
 def _snippet(window: str, claim_tokens: set[str], width: int = 280) -> str:
     """The part of a window around its first claim-token hit."""
     lowered = window.lower()
@@ -425,15 +538,42 @@ async def verify_answer(
     # ── 2. NLI ──────────────────────────────────────────────────────────────
     if use_nli is None:
         use_nli = nli.nli_enabled()
+    injected = scorer is not None
     if scorer is None and use_nli:
         scorer = nli.ascore_pairs
 
     windows = _build_windows(chunks)
     top_k = list(range(min(len(chunks), FALLBACK_TOP_K)))
 
+    # The figure veto. A claim whose every figure is confirmed is otherwise
+    # passed on its figures alone, and the figures cannot see the words around
+    # them: "Several customers each exceed 10% of total revenue" holds the
+    # document's 10% and says the opposite of it. Such a claim is scored too,
+    # and a low support score sends it to the judge — never to "failed" or a
+    # warning, never the other way. Whether the model that will score has a
+    # veto is known before scoring only for the configured model; the lines
+    # applied afterwards are those of the model that actually loaded.
+    planned_veto = None
+    if use_nli and scorer is not None:
+        expected = nli.loaded_model_name() or (None if injected else nli.nli_model_name())
+        planned_veto = thresholds_for(expected).figure_veto
+    veto_claims: set[int] = set()
+    if planned_veto is not None:
+        for claim in claims:
+            if not figure_view[claim.index].confirmed or claim.is_absence:
+                continue
+            if planned_veto.cues_only and not _VETO_CUE.search(claim.text):
+                continue
+            # Its own budget, so grounded padding cannot crowd out the others.
+            if len(veto_claims) < MAX_CLAIMS:
+                veto_claims.add(claim.index)
+
     # (claim idx, chunk idx, cited, window, lexical overlap)
     pair_owner: list[tuple[int, int, bool, str, float]] = []
     pairs: list[tuple[str, str]] = []
+    # (claim idx, chunk idx, window) for the figure veto
+    veto_owner: list[tuple[int, int, str]] = []
+    veto_pairs: list[tuple[str, str]] = []
     cited_by_claim: dict[int, list[int]] = {}
     claim_tokens: dict[int, set[str]] = {}
 
@@ -442,30 +582,40 @@ async def verify_answer(
         claim_tokens[claim.index] = toks
         cited = resolve_cited_chunks(claim.markers, chunks)
         cited_by_claim[claim.index] = cited
+        if claim.index in veto_claims:
+            chosen = []
+            if planned_veto.evidence in ("figure", "union"):
+                chosen = _figure_windows(toks, numeric[claim.index], windows)
+            if planned_veto.evidence in ("claim", "union") or not chosen:
+                have = {w for _, w, _ in chosen}
+                chosen += [
+                    c for c in _claim_windows(toks, cited, len(chunks), windows)
+                    if c[1] not in have
+                ]
+            hypothesis = _nli_hypothesis(claim.text)
+            for ci, w, _overlap in chosen:
+                veto_owner.append((claim.index, ci, w))
+                veto_pairs.append((w, hypothesis))
+            continue
         # No entailment pairs for a claim the figures already settled, one past
         # the budget, or a statement of absence — "X is not disclosed" is not
         # entailed by any passage, only by the lack of one.
         if claim.index not in in_budget or claim.is_absence:
             continue
-        # Uncited evidence is searched across ALL retrieved chunks: lexical
-        # ranking is cheap, and a correct claim with a wrong or missing
-        # citation should still find its passage.
-        others = [ci for ci in range(len(chunks)) if ci not in cited]
-        chosen = _best_windows(toks, cited, windows, CITED_WINDOWS_PER_CLAIM)
-        chosen += _best_windows(
-            toks, others, windows,
-            OTHER_WINDOWS_PER_CLAIM + (0 if cited else 1),
-        )
+        chosen = _claim_windows(toks, cited, len(chunks), windows)
         hypothesis = _nli_hypothesis(claim.text)
         for ci, w, overlap in chosen:
             pair_owner.append((claim.index, ci, ci in cited, w, overlap))
             pairs.append((w, hypothesis))
 
     nli_scores: list[nli.NLIScore] = []
+    veto_scores: list[nli.NLIScore] = []
     nli_available = False
-    if use_nli and scorer is not None and pairs:
+    if use_nli and scorer is not None and (pairs or veto_pairs):
         try:
-            nli_scores = await scorer(pairs)
+            # One call: the model batches both sets.
+            scored = await scorer(pairs + veto_pairs)
+            nli_scores, veto_scores = scored[: len(pairs)], scored[len(pairs):]
             nli_available = True
             report.nli_model = nli.loaded_model_name() or nli.nli_model_name()
         except Exception as e:
@@ -476,6 +626,14 @@ async def verify_answer(
     # The lines follow the model that actually scored: a checker that failed
     # to load was replaced by a cross-encoder (nli._get_model).
     th = thresholds_for(nli.loaded_model_name() if nli_available else None)
+
+    # Best support per figure-confirmed claim: (score, chunk idx, window).
+    veto_best: dict[int, tuple[float, int, str]] = {}
+    if th.figure_veto is not None:
+        for (claim_idx, ci, window), score in zip(veto_owner, veto_scores):
+            current = veto_best.get(claim_idx)
+            if current is None or score.entailment > current[0]:
+                veto_best[claim_idx] = (score.entailment, ci, window)
 
     # Best evidence per claim.
     best: dict[int, dict] = {}
@@ -597,6 +755,27 @@ async def verify_answer(
                 evidence=_snippet(ev["entail_window"], toks),
                 **_evidence_fields(chunk),
             )
+        elif (
+            all_grounded
+            and claim.index in veto_best
+            and veto_best[claim.index][0] < th.figure_veto.line
+        ):
+            # Every figure is the document's, attached to the right row and
+            # period — but no passage that holds them supports the sentence as
+            # worded (another party, a flipped negation, "each" for "one").
+            # The judge decides; until it has, the claim is unverified.
+            score, ci, window = veto_best[claim.index]
+            undecided.append(claim.index)
+            check.update(
+                score=round(score, 3),
+                reason=(
+                    "every figure is in the documents, but the passages holding them "
+                    "do not support the statement as worded; not confirmed"
+                ),
+                evidence=_snippet(window, toks),
+                suspected_misstatement=True,
+                **_evidence_fields(chunks[ci]),
+            )
         elif all_grounded:
             # Exact figure matches outrank the NLI model on figure-dense claims.
             # Measured on the 35 RESULTS.md answers: of the claims whose every
@@ -605,10 +784,11 @@ async def verify_answer(
             # ("Minimum Fixed Charge Coverage Ratio: >= 1.25x"). The score is
             # kept on the check so a reviewer can still see the disagreement.
             first = next((n for n in nums if n.evidence_source), None)
+            vetted = veto_best.get(claim.index)
             check.update(
                 status="supported",
                 method="numeric",
-                score=round(entail, 3) if ev else None,
+                score=round(vetted[0], 3) if vetted else (round(entail, 3) if ev else None),
                 reason="every figure appears in, or is computed from, the retrieved documents",
                 evidence=first.evidence_snippet if first else "",
                 evidence_source=first.evidence_source if first else "",
@@ -662,7 +842,9 @@ async def verify_answer(
         # When the cap bites, the claims with something specific against them
         # go first: a figure attached to the wrong row, a suspected contradiction.
         undecided.sort(key=lambda idx: not (
-            checks[idx].get("suspected_misattribution") or checks[idx].get("suspected_contradiction")
+            checks[idx].get("suspected_misattribution")
+            or checks[idx].get("suspected_contradiction")
+            or checks[idx].get("suspected_misstatement")
         ))
         to_judge = undecided[:MAX_JUDGE_CLAIMS]
         if len(undecided) > MAX_JUDGE_CLAIMS:
@@ -692,6 +874,8 @@ async def verify_answer(
                 if ev:
                     add(ev["entail_chunk"])
                     add(ev["contra_chunk"])
+                if idx in veto_best:
+                    add(veto_best[idx][1])
             for idx in to_judge:
                 for ci in cited_by_claim[idx]:
                     add(ci)

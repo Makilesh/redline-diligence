@@ -1236,6 +1236,11 @@ class NumericCheck:
     # figures that were not found verbatim.
     binding: str = ""
     binding_note: str = ""
+    # Where the matching context figure sits — its chunk and the figure as the
+    # document prints it — so the claim checker can score the claim against
+    # the exact passage the number came from. Internal: not serialised.
+    evidence_chunk: int = -1
+    evidence_figure: str = ""
 
     @property
     def is_confirmed(self) -> bool:
@@ -1248,7 +1253,9 @@ class NumericCheck:
 
     def to_dict(self) -> dict:
         """Serialisable form for AgentState."""
-        return asdict(self)
+        out = asdict(self)
+        del out["evidence_chunk"], out["evidence_figure"]
+        return out
 
 
 def _fmt(v: float) -> str:
@@ -1428,6 +1435,8 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
                     text_index=ti,
                     binding=binding.status,
                     binding_note=binding.note,
+                    evidence_chunk=fig.chunk_index,
+                    evidence_figure=fig.mention.raw,
                 )
                 if fig.mention.kind == "bps" and mention.kind == "percent":
                     # Found in the other notation: a conversion, shown as one.
@@ -1530,6 +1539,8 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
                 cur.evidence_snippet = prev.evidence_snippet
                 cur.binding = prev.binding
                 cur.binding_note = prev.binding_note
+                cur.evidence_chunk = prev.evidence_chunk
+                cur.evidence_figure = prev.evidence_figure
 
         results.append(checks)
 
