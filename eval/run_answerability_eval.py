@@ -4,6 +4,7 @@ Answerability gate calibration on the dev set — where the Laya thresholds come
     python -m eval.run_answerability_eval
     python -m eval.run_answerability_eval --compare-phrasings
     LAYA_DEVICE=cpu python -m eval.run_answerability_eval --threads 2 --limit 8   # CPU timing
+    RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2 python -m eval.run_answerability_eval
 
 Indexes data/sample_deal exactly as eval/run_retrieval_eval.py does, runs every
 question in eval/answerability_dev.json through the production retrieval node
@@ -184,6 +185,8 @@ async def run(args: argparse.Namespace) -> dict:
             "top_k_passages": ans.TOP_K_PASSAGES,
             "veto_threshold": ans.VETO_THRESHOLD,
             "threads": args.threads,
+            # One pair at a time with early exit (the CPU default) or one batch.
+            "early_exit": ans.early_exit_enabled(),
         },
         "environment": {"laya_device": _laya_device()},
         "labels": {lab: sum(r["label"] == lab for r in rows)

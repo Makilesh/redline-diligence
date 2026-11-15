@@ -143,11 +143,13 @@ COPY --chown=user . .
 
 # Measured on 2 vCPU: bge-reranker-v2-m3 needs 111s to score 40 passages and a
 # decomposed query reranks four times. The MiniLM cross-encoder does the same
-# work in 3.2s. See src/vector_db/reranker.py for the full measurement.
+# work in 3.2s. See src/vector_db/reranker.py for the full measurement. No
+# RERANKER_MAX_LENGTH: the length is clipped to the model's own limit (512 for
+# MiniLM), and a reranker without a calibration profile in
+# src/decisions/reranker_calibration.py stops startup.
 ENV EMBEDDING_MODEL=${EMBEDDING_MODEL} \
     RERANKER_MODEL=${RERANKER_MODEL} \
     NLI_MODEL=${NLI_MODEL} \
-    RERANKER_MAX_LENGTH=512 \
     WARM_MODELS=1
 
 EXPOSE 7860

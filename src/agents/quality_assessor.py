@@ -25,6 +25,7 @@ from src.decisions.answerability import (
     assess_answerability,
     laya_gate_enabled,
 )
+from src.decisions import reranker_calibration as rc
 from src.decisions.laya_client import LayaUnavailable
 from src.llm.failures import FailureKind, classify_failure
 from src.llm.litellm_wrapper import ServedModel, call_structured_agent
@@ -54,16 +55,21 @@ logger = setup_logger(__name__)
 #
 # A floor sweep over that labelled data put peak F1 at 0.10, so that is the
 # boundary between "usable evidence" and noise. See DECISIONS_LOG Decision 17.
+#
+# These numbers are bge's scale. Another cross-encoder's scores are mapped onto
+# it by the reranker's calibration profile before anything here reads them
+# (_calibrated_scores); the floors themselves are defined once, in
+# src/decisions/reranker_calibration.py.
 # ==============================================================================
 
 # Score at or above which a chunk counts as usable evidence (peak-F1 from sweep).
-RELEVANCE_FLOOR = 0.10
+RELEVANCE_FLOOR = rc.RELEVANCE_FLOOR
 
 # Below this, the best chunk is noise and no amount of context will help.
-CONFIDENT_REFUSAL_CEILING = 0.05
+CONFIDENT_REFUSAL_CEILING = rc.CONFIDENT_REFUSAL_CEILING
 
 # Above this, the heuristic is confident enough to skip the LLM assessor.
-CONFIDENT_PASS_FLOOR = 0.30
+CONFIDENT_PASS_FLOOR = rc.CONFIDENT_PASS_FLOOR
 
 # How many usable chunks a fully-answered query of each type needs. Taken from
 # the observed relevant-chunk counts per type in the same labelled run: pointed
@@ -78,6 +84,27 @@ EXPECTED_EVIDENCE_COUNT: dict[str, int] = {
     "summary": 3,
     "multi_hop": 3,
 }
+
+
+def _calibrated_scores(chunks: list[dict]) -> list[float]:
+    """
+    Reranker scores of `chunks`, mapped onto the scale the thresholds sit on.
+
+    Identity for bge-reranker-v2-m3. For any other reranker its calibration
+    profile's monotone map, so rankings are untouched and only the numbers the
+    floors compare move. Every score this module reads goes through here.
+
+    Args:
+        chunks: reranked_results payloads.
+
+    Returns:
+        Common-scale scores, in the order of `chunks`.
+
+    Raises:
+        UncalibratedReranker: The configured reranker has no profile.
+    """
+    profile = rc.active_profile()
+    return [profile.calibrate(float(c.get("reranker_score", 0.0))) for c in chunks]
 
 
 def _evidence_dimensions(state: AgentState, scores: list[float]) -> tuple[int, float, float, float]:
@@ -152,13 +179,15 @@ def _heuristic_assessment(state: AgentState) -> dict | None:
             "force_refusal": True,
         }
 
-    scores = [float(c.get("reranker_score", 0.0)) for c in chunks]
+    scores = _calibrated_scores(chunks)
     usable = [s for s in scores if s >= RELEVANCE_FLOOR]
 
     relevance = max(scores) if scores else 0.0
 
     # Clearly nothing worth answering from — refuse without spending an LLM call.
-    if relevance < CONFIDENT_REFUSAL_CEILING:
+    # CONFIDENT_REFUSAL_CEILING for bge; lower for a reranker that sometimes
+    # scores real evidence near zero (its profile's refusal_ceiling).
+    if relevance < rc.active_profile().refusal_ceiling:
         return {
             "context_quality_score": round(relevance, 3),
             "quality_breakdown": {
@@ -269,7 +298,7 @@ def combine_with_answerability(
     if not verdict.vetoed:
         return None
 
-    scores = [float(c.get("reranker_score", 0.0)) for c in state.get("reranked_results", [])]
+    scores = _calibrated_scores(state.get("reranked_results", []))
     relevance = max(scores) if scores else 0.0
     _, precision, completeness, overall = (
         _evidence_dimensions(state, scores) if scores else (0, 0.0, 0.0, 0.0)
@@ -296,6 +325,7 @@ def _laya_trace(verdict: Answerability | None) -> dict:
         "answerability": round(verdict.score, 3),
         "answerability_veto": verdict.vetoed,
         "laya_ms": verdict.latency_ms,
+        "laya_pairs": verdict.pairs_scored,
     }
 
 
@@ -347,7 +377,10 @@ async def quality_assessor_node(state: AgentState) -> dict:
 
     # Fallback to LLM for ambiguous cases
     chunks = state.get("reranked_results", [])
-    scores = [c.get("reranker_score", 0.0) for c in chunks[:5]]
+    # Common-scale scores here too, so what the LLM is shown — and the numbers
+    # the router reads back — do not depend on which reranker is deployed.
+    all_scores = _calibrated_scores(chunks)
+    scores = all_scores[:5]
 
     tracker = await BudgetTracker.get_instance()
     choice = await tracker.get_model_for_agent()
@@ -361,11 +394,11 @@ async def quality_assessor_node(state: AgentState) -> dict:
         wrap_document(
             i + 1,
             c.get("text", "")[:1200],
-            reranker_score=f"{float(c.get('reranker_score', 0.0)):.2f}",
+            reranker_score=f"{score:.2f}",
             category=c.get("document_category") or None,
             **chunk_attributes(c),
         )
-        for i, c in enumerate(chunks[:10])
+        for i, (c, score) in enumerate(zip(chunks[:10], all_scores[:10]))
     )
 
     user_prompt = QUALITY_ASSESSOR_USER_TEMPLATE.format(
@@ -416,7 +449,6 @@ async def quality_assessor_node(state: AgentState) -> dict:
         # Best chunk is in 0.05–0.30 here, under the router's 0.30 relevance
         # floor, so these numbers send the query to a rewrite, never straight
         # to synthesis: without a usable second opinion the gate fails closed.
-        all_scores = [float(c.get("reranker_score", 0.0)) for c in chunks]
         relevance = max(all_scores) if all_scores else 0.0
         _, precision, completeness, overall = (
             _evidence_dimensions(state, all_scores) if all_scores else (0, 0.0, 0.0, 0.0)

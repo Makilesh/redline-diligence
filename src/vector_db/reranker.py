@@ -53,8 +53,13 @@ _rerank_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="rerank"
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 RERANKER_MODEL_NAME = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
 
-# Sequence length the cross-encoder pads pairs to. Halving it to 512 is worth
-# 1.6x on its own and costs nothing when chunks are 512 tokens to begin with.
+# Upper bound on the sequence length the cross-encoder pads pairs to. Halving it
+# to 512 is worth 1.6x on its own and costs nothing when chunks are 512 tokens to
+# begin with. The length actually used is this or the model's own limit,
+# whichever is smaller (see _model_max_length): MiniLM has 512 position
+# embeddings, and at 1024 the first pair longer than 512 tokens (594, on the
+# golden set) crashed the forward pass, so it used to need RERANKER_MAX_LENGTH=512
+# set by hand.
 RERANKER_MAX_LENGTH = int(os.getenv("RERANKER_MAX_LENGTH", "1024"))
 
 # Half precision for the cross-encoder. "auto" (the default) enables it on CUDA
@@ -78,6 +83,9 @@ RERANKER_BATCH_SIZE = int(os.getenv("RERANKER_BATCH_SIZE", "8"))
 # ==============================================================================
 _embedding_model: SentenceTransformer | None = None
 _reranker_model: CrossEncoder | None = None
+# The calibration profile of the loaded cross-encoder (src/decisions/
+# reranker_calibration.py), resolved with its effective sequence length.
+_reranker_profile = None
 
 
 def _get_embedding_model() -> SentenceTransformer:
@@ -123,30 +131,81 @@ def _get_reranker_model() -> CrossEncoder:
     to any substituted model, not just the default — swapping the model without
     it would leave every threshold comparing against a different scale, silently.
 
+    The sigmoid puts every model on [0, 1], not on the same scale. The gate's
+    thresholds are calibrated per model, so the model's calibration profile is
+    resolved here, at its effective sequence length, and an uncalibrated model
+    fails to load rather than being gated against another model's floors.
+
     Returns:
         CrossEncoder model with sigmoid activation for [0,1] normalized scores.
+
+    Raises:
+        UncalibratedReranker: No calibration profile for this model and length.
     """
-    global _reranker_model
+    global _reranker_model, _reranker_profile
     if _reranker_model is None:
+        from src.decisions.reranker_calibration import resolve_profile
+
         device = "cuda" if torch.cuda.is_available() else "cpu"
         logger.info(
             f"Loading {RERANKER_MODEL_NAME} to {device.upper()}",
             extra={"max_length": RERANKER_MAX_LENGTH},
         )
-        _reranker_model = CrossEncoder(
+        model = CrossEncoder(
             RERANKER_MODEL_NAME,
             max_length=RERANKER_MAX_LENGTH,
             device=device,
             default_activation_function=torch.nn.Sigmoid(),  # ← MANDATORY for [0,1] scores
         )
+        limit = _model_max_length(model)
+        max_length = RERANKER_MAX_LENGTH if limit is None else min(RERANKER_MAX_LENGTH, limit)
+        if max_length != RERANKER_MAX_LENGTH:
+            model.max_length = max_length
+        if limit is None:
+            logger.warning(
+                f"{RERANKER_MODEL_NAME} does not state its sequence limit; "
+                "calibration length not checked"
+            )
+        profile = resolve_profile(RERANKER_MODEL_NAME, None if limit is None else max_length)
         half = _use_half_precision(device)
         if half:
-            _reranker_model.model.half()
+            model.model.half()
+        _reranker_model, _reranker_profile = model, profile
         logger.info(
             f"{RERANKER_MODEL_NAME} loaded successfully on {device.upper()} (sigmoid activated)",
-            extra={"half_precision": half},
+            extra={"half_precision": half, "max_length": max_length,
+                   "calibration_profile": profile.name},
         )
     return _reranker_model
+
+
+def _model_max_length(model) -> int | None:
+    """
+    The longest sequence the model can encode, from its own config and tokenizer.
+
+    The smaller of the tokenizer's model_max_length and the position-embedding
+    count. RoBERTa-family encoders (bge-reranker-v2-m3 is XLM-RoBERTa) offset
+    positions by padding_idx + 1, so 8194 embeddings hold 8192 tokens.
+
+    Args:
+        model: A loaded CrossEncoder.
+
+    Returns:
+        The limit in tokens, or None when the model states neither.
+    """
+    limits = []
+    tokenizer_limit = getattr(getattr(model, "tokenizer", None), "model_max_length", None)
+    # Tokenizers without a limit report a huge sentinel (int(1e30)).
+    if isinstance(tokenizer_limit, int) and 0 < tokenizer_limit < 1_000_000:
+        limits.append(tokenizer_limit)
+    config = getattr(model, "config", None)
+    positions = getattr(config, "max_position_embeddings", None)
+    if isinstance(positions, int) and positions > 0:
+        if "roberta" in str(getattr(config, "model_type", "")):
+            pad = getattr(config, "pad_token_id", 1)
+            positions -= (pad if isinstance(pad, int) else 1) + 1
+        limits.append(positions)
+    return min(limits) if limits else None
 
 
 def _use_half_precision(device: str) -> bool:
@@ -349,14 +408,21 @@ async def warm_models() -> dict[str, float]:
     bare constructor call does not.
 
     Failures are logged and swallowed. A warmup is an optimisation, and it must
-    never be the reason the API refuses to start.
+    never be the reason the API refuses to start — with one exception: a
+    reranker without a calibration profile. That is a configuration error, not
+    a load failure, and serving with it would gate every query against another
+    model's score scale, so it stops startup here instead of the first query.
 
     Returns:
         Mapping of model name to seconds taken. Missing keys indicate a failure.
+
+    Raises:
+        UncalibratedReranker: The configured reranker has no profile.
     """
     import asyncio
     import time
 
+    from src.decisions.reranker_calibration import UncalibratedReranker
     from src.vector_db.hybrid_search import compute_sparse_bm25
 
     timings: dict[str, float] = {}
@@ -368,6 +434,8 @@ async def warm_models() -> dict[str, float]:
         try:
             await loop.run_in_executor(_embed_executor, fn)
             timings[name] = round(time.monotonic() - start, 2)
+        except UncalibratedReranker:
+            raise
         except Exception as e:
             logger.warning(f"Model warmup failed for {name}: {e}")
 

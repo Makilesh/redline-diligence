@@ -7,6 +7,7 @@ merges state at superstep boundaries via node returns. Mutating state
 in edge functions bypasses reducers and can break checkpoint resume.
 """
 
+from src.decisions.reranker_calibration import ROUTER_MIN_SCORE, ROUTER_THRESHOLDS
 from src.workflow.state_definitions import AgentState
 from src.utils.logger import setup_logger
 
@@ -36,7 +37,12 @@ logger = setup_logger(__name__)
 # Type-specific expectation lives in EXPECTED_EVIDENCE_COUNT (the completeness
 # denominator), which is why these are uniform rather than a second set of
 # per-type constants. See DECISIONS_LOG Decision 17.
-_CALIBRATED = {"relevance": 0.30, "completeness": 0.30, "precision": 0.25}
+#
+# They are on bge's scale for every reranker: the Quality Assessor maps another
+# cross-encoder's scores onto it through that model's calibration profile
+# before computing these dimensions, so the values live once, in
+# src/decisions/reranker_calibration.py.
+_CALIBRATED = dict(ROUTER_THRESHOLDS)
 
 THRESHOLDS: dict[str, dict[str, float]] = {
     "financial": dict(_CALIBRATED),
@@ -131,7 +137,7 @@ def route_after_quality_check(state: AgentState) -> str:
     # the trace reported the gate as passed (audit W3/C2). Every assessor pass
     # writes force_refusal, so it is never left over from an earlier pass.
     refused = bool(state.get("force_refusal", False))
-    if score >= 0.3 and _meets_type_threshold(state) and not vetoed and not refused:
+    if score >= ROUTER_MIN_SCORE and _meets_type_threshold(state) and not vetoed and not refused:
         logger.info(
             "Quality check passed, routing to synthesizer",
             extra={"score": score, "iteration": iteration},
