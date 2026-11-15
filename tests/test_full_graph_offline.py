@@ -144,7 +144,12 @@ class TestAnswering:
         assert blocking.answer == streamed.answer
         assert blocking.state["validation_status"] == "passed"
         assert blocking.cited_sources == streamed.cited_sources
-        assert p.llm.of("synthesis")[-1].stream is False
+        # The provider request is streamed on the blocking path too — that is
+        # what lets the first-token deadline catch a hung model in seconds
+        # rather than at the 120s timeout — but nothing reaches the client
+        # until the validated result.
+        assert p.llm.of("synthesis")[-1].stream is True
+        assert blocking.events == [] and blocking.tokens == ""
 
     async def test_financial_question_runs_the_figure_check(self, offline_pipeline):
         p = offline_pipeline
