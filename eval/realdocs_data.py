@@ -251,6 +251,7 @@ class FinanceQuestion:
     question_reasoning: str
     doc_name: str
     evidence: list[EvidencePage]
+    company: str = ""  # FinanceBench's company label: the unit the dev/test split keeps together
 
 
 def financebench_dir(root: Path | None = None) -> Path:
@@ -302,6 +303,7 @@ def load_financebench(root: Path | None = None) -> list[FinanceQuestion]:
                              text=e.get("evidence_text") or "")
                 for e in row["evidence"]
             ],
+            company=str(row.get("company") or ""),
         ))
     return questions
 
@@ -333,6 +335,41 @@ def select_financebench_documents(questions: list[FinanceQuestion], max_document
     if max_documents is None or max_documents >= len(names):
         return names
     return sorted(random.Random(seed).sample(names, max_documents))
+
+
+# The tuning split used for Decision 68. Fixed before any setting was chosen.
+FINANCEBENCH_SPLIT_SEED = 20261115
+
+
+def financebench_company_split(questions: list[FinanceQuestion],
+                               seed: int = FINANCEBENCH_SPLIT_SEED) -> dict[str, list[str]]:
+    """
+    Companies for a dev/test split that keeps each company's filings together.
+
+    Splitting by question would put one year's 10-K in dev and the next year's
+    in test, and the main failure on this benchmark is confusing exactly those
+    two. So the sorted company labels are shuffled with a fixed seed and the
+    first half is dev.
+
+    Args:
+        questions: All questions.
+        seed: Shuffle seed.
+
+    Returns:
+        {"dev": [...], "test": [...]} sorted company labels.
+    """
+    companies = sorted({q.company for q in questions})
+    random.Random(seed).shuffle(companies)
+    half = len(companies) // 2
+    return {"dev": sorted(companies[:half]), "test": sorted(companies[half:])}
+
+
+def select_financebench_split(questions: list[FinanceQuestion], split: str,
+                              seed: int = FINANCEBENCH_SPLIT_SEED) -> list[str]:
+    """Sorted doc_names of every filing a question of the split's companies uses."""
+    companies = set(financebench_company_split(questions, seed)[split])
+    chosen = [q for q in questions if q.company in companies]
+    return sorted({q.doc_name for q in chosen} | {e.doc_name for q in chosen for e in q.evidence})
 
 
 def main(argv: list[str] | None = None) -> int:
