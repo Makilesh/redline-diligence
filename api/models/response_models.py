@@ -20,6 +20,14 @@ class Citation(BaseModel):
 class QueryResponse(BaseModel):
     """Response model for the /query endpoint."""
     answer: str = Field(..., description="Generated answer with citations")
+    answer_truncated: bool = Field(
+        False,
+        description=(
+            "True when the answer stopped at the model's output limit rather than "
+            "where the model ended it (streamed route only); validation_status is "
+            "then never 'passed'"
+        ),
+    )
     query_type: str = Field(..., description="Detected query type")
     confidence_score: float = Field(..., description="Answer confidence 0.0-1.0")
     validation_status: str = Field(..., description="passed|warning|failed")

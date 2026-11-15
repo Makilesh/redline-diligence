@@ -143,6 +143,8 @@ def _attach_perf(result, scope: dict, node: str):
         "prompt_tokens": scope["prompt_tokens"],
         "completion_tokens": scope["completion_tokens"],
         "models": list(scope["models"]),
+        # One per LLM call, in order; "length" is a reply cut off at max_tokens.
+        "finish_reasons": list(scope.get("finish_reasons") or []),
     }
     trace = result.get("agent_trace")
     if isinstance(trace, list) and trace and isinstance(trace[-1], dict):
@@ -734,6 +736,7 @@ def _build_initial_state(
         "numerical_registry": {},
         "inconsistencies": [],
         "generated_answer": "",
+        "answer_truncated": False,
         "citations": [],
         "numerical_claims": [],
         "confidence_score": 0.0,
@@ -1025,11 +1028,14 @@ def _summarize_stage(node: str, delta: dict) -> tuple[str, dict]:
         if trace.get("revision"):
             items = trace.get("revision_items", 0)
             summary += f" - {items} flagged claim{'s' if items != 1 else ''} fed back"
+        if delta.get("answer_truncated"):
+            summary += " - cut off at the output limit"
         return summary, {
             "citation_count": len(citations),
             "answer_length": trace.get("answer_length", 0),
             "model": trace.get("model", ""),
             "revision": bool(trace.get("revision")),
+            "answer_truncated": bool(delta.get("answer_truncated")),
         }
 
     if node == "hallucination_validator":

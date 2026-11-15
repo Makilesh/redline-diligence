@@ -22,6 +22,7 @@ import time
 import litellm
 
 from src.llm.failures import (
+    CompletionTruncated,
     Failure,
     FailureKind,
     ProseAgentFailed,
@@ -129,23 +130,42 @@ def _call_metadata(agent: str | None) -> dict | None:
     }
 
 
-def _log_usage(response, model: str, agent: str | None, started: float) -> None:
+def _usage_field(obj, name: str):
+    """A field of a usage object or dict (or of its token-details part), if any."""
+    if obj is None:
+        return None
+    value = getattr(obj, name, None)
+    if value is None and isinstance(obj, dict):
+        value = obj.get(name)
+    return value
+
+
+def _log_usage(
+    response,
+    model: str,
+    agent: str | None,
+    started: float,
+    finish_reason: str | None = None,
+    max_tokens: int | None = None,
+) -> None:
     """
-    Logs token usage and latency for one completed call.
+    Logs token usage, latency and how the call ended, for one completed call.
 
     Free observability even without Langfuse: the structured log line is enough
     to see which agent spends the quota. Tolerates responses without `usage`
     (test doubles, some local backends).
+
+    `finish_reason` "length" next to `max_tokens` is what makes a cut-off reply
+    visible: the 2026-11-15 evening run had 29 synthesis calls end at 2,996 of
+    3,000 tokens, and nothing in the log said so. Gemini 3.x counts thinking
+    against max_tokens, so `reasoning_tokens` (LiteLLM's reading of the
+    provider's thoughtsTokenCount) is logged too — it is the part of the budget
+    the reader never sees.
     """
     usage = getattr(response, "usage", None)
 
     def _get(name: str):
-        if usage is None:
-            return None
-        value = getattr(usage, name, None)
-        if value is None and isinstance(usage, dict):
-            value = usage.get(name)
-        return value
+        return _usage_field(usage, name)
 
     logger.info(
         "LLM call usage",
@@ -154,11 +174,48 @@ def _log_usage(response, model: str, agent: str | None, started: float) -> None:
             "agent": agent,
             "prompt_tokens": _get("prompt_tokens"),
             "completion_tokens": _get("completion_tokens"),
+            "reasoning_tokens": _reasoning_tokens(usage),
             "total_tokens": _get("total_tokens"),
+            "max_tokens": max_tokens,
+            "finish_reason": finish_reason,
             "latency_ms": round((time.monotonic() - started) * 1000, 1),
             **{k: v for k, v in (_trace_context.get() or {}).items() if k == "deal_id"},
         },
     )
+
+
+def _reasoning_tokens(usage) -> int | None:
+    """Thinking tokens the provider reported, from usage.completion_tokens_details."""
+    value = _usage_field(_usage_field(usage, "completion_tokens_details"), "reasoning_tokens")
+    return value if isinstance(value, int) else None
+
+
+class ProseOutcome:
+    """
+    Out-parameter describing how a prose call ended, for the caller's trace.
+
+    Like ServedModel: a caller that passes one learns what it could not see
+    from the returned text alone, and a test double that ignores it leaves the
+    defaults (finish_reason None, not truncated).
+
+    Attributes:
+        finish_reason: The provider's finish reason for the request whose text
+            was returned ("stop", "length", ...), or None if it did not say.
+        max_tokens: That request's output budget (larger after a length retry).
+        length_retries: Same-model requests made because a reply was cut off.
+        reasoning_tokens: Thinking tokens the provider reported for it, if any.
+    """
+
+    def __init__(self, max_tokens: int | None = None):
+        self.finish_reason: str | None = None
+        self.max_tokens = max_tokens
+        self.length_retries = 0
+        self.reasoning_tokens: int | None = None
+
+    @property
+    def truncated(self) -> bool:
+        """True when the returned text stopped at max_tokens, not where the model ended it."""
+        return self.finish_reason == "length"
 
 # Local fallback for the verification agents. The cloud model is no longer named
 # here — it comes from BudgetTracker's agent ladder, so verification routes and
@@ -242,6 +299,21 @@ PROSE_TIMEOUT_SECONDS = 120.0
 # One of the 59 healthy calls would have been abandoned (34.0s total, 2,409
 # tokens — 71 tokens/s); it would have cost its unit and a fall to the next rung.
 # Each hung call it replaces cost 120s.
+#
+# Still keyed to the WHOLE budget now that synthesis asks for 8,192 tokens
+# (56.6s), not to a guess at how much of it thinking will take. Gemini 3.x
+# takes no numeric thinking cap (LiteLLM 1.89.3 maps reasoning_effort to a
+# thinkingLevel and drops a `thinking` budget for Gemini 3), so any number
+# below the budget is a guess the model is free to exceed — and a missed
+# deadline cools the model for everyone. Re-asked live with room to spare
+# (2026-11-15, gemini-3.6-flash), mh_05 thought for 3,992 tokens and started
+# answering at 37.9s, then wrote a complete 17-citation answer: any deadline
+# under ~38s would have abandoned and cooled a healthy model (the same model
+# reached the same point in 11-14s on two other questions, so the rate varies
+# more than the run suggested). The cost is a slower verdict on a model that never starts —
+# 56.6s instead of 22s, still half the 120s it replaced — and the case it
+# exists for is still caught: the same request on gemini-3.8-flash, thinking at
+# ~18 tokens/s, first answered at 71.2s.
 FIRST_TOKEN_MIN_TOKENS_PER_SECOND = 150.0
 FIRST_TOKEN_OVERHEAD_SECONDS = 2.0
 FIRST_TOKEN_FLOOR_SECONDS = 10.0
@@ -690,10 +762,11 @@ async def _structured_request(
     )
     started = time.monotonic()
     response = await _acompletion(kwargs, model, api_key)
-    _log_usage(response, model, agent, started)
 
     first = response.choices[0]
-    parsed = _parse_json_object(first.message.content, getattr(first, "finish_reason", None))
+    finish_reason = getattr(first, "finish_reason", None)
+    _log_usage(response, model, agent, started, finish_reason=finish_reason, max_tokens=max_tokens)
+    parsed = _parse_json_object(first.message.content, finish_reason)
     logger.info(
         "Structured agent call successful",
         extra={"model": model, "response_keys": list(parsed.keys())},
@@ -1010,6 +1083,73 @@ _PROSE_NO_RETRY_KINDS = frozenset({
     FailureKind.REQUEST_INVALID,
 })
 
+# ─── Replies cut off at max_tokens ───────────────────────────────────────────
+#
+# Gemini 3.x counts thinking against max_tokens, and a reply that runs into the
+# limit ends with finish_reason "length" and whatever text fitted. Nothing used
+# to read that: in the 2026-11-15 evening run 29 of 54 synthesis calls stopped
+# at 2,996 of 3,000 tokens and shipped mid-sentence — mh_05 as 528 characters
+# ending "because Adjusted EBITDA is higher", scored passed at recall 0 — and
+# mh_06 failed outright when three rungs in a row were cut before their first
+# citation.
+#
+# The repair is more room on the same model, as for a cut-off structured reply,
+# not another model. The model answered promptly; it needed a bigger budget.
+# Moving down the ladder did not help in that run — every rung tried for
+# mh_06, legal_05 and mh_04 was cut off too, and 3.5-flash is served by the same
+# backend as 3.6-flash. So a cut-off reply gets ONE retry on the same slot with
+# twice the room, paid for like any retry. It is not a health failure: nothing
+# is cooled and nothing is refunded (the provider served the request). Only if
+# the retry is cut off as well — twice the budget suggests a model that loops,
+# not one that is verbose — does the caller's ladder move on, for this request
+# only (CompletionTruncated is MODEL_FAILED).
+LENGTH_RETRY_GROWTH = 2
+
+
+async def _room_after_cutoff(
+    model: str,
+    api_key: str | None,
+    room: int,
+    outcome: ProseOutcome,
+    text: str | None,
+    attempts_left: int,
+) -> int:
+    """
+    The output budget for the one retry a cut-off reply gets, paid for.
+
+    Args:
+        model: The model that was cut off.
+        api_key: Its credential, for the retry charge.
+        room: The budget it was cut off at.
+        outcome: The call's outcome; its length_retries is updated.
+        text: What the cut-off reply contained, for the log.
+        attempts_left: Requests the caller may still make on this slot.
+
+    Returns:
+        The retry's budget.
+
+    Raises:
+        CompletionTruncated: The retry was already used, the caller has no
+            attempt left, or the slot cannot pay for another request.
+    """
+    logger.warning(
+        "Prose reply cut off at the output limit",
+        extra={"model": model, "max_tokens": room, "reasoning_tokens": outcome.reasoning_tokens,
+               "visible_chars": len(text or ""), "length_retries": outcome.length_retries},
+    )
+    if outcome.length_retries >= 1 or attempts_left < 1:
+        raise CompletionTruncated(
+            f"prose reply from {model} was cut off at {room} tokens "
+            f"after {outcome.length_retries} retry with more room"
+        )
+    if not await _charge_retry(model, api_key):
+        raise CompletionTruncated(
+            f"prose reply from {model} was cut off at {room} tokens and the slot "
+            f"has no allowance left for a retry"
+        )
+    outcome.length_retries += 1
+    return room * LENGTH_RETRY_GROWTH
+
 
 async def call_prose_agent(
     system_prompt: str,
@@ -1020,6 +1160,7 @@ async def call_prose_agent(
     api_key: str | None = None,
     agent: str | None = None,
     stream_with_deadline: bool = False,
+    outcome: ProseOutcome | None = None,
 ) -> str:
     """
     Wrapper for agents that return prose (not JSON).
@@ -1040,11 +1181,16 @@ async def call_prose_agent(
             request cannot tell a model that is thinking from one that is hung
             until the total timeout; a streamed one can. Ignored for the local
             model, which has no rung below it to fall to.
+        outcome: Optional holder told how the returned text ended (finish
+            reason, final budget, length retries).
 
     Returns:
-        Raw string response from the agent. Never None.
+        Raw string response from the agent. Never None, and never a reply cut
+        off at max_tokens.
 
     Raises:
+        CompletionTruncated: A reply was cut off at max_tokens and the one
+            retry with twice the room was cut off too or could not be paid for.
         ProseAgentFailed: (a RuntimeError) every attempt failed or returned an
             empty completion. Classified so a ladder moves to another model.
         StreamInterrupted: With stream_with_deadline, the stream failed after
@@ -1067,6 +1213,8 @@ async def call_prose_agent(
     last_error: Exception | None = None
     attempts = 0
     streamed = stream_with_deadline and not is_local(model)
+    outcome = outcome if outcome is not None else ProseOutcome()
+    room = max_tokens
 
     for attempt in range(1, MAX_RETRIES + 1):
         attempts = attempt
@@ -1076,7 +1224,7 @@ async def call_prose_agent(
                 "model": model,
                 "attempt": attempt,
                 "temperature": temperature,
-                "max_tokens": max_tokens,
+                "max_tokens": room,
             },
         )
 
@@ -1088,7 +1236,7 @@ async def call_prose_agent(
                     {"role": "user", "content": user_prompt},
                 ],
                 "temperature": temperature,
-                "max_tokens": max_tokens,
+                "max_tokens": room,
                 "timeout": PROSE_TIMEOUT_SECONDS,
             }
             if api_key:
@@ -1097,33 +1245,23 @@ async def call_prose_agent(
             if metadata:
                 prose_kwargs["metadata"] = metadata
             if streamed:
+                probe = ProseOutcome(room)
                 content = await _streamed_text(
                     prose_kwargs, model, api_key, agent,
                     on_token=_discard_token,
-                    first_token_timeout=first_token_deadline(max_tokens),
+                    first_token_timeout=first_token_deadline(room),
+                    outcome=probe,
                 )
+                finish_reason, reasoning = probe.finish_reason, probe.reasoning_tokens
             else:
                 started = time.monotonic()
                 response = await _acompletion(prose_kwargs, model, api_key)
-                _log_usage(response, model, agent, started)
-                content = response.choices[0].message.content
-
-            if content and content.strip():
-                logger.info(
-                    "Prose agent call successful",
-                    extra={
-                        "model": model,
-                        "attempt": attempt,
-                        "response_length": len(content),
-                    },
-                )
-                return content
-
-            last_error = RuntimeError("empty completion")
-            logger.warning(
-                "Prose agent returned an empty completion",
-                extra={"model": model, "attempt": attempt},
-            )
+                first = response.choices[0]
+                finish_reason = getattr(first, "finish_reason", None)
+                reasoning = _reasoning_tokens(getattr(response, "usage", None))
+                _log_usage(response, model, agent, started,
+                           finish_reason=finish_reason, max_tokens=room)
+                content = first.message.content
 
         except StreamInterrupted:
             # The model stopped mid-answer and has already been reported; a
@@ -1153,6 +1291,33 @@ async def call_prose_agent(
                 if kind in _HEALTH_KINDS:
                     _report_unhealthy(model)
                 raise
+        else:
+            outcome.finish_reason, outcome.reasoning_tokens = finish_reason, reasoning
+            outcome.max_tokens = room
+            if finish_reason == "length":
+                # Cut off at max_tokens, with or without visible text. Never
+                # returned as an answer: the model gets the room it needed,
+                # once, on the same slot (see _room_after_cutoff).
+                room = await _room_after_cutoff(
+                    model, api_key, room, outcome, content, attempts_left=MAX_RETRIES - attempt
+                )
+                continue
+            if content and content.strip():
+                logger.info(
+                    "Prose agent call successful",
+                    extra={
+                        "model": model,
+                        "attempt": attempt,
+                        "response_length": len(content),
+                    },
+                )
+                return content
+
+            last_error = RuntimeError("empty completion")
+            logger.warning(
+                "Prose agent returned an empty completion",
+                extra={"model": model, "attempt": attempt},
+            )
 
         if attempt == MAX_RETRIES or not await _charge_retry(model, api_key):
             break
@@ -1384,6 +1549,7 @@ async def _streamed_text(
     agent: str | None,
     on_token,
     first_token_timeout: float | None,
+    outcome: "ProseOutcome | None" = None,
 ) -> str:
     """
     One streamed provider request under the wrapper's deadlines.
@@ -1415,6 +1581,9 @@ async def _streamed_text(
         on_token: Receives each text delta.
         first_token_timeout: Seconds to the first text delta, or None for no
             first-token deadline (the total and stall deadlines still apply).
+        outcome: Receives the stream's finish reason and reasoning tokens.
+            LiteLLM puts the finish reason on the stream's last choice, so a
+            stream cut off at max_tokens ends normally and only this tells.
 
     Returns:
         The concatenated text (possibly empty — the caller decides).
@@ -1438,6 +1607,7 @@ async def _streamed_text(
     parts: list[str] = []
     emitted = 0
     usage = None
+    finish_reason = None
     stream = None
     started = time.monotonic()
     reservation = await _reserve_input_tokens(kwargs, model, api_key)
@@ -1465,8 +1635,13 @@ async def _streamed_text(
             last_chunk_at = loop.time()
             usage = getattr(chunk, "usage", None) or usage
             try:
-                delta = chunk.choices[0].delta.content
+                choice = chunk.choices[0]
             except (AttributeError, IndexError, TypeError):
+                choice = None
+            finish_reason = getattr(choice, "finish_reason", None) or finish_reason
+            try:
+                delta = choice.delta.content
+            except AttributeError:
                 delta = None
             if delta:
                 parts.append(delta)
@@ -1498,9 +1673,15 @@ async def _streamed_text(
             )
         raise
 
-    _log_usage(_UsageHolder(usage), model, agent, started)
+    _log_usage(
+        _UsageHolder(usage), model, agent, started,
+        finish_reason=finish_reason, max_tokens=kwargs.get("max_tokens"),
+    )
     if reservation is not None:
         reservation.adjust(_prompt_tokens(usage))
+    if outcome is not None:
+        outcome.finish_reason = finish_reason
+        outcome.reasoning_tokens = _reasoning_tokens(usage)
     return "".join(parts)
 
 
@@ -1513,6 +1694,7 @@ async def stream_prose_agent(
     max_tokens: int = 3000,
     api_key: str | None = None,
     agent: str | None = None,
+    outcome: ProseOutcome | None = None,
 ) -> str:
     """
     Prose completion streamed token by token, returning the full text.
@@ -1529,6 +1711,11 @@ async def stream_prose_agent(
     - fails AFTER tokens were emitted (including a stall): raises
       StreamInterrupted, and the caller emits an answer reset before trying
       elsewhere.
+    - is cut off at max_tokens (finish_reason "length"): before any text, it
+      is retried once with twice the room exactly as call_prose_agent does —
+      the client has seen nothing. After text, the tokens are already on the
+      client's screen, so the text is returned and `outcome.truncated` tells
+      the caller to mark the answer as cut off.
 
     Args:
         system_prompt: System-level instructions.
@@ -1539,12 +1726,16 @@ async def stream_prose_agent(
         max_tokens: Maximum output tokens.
         api_key: Credential for this call.
         agent: Calling agent's name.
+        outcome: Optional holder told how the returned text ended. Callers
+            must read `outcome.truncated`: on this path a cut-off answer is
+            returned, not raised.
 
     Returns:
-        The complete generated text. Never empty.
+        The generated text. Never empty; possibly cut off (see outcome).
 
     Raises:
         StreamInterrupted: The stream broke after emitting text.
+        CompletionTruncated: Cut off before any text, twice.
         RuntimeError: Empty completion.
         Exception: Provider errors the ladder classifies (see above).
     """
@@ -1563,13 +1754,28 @@ async def stream_prose_agent(
     metadata = _call_metadata(agent)
     if metadata:
         kwargs["metadata"] = metadata
+    outcome = outcome if outcome is not None else ProseOutcome()
+    room = max_tokens
 
     try:
-        text = await _streamed_text(
-            kwargs, model, api_key, agent, on_token,
-            first_token_timeout=None if is_local(model) else first_token_deadline(max_tokens),
-        )
+        while True:
+            kwargs["max_tokens"] = room
+            probe = ProseOutcome(room)
+            text = await _streamed_text(
+                kwargs, model, api_key, agent, on_token,
+                first_token_timeout=None if is_local(model) else first_token_deadline(room),
+                outcome=probe,
+            )
+            outcome.finish_reason, outcome.reasoning_tokens = probe.finish_reason, probe.reasoning_tokens
+            outcome.max_tokens = room
+            if not (probe.truncated and not text.strip()):
+                break
+            # Cut off while still thinking: nothing has reached the client, so
+            # the retry with more room is as invisible here as on /query.
+            room = await _room_after_cutoff(model, api_key, room, outcome, text, attempts_left=1)
     except StreamInterrupted:
+        raise
+    except CompletionTruncated:
         raise
     except Exception as e:
         failure = classify_failure(e)
@@ -1593,9 +1799,10 @@ async def stream_prose_agent(
             user_prompt=user_prompt,
             model=model,
             temperature=temperature,
-            max_tokens=max_tokens,
+            max_tokens=room,
             api_key=api_key,
             agent=agent,
+            outcome=outcome,
         )
         on_token(text)
         return text
@@ -1604,4 +1811,12 @@ async def stream_prose_agent(
         # Typed so the caller's ladder tries another model; as a bare
         # RuntimeError it matched no classifier and ended in a refusal.
         raise ProseAgentFailed(f"empty streamed completion (model={model})")
+    if outcome.truncated:
+        # The answer is already on the client's screen, so it cannot be
+        # silently replaced. It is returned, and the caller marks it as cut off.
+        logger.warning(
+            "Streamed answer cut off at the output limit; returned flagged as truncated",
+            extra={"model": model, "max_tokens": room, "chars": len(text),
+                   "reasoning_tokens": outcome.reasoning_tokens},
+        )
     return text

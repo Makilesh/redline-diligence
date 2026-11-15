@@ -292,7 +292,7 @@ def node_scope(node: str) -> Iterator[dict]:
 
     Yields:
         The live scope dict: {node, llm_calls, prompt_tokens, completion_tokens,
-        models, duration_ms}. `duration_ms` is filled in on exit.
+        models, finish_reasons, duration_ms}. `duration_ms` is filled in on exit.
     """
     scope = {
         "node": node,
@@ -300,6 +300,7 @@ def node_scope(node: str) -> Iterator[dict]:
         "prompt_tokens": 0,
         "completion_tokens": 0,
         "models": [],
+        "finish_reasons": [],
     }
     token = _node_scope.set(scope)
     # perf_counter, not monotonic: on Windows monotonic() ticks every ~15 ms,
@@ -323,6 +324,7 @@ def record_llm_call(
     prompt_tokens: int | None,
     completion_tokens: int | None,
     latency_ms: float | None,
+    finish_reason: str | None = None,
 ) -> None:
     """
     Records one completed LLM call against the global series and the active node.
@@ -334,6 +336,9 @@ def record_llm_call(
         prompt_tokens: Prompt tokens, if the provider reported usage.
         completion_tokens: Completion tokens, if reported.
         latency_ms: Wall time of the call in milliseconds.
+        finish_reason: How the call ended ("stop", "length", ...), if reported.
+            Kept per call, in order, so a node's perf shows a reply cut off at
+            max_tokens next to its completion tokens.
     """
     scope = _node_scope.get()
     node = scope["node"] if scope else (agent or "unattributed")
@@ -351,6 +356,7 @@ def record_llm_call(
         scope["completion_tokens"] += int(completion_tokens or 0)
         if model not in scope["models"]:
             scope["models"].append(model)
+        scope.setdefault("finish_reasons", []).append(finish_reason)
 
 
 class _LLMUsageTap(logging.Filter):
@@ -365,6 +371,7 @@ class _LLMUsageTap(logging.Filter):
                     prompt_tokens=getattr(record, "prompt_tokens", None),
                     completion_tokens=getattr(record, "completion_tokens", None),
                     latency_ms=getattr(record, "latency_ms", None),
+                    finish_reason=getattr(record, "finish_reason", None),
                 )
             except Exception:
                 # Observability must never break the call it observes.

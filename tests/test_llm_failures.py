@@ -84,6 +84,28 @@ class TestTypedExceptions:
         )
         assert classify_failure(exc).kind is FailureKind.AUTH
 
+    def test_daily_quota_wrapped_as_http_400_is_a_quota_failure(self):
+        """Seen live on the streamed path: the class says 400, the body says 429."""
+        exc = litellm.BadRequestError(
+            message="Vertex_ai_betaException BadRequestError - b'{\\n  \"error\": {\\n    "
+                    "\"code\": 429,\\n    \"message\": \"You exceeded your current quota. "
+                    "Please retry in 16h36m24.27s.\",\\n    \"status\": \"RESOURCE_EXHAUSTED\",\\n"
+                    "    \"details\": [{\"quotaId\": \"GenerateRequestsPerDayPerProjectPerModel-FreeTier\"}]}}'",
+            model="m", llm_provider="gemini",
+        )
+        f = classify_failure(exc)
+        assert f.kind is FailureKind.QUOTA
+        assert f.quota_window == "day"
+
+    def test_a_bare_429_in_a_bad_request_message_is_not_quota(self):
+        """Only the error body's own status counts, not a number in the prose."""
+        exc = litellm.BadRequestError(
+            message='GeminiException BadRequestError - {"error": {"code": 400, "message": '
+                    '"Invalid value at position 429", "status": "INVALID_ARGUMENT"}}',
+            model="m", llm_provider="gemini",
+        )
+        assert classify_failure(exc).kind is FailureKind.REQUEST_INVALID
+
     def test_unmapped_provider_error_in_a_catch_all_class_is_refined(self):
         """LiteLLM files errors it cannot map under APIConnectionError."""
         exc = litellm.APIConnectionError(

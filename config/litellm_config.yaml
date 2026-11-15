@@ -105,16 +105,16 @@ deadlines:
   local_structured_timeout_seconds: 60
   prose_total_seconds: 120
   # Synthesis is streamed (also on the blocking /query path) so a model that
-  # has not STARTED answering is abandoned early: 2 + max_tokens / 150 = 22s at
-  # 3000. Gemini 3.x sends no bytes while thinking, so this is a bound on
+  # has not STARTED answering is abandoned early: 2 + max_tokens / 150 = 56.6s
+  # at 8192. Gemini 3.x sends no bytes while thinking, so this is a bound on
   # thinking time; PROSE_FIRST_TOKEN_TIMEOUT_SECONDS overrides it.
-  prose_first_token_seconds: 22
+  prose_first_token_seconds: 56.6
   stream_stall_seconds: 20
 
 sampling:
   synthesis:
     temperature: 0.1      # slight variety in prose
-    max_tokens: 3000
+    max_tokens: 8192      # thinking included; SYNTHESIS_MAX_TOKENS overrides
   agents:
     temperature: 0.0      # deterministic structured output
     max_tokens: 800

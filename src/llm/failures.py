@@ -178,6 +178,19 @@ class ProseAgentFailed(RuntimeError):
     """
 
 
+class CompletionTruncated(ProseAgentFailed):
+    """
+    A prose reply stopped at max_tokens (finish_reason "length") and the one
+    same-model retry with twice the room was cut off too, or could not be paid
+    for.
+
+    A ProseAgentFailed, so it is MODEL_FAILED: the caller's ladder tries another
+    model for this request only. It is deliberately not a health failure — the
+    model answered promptly and at length, so nothing is cooled, and the
+    request keeps its unit because the provider served it.
+    """
+
+
 _QUOTA_ID_DAY = re.compile(r"per\s*_?day", re.IGNORECASE)
 _QUOTA_ID_MINUTE = re.compile(r"per\s*_?minute", re.IGNORECASE)
 _RETRY_DELAY = re.compile(
@@ -248,6 +261,14 @@ def _is_unavailable_text(text: str) -> bool:
 
 def _is_timeout_text(text: str) -> bool:
     return "timed out" in text or "timeout passed" in text
+
+
+_WRAPPED_429 = re.compile(r'"code"\s*:\s*429\b')
+
+
+def _is_wrapped_quota_body(text: str) -> bool:
+    """A provider error body that itself says 429 / RESOURCE_EXHAUSTED."""
+    return _WRAPPED_429.search(text) is not None or '"status": "resource_exhausted"' in text
 
 
 def _is_quota_text(text: str) -> bool:
@@ -331,6 +352,13 @@ def classify_failure(exc: BaseException) -> Failure:
         # cannot tell a dead credential from a malformed request.
         if _is_bad_key_text(text):
             return Failure(FailureKind.AUTH)
+        # On the streamed path LiteLLM sometimes files Gemini's daily-quota 429
+        # as a BadRequestError, with the 429 body intact. Taken as an invalid
+        # request, it ended synthesis on the spot instead of moving down the
+        # ladder: fin_06 in the 2026-11-15 live run was refused in 2.6 s.
+        # Only the body's own status is trusted, never a bare "429" in prose.
+        if _is_wrapped_quota_body(text):
+            return _quota(exc, text)
         return Failure(FailureKind.REQUEST_INVALID)
     if isinstance(exc, litellm.UnprocessableEntityError):
         return Failure(FailureKind.REQUEST_INVALID)

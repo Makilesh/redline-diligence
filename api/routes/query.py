@@ -126,6 +126,7 @@ def _build_response(
 
     return QueryResponse(
         answer=result.get("generated_answer", ""),
+        answer_truncated=bool(result.get("answer_truncated", False)),
         query_type=result.get("query_type", "summary"),
         confidence_score=result.get("confidence_score", 0.0),
         # A run that reached here without a status was not verified; it must

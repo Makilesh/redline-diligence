@@ -2,7 +2,7 @@
 Prompt template for Answer Synthesizer Agent (Agent 7).
 
 Model: selected per call from the synthesis ladder (src/llm/model_registry.py)
-Temp: 0.1 | Tokens: 3000 | JSON mode: OFF (prose answer)
+Temp: 0.1 | Tokens: 8192, thinking included (SYNTHESIS_MAX_TOKENS) | JSON mode: OFF (prose answer)
 
 Citation format includes version and computed flags. Context arrives as
 <document> elements (src/verification/prompt_safety.py) and is untrusted.
