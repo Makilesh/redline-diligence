@@ -28,6 +28,7 @@ def render_answer(
     rewrite_iterations: int = 0,
     claim_checks: list[dict] | None = None,
     outcome: str = "",
+    answer_truncated: bool = False,
 ) -> None:
     """
     Renders the main answer with confidence badge, validation status, the
@@ -44,6 +45,7 @@ def render_answer(
         rewrite_iterations: Number of query rewrites performed.
         claim_checks: Per-claim verification results.
         outcome: The run's outcome (answered | answered_unverified).
+        answer_truncated: The answer stopped at the model's output limit.
     """
     claim_checks = claim_checks or []
     # Header metrics. A compact strip rather than st.metric cards: these are
@@ -71,6 +73,7 @@ def render_answer(
             "claim_checks": claim_checks,
             "outcome": outcome,
             "answer": answer,
+            "answer_truncated": answer_truncated,
         }
     )
     icon, variant = _VERDICT_PILL[key]
@@ -91,6 +94,8 @@ def render_answer(
     with st.container(border=True):
         st.markdown("<span class='dd-answer-marker'></span>", unsafe_allow_html=True)
         st.markdown(escape_currency(answer))
+        if answer_truncated:
+            st.caption("✂ Cut off here: the model reached its output limit, so the answer is incomplete.")
 
     if claim_checks:
         st.write("")
