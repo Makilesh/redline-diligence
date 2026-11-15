@@ -1,6 +1,6 @@
 {
- "generated_at": "2026-11-15T09:32:30+00:00",
- "command": "python -m eval.run_retrieval_eval --baseline eval/baseline.json --compare eval/results/retrieval_2026-11-14.json",
+ "generated_at": "2026-11-15T23:12:44+00:00",
+ "command": "python -m eval.run_retrieval_eval --baseline eval/baseline.json",
  "golden_set": {
   "path": "tests\\golden_qa_set.json",
   "sha256": "a192d34a93c330963ff0fbec68c33264b08205c194844905fe0b82c398f05005",
@@ -101,7 +101,7 @@
   ],
   "chunks": 111,
   "retrievable_chunks": 111,
-  "index_seconds": 25.5
+  "index_seconds": 19.3
  },
  "sub_questions": {
   "path": "eval\\sub_questions.json",
@@ -142,7 +142,7 @@
       "mrr@10": 0.1429,
       "ndcg@10": 0.2044
      },
-     "latency_ms": 32.9,
+     "latency_ms": 20.1,
      "top_grades": [
       0,
       0,
@@ -167,7 +167,7 @@
       "mrr@10": 0.2,
       "ndcg@10": 0.4556
      },
-     "latency_ms": 32.9,
+     "latency_ms": 20.1,
      "top_grades": [
       0,
       0,
@@ -192,7 +192,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.6053
      },
-     "latency_ms": 34.9,
+     "latency_ms": 20.9,
      "top_grades": [
       0,
       2,
@@ -218,7 +218,7 @@
       "ndcg@10": 1.0,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 214.6,
+     "latency_ms": 180.6,
      "distractors_in_top": 0,
      "context_chunks": 14,
      "context_chars": 18994,
@@ -235,7 +235,7 @@
        "facets": {
         "What was Aurora's total revenue in FY2023 and how does it compare to FY2022?": 0.4822
        },
-       "latency_ms": 76.8
+       "latency_ms": 76.4
       }
      },
      "sub_questions": [],
@@ -324,7 +324,7 @@
       "ndcg@10": 1.0,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 341.5,
+     "latency_ms": 346.3,
      "distractors_in_top": 0,
      "context_chunks": 14,
      "context_chars": 18994,
@@ -343,7 +343,7 @@
         "What was Aurora's total revenue in FY2023?": 0.4767,
         "What was Aurora's total revenue in FY2022?": 0.3911
        },
-       "latency_ms": 203.5
+       "latency_ms": 219.1
       }
      },
      "sub_questions": [
@@ -446,7 +446,7 @@
       "mrr@10": 0.3333,
       "ndcg@10": 0.4189
      },
-     "latency_ms": 21.1,
+     "latency_ms": 23.0,
      "top_grades": [
       0,
       0,
@@ -471,7 +471,7 @@
       "mrr@10": 0.2,
       "ndcg@10": 0.2941
      },
-     "latency_ms": 21.1,
+     "latency_ms": 23.0,
      "top_grades": [
       0,
       0,
@@ -496,7 +496,7 @@
       "mrr@10": 0.2,
       "ndcg@10": 0.2941
      },
-     "latency_ms": 22.3,
+     "latency_ms": 23.9,
      "top_grades": [
       0,
       0,
@@ -522,7 +522,7 @@
       "ndcg@10": 0.615,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 154.2,
+     "latency_ms": 144.1,
      "distractors_in_top": 0,
      "context_chunks": 10,
      "context_chars": 16982,
@@ -539,7 +539,7 @@
        "facets": {
         "What is the EBITDA and Adjusted EBITDA for FY2023?": 0.6498
        },
-       "latency_ms": 56.1
+       "latency_ms": 61.2
       }
      },
      "sub_questions": [],
@@ -628,7 +628,7 @@
       "ndcg@10": 0.615,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 154.2,
+     "latency_ms": 144.1,
      "distractors_in_top": 0,
      "context_chunks": 10,
      "context_chars": 16982,
@@ -645,7 +645,7 @@
        "facets": {
         "What is the EBITDA and Adjusted EBITDA for FY2023?": 0.6498
        },
-       "latency_ms": 56.1
+       "latency_ms": 61.2
       }
      },
      "sub_questions": [],
@@ -745,7 +745,7 @@
       "mrr@10": 0.0,
       "ndcg@10": 0.0
      },
-     "latency_ms": 21.2,
+     "latency_ms": 18.2,
      "top_grades": [
       0,
       0,
@@ -770,7 +770,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 21.2,
+     "latency_ms": 18.2,
      "top_grades": [
       5,
       0,
@@ -795,7 +795,7 @@
       "mrr@10": 0.25,
       "ndcg@10": 0.4307
      },
-     "latency_ms": 22.3,
+     "latency_ms": 19.0,
      "top_grades": [
       0,
       0,
@@ -821,7 +821,7 @@
       "ndcg@10": 1.0,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 151.0,
+     "latency_ms": 146.7,
      "distractors_in_top": 0,
      "context_chunks": 11,
      "context_chars": 15414,
@@ -838,7 +838,7 @@
        "facets": {
         "What is the company's free cash flow for FY2023 and what were the components?": 0.3957
        },
-       "latency_ms": 69.8
+       "latency_ms": 78.5
       }
      },
      "sub_questions": [],
@@ -927,7 +927,7 @@
       "ndcg@10": 1.0,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 151.0,
+     "latency_ms": 146.7,
      "distractors_in_top": 0,
      "context_chunks": 11,
      "context_chars": 15414,
@@ -944,7 +944,7 @@
        "facets": {
         "What is the company's free cash flow for FY2023 and what were the components?": 0.3957
        },
-       "latency_ms": 69.8
+       "latency_ms": 78.5
       }
      },
      "sub_questions": [],
@@ -1044,7 +1044,7 @@
       "mrr@10": 0.3333,
       "ndcg@10": 0.5
      },
-     "latency_ms": 20.1,
+     "latency_ms": 20.9,
      "top_grades": [
       0,
       0,
@@ -1069,7 +1069,7 @@
       "mrr@10": 0.25,
       "ndcg@10": 0.4307
      },
-     "latency_ms": 20.1,
+     "latency_ms": 20.9,
      "top_grades": [
       0,
       0,
@@ -1094,7 +1094,7 @@
       "mrr@10": 0.3333,
       "ndcg@10": 0.5
      },
-     "latency_ms": 21.1,
+     "latency_ms": 21.7,
      "top_grades": [
       0,
       0,
@@ -1120,7 +1120,7 @@
       "ndcg@10": 0.6309,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 157.5,
+     "latency_ms": 155.2,
      "distractors_in_top": 0,
      "context_chunks": 10,
      "context_chars": 14460,
@@ -1137,7 +1137,7 @@
        "facets": {
         "What is the Net Debt/EBITDA leverage ratio and how has it changed?": 0.396
        },
-       "latency_ms": 41.1
+       "latency_ms": 45.4
       }
      },
      "sub_questions": [],
@@ -1226,7 +1226,7 @@
       "ndcg@10": 1.0,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 428.9,
+     "latency_ms": 426.0,
      "distractors_in_top": 0,
      "context_chunks": 10,
      "context_chars": 14460,
@@ -1246,7 +1246,7 @@
         "What is the EBITDA of Aurora for the applicable periods?": 0.2868,
         "What was the leverage ratio in prior comparable periods?": 0.295
        },
-       "latency_ms": 138.4
+       "latency_ms": 158.1
       }
      },
      "sub_questions": [
@@ -1350,7 +1350,7 @@
       "mrr@10": 0.1429,
       "ndcg@10": 0.3333
      },
-     "latency_ms": 19.7,
+     "latency_ms": 18.6,
      "top_grades": [
       0,
       0,
@@ -1375,7 +1375,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.6309
      },
-     "latency_ms": 19.7,
+     "latency_ms": 18.6,
      "top_grades": [
       0,
       6,
@@ -1400,7 +1400,7 @@
       "mrr@10": 0.2,
       "ndcg@10": 0.3869
      },
-     "latency_ms": 20.6,
+     "latency_ms": 19.3,
      "top_grades": [
       0,
       0,
@@ -1426,7 +1426,7 @@
       "ndcg@10": 0.5,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 150.8,
+     "latency_ms": 141.9,
      "distractors_in_top": 0,
      "context_chunks": 11,
      "context_chars": 13877,
@@ -1443,7 +1443,7 @@
        "facets": {
         "What are the terms of the company's revolving credit facility?": 0.675
        },
-       "latency_ms": 40.4
+       "latency_ms": 44.6
       }
      },
      "sub_questions": [],
@@ -1532,7 +1532,7 @@
       "ndcg@10": 0.5,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 150.8,
+     "latency_ms": 141.9,
      "distractors_in_top": 0,
      "context_chunks": 11,
      "context_chars": 13877,
@@ -1549,7 +1549,7 @@
        "facets": {
         "What are the terms of the company's revolving credit facility?": 0.675
        },
-       "latency_ms": 40.4
+       "latency_ms": 44.6
       }
      },
      "sub_questions": [],
@@ -1649,7 +1649,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 20.6,
+     "latency_ms": 18.2,
      "top_grades": [
       4,
       0,
@@ -1674,7 +1674,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 20.6,
+     "latency_ms": 18.2,
      "top_grades": [
       4,
       0,
@@ -1699,7 +1699,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 21.4,
+     "latency_ms": 19.0,
      "top_grades": [
       4,
       0,
@@ -1725,7 +1725,7 @@
       "ndcg@10": 1.0,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 113.5,
+     "latency_ms": 141.4,
      "distractors_in_top": 0,
      "context_chunks": 12,
      "context_chars": 15193,
@@ -1742,7 +1742,7 @@
        "facets": {
         "What is the per share merger consideration and what premium does it represent?": 0.7613
        },
-       "latency_ms": 29.8
+       "latency_ms": 33.3
       }
      },
      "sub_questions": [],
@@ -1831,7 +1831,7 @@
       "ndcg@10": 1.0,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 371.0,
+     "latency_ms": 505.2,
      "distractors_in_top": 0,
      "context_chunks": 13,
      "context_chars": 16030,
@@ -1851,7 +1851,7 @@
         "What was the unaffected trading price of the target company's stock prior to the transaction announcement?": 0.3254,
         "What is the calculated percentage premium represented by the per-share merger consideration over the unaffected share price?": 0.7373
        },
-       "latency_ms": 67.3
+       "latency_ms": 74.0
       }
      },
      "sub_questions": [
@@ -1893,7 +1893,7 @@
        "source_file": "merger_agreement_v2_final.txt",
        "section_heading": "Section 8.3 — Deductible",
        "grade": 0,
-       "reranker_score": 0.0203
+       "reranker_score": 0.0204
       },
       {
        "chunk_id": "aurora_vertex_2024_0a9a6cd6-fd43-5c40-bb12-e9076ff311f3_0003",
@@ -1955,7 +1955,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.9299
      },
-     "latency_ms": 19.5,
+     "latency_ms": 16.1,
      "top_grades": [
       6,
       1,
@@ -1980,7 +1980,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.9485
      },
-     "latency_ms": 19.5,
+     "latency_ms": 16.1,
      "top_grades": [
       6,
       0,
@@ -2005,7 +2005,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.9299
      },
-     "latency_ms": 20.6,
+     "latency_ms": 16.8,
      "top_grades": [
       6,
       1,
@@ -2031,15 +2031,15 @@
       "ndcg@10": 0.9841,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 147.2,
+     "latency_ms": 189.0,
      "distractors_in_top": 0,
      "context_chunks": 12,
      "context_chars": 19630,
      "facts_missing_from_context": [],
      "gate": {
       "decision": "admitted",
-      "max_reranker_score": 0.7156,
-      "context_quality_score": 0.726,
+      "max_reranker_score": 0.7153,
+      "context_quality_score": 0.725,
       "laya": {
        "decision": "admitted",
        "consulted": true,
@@ -2048,7 +2048,7 @@
        "facets": {
         "What are the termination fee provisions?": 0.6486
        },
-       "latency_ms": 29.9
+       "latency_ms": 38.6
       }
      },
      "sub_questions": [],
@@ -2058,14 +2058,14 @@
        "source_file": "merger_agreement_v2_final.txt",
        "section_heading": "Section 7.2 — Termination Fee",
        "grade": 6,
-       "reranker_score": 0.7156
+       "reranker_score": 0.7153
       },
       {
        "chunk_id": "aurora_vertex_2024_87530865-418f-5c4e-b33e-a1562b77765e_0010",
        "source_file": "merger_agreement_v2_final.txt",
        "section_heading": "Section 7.1 — Termination",
        "grade": 1,
-       "reranker_score": 0.2129
+       "reranker_score": 0.2126
       },
       {
        "chunk_id": "aurora_vertex_2024_87530865-418f-5c4e-b33e-a1562b77765e_0016",
@@ -2137,15 +2137,15 @@
       "ndcg@10": 0.9841,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 147.2,
+     "latency_ms": 189.0,
      "distractors_in_top": 0,
      "context_chunks": 12,
      "context_chars": 19630,
      "facts_missing_from_context": [],
      "gate": {
       "decision": "admitted",
-      "max_reranker_score": 0.7156,
-      "context_quality_score": 0.726,
+      "max_reranker_score": 0.7153,
+      "context_quality_score": 0.725,
       "laya": {
        "decision": "admitted",
        "consulted": true,
@@ -2154,7 +2154,7 @@
        "facets": {
         "What are the termination fee provisions?": 0.6486
        },
-       "latency_ms": 29.9
+       "latency_ms": 38.6
       }
      },
      "sub_questions": [],
@@ -2164,14 +2164,14 @@
        "source_file": "merger_agreement_v2_final.txt",
        "section_heading": "Section 7.2 — Termination Fee",
        "grade": 6,
-       "reranker_score": 0.7156
+       "reranker_score": 0.7153
       },
       {
        "chunk_id": "aurora_vertex_2024_87530865-418f-5c4e-b33e-a1562b77765e_0010",
        "source_file": "merger_agreement_v2_final.txt",
        "section_heading": "Section 7.1 — Termination",
        "grade": 1,
-       "reranker_score": 0.2129
+       "reranker_score": 0.2126
       },
       {
        "chunk_id": "aurora_vertex_2024_87530865-418f-5c4e-b33e-a1562b77765e_0016",
@@ -2254,7 +2254,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.9754
      },
-     "latency_ms": 18.7,
+     "latency_ms": 15.2,
      "top_grades": [
       5,
       2,
@@ -2279,7 +2279,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.9787
      },
-     "latency_ms": 18.7,
+     "latency_ms": 15.2,
      "top_grades": [
       5,
       2,
@@ -2302,7 +2302,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 19.8,
+     "latency_ms": 16.1,
      "top_grades": [
       5,
       2,
@@ -2328,7 +2328,7 @@
       "ndcg@10": 0.9897,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 153.7,
+     "latency_ms": 182.6,
      "distractors_in_top": 0,
      "context_chunks": 10,
      "context_chars": 17572,
@@ -2345,7 +2345,7 @@
        "facets": {
         "What are the indemnification caps and deductible?": 0.6851
        },
-       "latency_ms": 34.2
+       "latency_ms": 46.4
       }
      },
      "sub_questions": [],
@@ -2362,7 +2362,7 @@
        "source_file": "merger_agreement_v2_final.txt",
        "section_heading": "Section 8.3 — Deductible",
        "grade": 2,
-       "reranker_score": 0.4789
+       "reranker_score": 0.4788
       },
       {
        "chunk_id": "aurora_vertex_2024_d8644901-f51c-510e-9a56-179477663299_0013",
@@ -2434,7 +2434,7 @@
       "ndcg@10": 0.9897,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 153.7,
+     "latency_ms": 182.6,
      "distractors_in_top": 0,
      "context_chunks": 10,
      "context_chars": 17572,
@@ -2451,7 +2451,7 @@
        "facets": {
         "What are the indemnification caps and deductible?": 0.6851
        },
-       "latency_ms": 34.2
+       "latency_ms": 46.4
       }
      },
      "sub_questions": [],
@@ -2468,7 +2468,7 @@
        "source_file": "merger_agreement_v2_final.txt",
        "section_heading": "Section 8.3 — Deductible",
        "grade": 2,
-       "reranker_score": 0.4789
+       "reranker_score": 0.4788
       },
       {
        "chunk_id": "aurora_vertex_2024_d8644901-f51c-510e-9a56-179477663299_0013",
@@ -2551,7 +2551,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.649
      },
-     "latency_ms": 19.5,
+     "latency_ms": 15.5,
      "top_grades": [
       0,
       5,
@@ -2576,7 +2576,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.6289
      },
-     "latency_ms": 19.5,
+     "latency_ms": 15.5,
      "top_grades": [
       0,
       5,
@@ -2601,7 +2601,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.649
      },
-     "latency_ms": 20.3,
+     "latency_ms": 16.3,
      "top_grades": [
       0,
       5,
@@ -2627,7 +2627,7 @@
       "ndcg@10": 0.6235,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 152.7,
+     "latency_ms": 193.5,
      "distractors_in_top": 0,
      "context_chunks": 11,
      "context_chars": 19144,
@@ -2644,7 +2644,7 @@
        "facets": {
         "What pending litigation does the company face?": 0.7303
        },
-       "latency_ms": 48.1
+       "latency_ms": 71.5
       }
      },
      "sub_questions": [],
@@ -2689,7 +2689,7 @@
        "source_file": "merger_agreement_v2_final.txt",
        "section_heading": "Section 3.12 — Intellectual Property",
        "grade": 1,
-       "reranker_score": 0.0736
+       "reranker_score": 0.074
       },
       {
        "chunk_id": "aurora_vertex_2024_cdca644c-7a3e-5074-9554-214b5ad0049e_0003",
@@ -2733,7 +2733,7 @@
       "ndcg@10": 0.6235,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 152.7,
+     "latency_ms": 193.5,
      "distractors_in_top": 0,
      "context_chunks": 11,
      "context_chars": 19144,
@@ -2750,7 +2750,7 @@
        "facets": {
         "What pending litigation does the company face?": 0.7303
        },
-       "latency_ms": 48.1
+       "latency_ms": 71.5
       }
      },
      "sub_questions": [],
@@ -2795,7 +2795,7 @@
        "source_file": "merger_agreement_v2_final.txt",
        "section_heading": "Section 3.12 — Intellectual Property",
        "grade": 1,
-       "reranker_score": 0.0736
+       "reranker_score": 0.074
       },
       {
        "chunk_id": "aurora_vertex_2024_cdca644c-7a3e-5074-9554-214b5ad0049e_0003",
@@ -2850,7 +2850,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.8528
      },
-     "latency_ms": 18.6,
+     "latency_ms": 18.9,
      "top_grades": [
       7,
       0,
@@ -2875,7 +2875,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.8176
      },
-     "latency_ms": 18.6,
+     "latency_ms": 18.9,
      "top_grades": [
       7,
       0,
@@ -2900,7 +2900,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.8528
      },
-     "latency_ms": 19.3,
+     "latency_ms": 19.7,
      "top_grades": [
       7,
       0,
@@ -2926,7 +2926,7 @@
       "ndcg@10": 0.8176,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 150.1,
+     "latency_ms": 179.3,
      "distractors_in_top": 0,
      "context_chunks": 11,
      "context_chars": 17737,
@@ -2943,7 +2943,7 @@
        "facets": {
         "What change of control provisions exist in the company's material contracts?": 0.6585
        },
-       "latency_ms": 33.1
+       "latency_ms": 47.8
       }
      },
      "sub_questions": [],
@@ -2960,7 +2960,7 @@
        "source_file": "customer_contracts_schedule.txt",
        "section_heading": "SECTION 2: CHANGE OF CONTROL PROVISIONS",
        "grade": 0,
-       "reranker_score": 0.7754
+       "reranker_score": 0.7751
       },
       {
        "chunk_id": "aurora_vertex_2024_5329748c-699d-55dd-bbf6-373b745b41cd_0012",
@@ -3009,7 +3009,7 @@
        "source_file": "regulatory_and_data_privacy_memo.txt",
        "section_heading": "HIPAA",
        "grade": 0,
-       "reranker_score": 0.0795
+       "reranker_score": 0.0796
       },
       {
        "chunk_id": "aurora_vertex_2024_d8644901-f51c-510e-9a56-179477663299_0013",
@@ -3032,7 +3032,7 @@
       "ndcg@10": 0.8176,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 150.1,
+     "latency_ms": 179.3,
      "distractors_in_top": 0,
      "context_chunks": 11,
      "context_chars": 17737,
@@ -3049,7 +3049,7 @@
        "facets": {
         "What change of control provisions exist in the company's material contracts?": 0.6585
        },
-       "latency_ms": 33.1
+       "latency_ms": 47.8
       }
      },
      "sub_questions": [],
@@ -3066,7 +3066,7 @@
        "source_file": "customer_contracts_schedule.txt",
        "section_heading": "SECTION 2: CHANGE OF CONTROL PROVISIONS",
        "grade": 0,
-       "reranker_score": 0.7754
+       "reranker_score": 0.7751
       },
       {
        "chunk_id": "aurora_vertex_2024_5329748c-699d-55dd-bbf6-373b745b41cd_0012",
@@ -3115,7 +3115,7 @@
        "source_file": "regulatory_and_data_privacy_memo.txt",
        "section_heading": "HIPAA",
        "grade": 0,
-       "reranker_score": 0.0795
+       "reranker_score": 0.0796
       },
       {
        "chunk_id": "aurora_vertex_2024_d8644901-f51c-510e-9a56-179477663299_0013",
@@ -3149,7 +3149,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.9151
      },
-     "latency_ms": 20.3,
+     "latency_ms": 30.5,
      "top_grades": [
       12,
       7,
@@ -3174,7 +3174,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.8085
      },
-     "latency_ms": 20.3,
+     "latency_ms": 30.5,
      "top_grades": [
       7,
       12,
@@ -3199,7 +3199,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.8889
      },
-     "latency_ms": 20.9,
+     "latency_ms": 32.6,
      "top_grades": [
       12,
       7,
@@ -3225,7 +3225,7 @@
       "ndcg@10": 0.7844,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 123.3,
+     "latency_ms": 132.8,
      "distractors_in_top": 0,
      "context_chunks": 9,
      "context_chars": 12636,
@@ -3242,7 +3242,7 @@
        "facets": {
         "Compare the three bidders — what were their offer ranges and certainty levels?": 0.5827
        },
-       "latency_ms": 45.4
+       "latency_ms": 57.8
       }
      },
      "sub_questions": [],
@@ -3317,7 +3317,7 @@
       "ndcg@10": 0.7844,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 392.7,
+     "latency_ms": 442.9,
      "distractors_in_top": 0,
      "context_chunks": 9,
      "context_chars": 12636,
@@ -3338,7 +3338,7 @@
         "What was the offer range proposed by bidder 3 for Vertex?": 0.577,
         "What are the assessed certainty levels or closing risks for each of the three bidders?": 0.58
        },
-       "latency_ms": 217.4
+       "latency_ms": 216.5
       }
      },
      "sub_questions": [
@@ -3429,7 +3429,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.9812
      },
-     "latency_ms": 20.8,
+     "latency_ms": 16.8,
      "top_grades": [
       10,
       0,
@@ -3454,7 +3454,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.972
      },
-     "latency_ms": 20.8,
+     "latency_ms": 16.8,
      "top_grades": [
       10,
       0,
@@ -3477,7 +3477,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.9877
      },
-     "latency_ms": 22.0,
+     "latency_ms": 17.5,
      "top_grades": [
       10,
       0,
@@ -3503,7 +3503,7 @@
       "ndcg@10": 1.0,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 131.3,
+     "latency_ms": 137.4,
      "distractors_in_top": 0,
      "context_chunks": 9,
      "context_chars": 13380,
@@ -3589,7 +3589,7 @@
       "ndcg@10": 0.5067,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 312.1,
+     "latency_ms": 326.2,
      "distractors_in_top": 0,
      "context_chunks": 10,
      "context_chars": 13359,
@@ -3609,7 +3609,7 @@
         "What is the implied valuation of Aurora using comparable company analysis?": 0.626,
         "What is the implied valuation of Aurora using precedent transactions?": 0.5813
        },
-       "latency_ms": 188.6
+       "latency_ms": 200.5
       }
      },
      "sub_questions": [
@@ -3706,7 +3706,7 @@
       "mrr@10": 0.1667,
       "ndcg@10": 0.3562
      },
-     "latency_ms": 22.4,
+     "latency_ms": 19.8,
      "top_grades": [
       0,
       0,
@@ -3731,7 +3731,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 22.4,
+     "latency_ms": 19.8,
      "top_grades": [
       4,
       0,
@@ -3756,7 +3756,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.6309
      },
-     "latency_ms": 23.5,
+     "latency_ms": 20.5,
      "top_grades": [
       0,
       4,
@@ -3782,7 +3782,7 @@
       "ndcg@10": 1.0,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 133.6,
+     "latency_ms": 125.2,
      "distractors_in_top": 0,
      "context_chunks": 10,
      "context_chars": 14476,
@@ -3799,7 +3799,7 @@
        "facets": {
         "Compare Aurora's gross margin and operating margin between FY2022 and FY2023.": 0.482
        },
-       "latency_ms": 58.8
+       "latency_ms": 64.1
       }
      },
      "sub_questions": [],
@@ -3874,7 +3874,7 @@
       "ndcg@10": 1.0,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 442.5,
+     "latency_ms": 394.0,
      "distractors_in_top": 0,
      "context_chunks": 10,
      "context_chars": 14476,
@@ -3895,7 +3895,7 @@
         "What was Aurora's operating margin in FY2022?": 0.4536,
         "What was Aurora's operating margin in FY2023?": 0.5128
        },
-       "latency_ms": 247.9
+       "latency_ms": 282.4
       }
      },
      "sub_questions": [
@@ -3986,7 +3986,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.6721
      },
-     "latency_ms": 36.6,
+     "latency_ms": 22.5,
      "top_grades": [
       0,
       7,
@@ -4011,7 +4011,7 @@
       "mrr@10": 0.2,
       "ndcg@10": 0.3516
      },
-     "latency_ms": 36.6,
+     "latency_ms": 22.5,
      "top_grades": [
       0,
       0,
@@ -4036,7 +4036,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.681
      },
-     "latency_ms": 38.7,
+     "latency_ms": 23.3,
      "top_grades": [
       0,
       7,
@@ -4062,7 +4062,7 @@
       "ndcg@10": 0.5728,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 186.5,
+     "latency_ms": 166.0,
      "distractors_in_top": 0,
      "context_chunks": 13,
      "context_chars": 20718,
@@ -4079,7 +4079,7 @@
        "facets": {
         "Summarize the board's recommendation regarding the strategic alternatives.": 0.6336
        },
-       "latency_ms": 44.3
+       "latency_ms": 54.0
       }
      },
      "sub_questions": [],
@@ -4168,7 +4168,7 @@
       "ndcg@10": 0.5728,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 186.5,
+     "latency_ms": 166.0,
      "distractors_in_top": 0,
      "context_chunks": 13,
      "context_chars": 20718,
@@ -4185,7 +4185,7 @@
        "facets": {
         "Summarize the board's recommendation regarding the strategic alternatives.": 0.6336
        },
-       "latency_ms": 44.3
+       "latency_ms": 54.0
       }
      },
      "sub_questions": [],
@@ -4285,7 +4285,7 @@
       "mrr@10": 0.3333,
       "ndcg@10": 0.3886
      },
-     "latency_ms": 27.0,
+     "latency_ms": 17.0,
      "top_grades": [
       0,
       0,
@@ -4310,7 +4310,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.808
      },
-     "latency_ms": 27.0,
+     "latency_ms": 17.0,
      "top_grades": [
       9,
       0,
@@ -4335,7 +4335,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.7772
      },
-     "latency_ms": 28.5,
+     "latency_ms": 17.9,
      "top_grades": [
       9,
       0,
@@ -4361,7 +4361,7 @@
       "ndcg@10": 0.7772,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 156.3,
+     "latency_ms": 133.4,
      "distractors_in_top": 0,
      "context_chunks": 12,
      "context_chars": 16789,
@@ -4378,7 +4378,7 @@
        "facets": {
         "What are the key risk factors identified for this transaction?": 0.6199
        },
-       "latency_ms": 45.2
+       "latency_ms": 57.4
       }
      },
      "sub_questions": [],
@@ -4467,7 +4467,7 @@
       "ndcg@10": 0.7772,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 156.3,
+     "latency_ms": 133.4,
      "distractors_in_top": 0,
      "context_chunks": 12,
      "context_chars": 16789,
@@ -4484,7 +4484,7 @@
        "facets": {
         "What are the key risk factors identified for this transaction?": 0.6199
        },
-       "latency_ms": 45.2
+       "latency_ms": 57.4
       }
      },
      "sub_questions": [],
@@ -4584,7 +4584,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.7001
      },
-     "latency_ms": 30.5,
+     "latency_ms": 22.7,
      "top_grades": [
       4,
       0,
@@ -4609,7 +4609,7 @@
       "mrr@10": 0.3333,
       "ndcg@10": 0.5343
      },
-     "latency_ms": 30.5,
+     "latency_ms": 22.7,
      "top_grades": [
       0,
       0,
@@ -4634,7 +4634,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.5683
      },
-     "latency_ms": 31.6,
+     "latency_ms": 23.5,
      "top_grades": [
       0,
       4,
@@ -4660,7 +4660,7 @@
       "ndcg@10": 0.7668,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 252.5,
+     "latency_ms": 218.1,
      "distractors_in_top": 0,
      "context_chunks": 13,
      "context_chars": 20193,
@@ -4677,7 +4677,7 @@
        "facets": {
         "What is the relationship between the FY2023 restructuring charge and the Adjusted EBITDA? Where did the restructuring charge come from?": 0.6099
        },
-       "latency_ms": 62.5
+       "latency_ms": 78.0
       }
      },
      "sub_questions": [],
@@ -4766,7 +4766,7 @@
       "ndcg@10": 0.799,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 640.7,
+     "latency_ms": 555.4,
      "distractors_in_top": 0,
      "context_chunks": 13,
      "context_chars": 20193,
@@ -4786,7 +4786,7 @@
         "How is Adjusted EBITDA defined in Aurora's FY2023 financial reconciliation with respect to restructuring charges?": 0.4715,
         "What specific events or operational changes caused the FY2023 restructuring charge?": 0.4554
        },
-       "latency_ms": 213.9
+       "latency_ms": 229.1
       }
      },
      "sub_questions": [
@@ -4890,7 +4890,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.8987
      },
-     "latency_ms": 27.7,
+     "latency_ms": 20.8,
      "top_grades": [
       2,
       3,
@@ -4915,7 +4915,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.8675
      },
-     "latency_ms": 27.7,
+     "latency_ms": 20.8,
      "top_grades": [
       2,
       1,
@@ -4940,7 +4940,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.9225
      },
-     "latency_ms": 28.8,
+     "latency_ms": 21.5,
      "top_grades": [
       2,
       3,
@@ -4966,7 +4966,7 @@
       "ndcg@10": 0.7963,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 227.0,
+     "latency_ms": 168.1,
      "distractors_in_top": 0,
      "context_chunks": 14,
      "context_chars": 20419,
@@ -4983,7 +4983,7 @@
        "facets": {
         "What indemnification exposure is tied to the financial statement representations, and how long do those representations survive?": 0.6205
        },
-       "latency_ms": 66.5
+       "latency_ms": 59.0
       }
      },
      "sub_questions": [],
@@ -5072,7 +5072,7 @@
       "ndcg@10": 0.7963,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 227.0,
+     "latency_ms": 168.1,
      "distractors_in_top": 0,
      "context_chunks": 14,
      "context_chars": 20419,
@@ -5089,7 +5089,7 @@
        "facets": {
         "What indemnification exposure is tied to the financial statement representations, and how long do those representations survive?": 0.6205
        },
-       "latency_ms": 66.5
+       "latency_ms": 59.0
       }
      },
      "sub_questions": [],
@@ -5189,7 +5189,7 @@
       "mrr@10": 0.3333,
       "ndcg@10": 0.4569
      },
-     "latency_ms": 27.3,
+     "latency_ms": 22.3,
      "top_grades": [
       0,
       0,
@@ -5214,7 +5214,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.5469
      },
-     "latency_ms": 27.3,
+     "latency_ms": 22.3,
      "top_grades": [
       0,
       3,
@@ -5239,7 +5239,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.5469
      },
-     "latency_ms": 28.4,
+     "latency_ms": 23.1,
      "top_grades": [
       0,
       3,
@@ -5265,7 +5265,7 @@
       "ndcg@10": 0.4967,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 215.8,
+     "latency_ms": 175.9,
      "distractors_in_top": 0,
      "context_chunks": 13,
      "context_chars": 21289,
@@ -5282,7 +5282,7 @@
        "facets": {
         "How does the DataFlow litigation exposure compare to the merger's indemnification deductible?": 0.6907
        },
-       "latency_ms": 74.0
+       "latency_ms": 64.9
       }
      },
      "sub_questions": [],
@@ -5371,7 +5371,7 @@
       "ndcg@10": 0.5826,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 427.7,
+     "latency_ms": 368.5,
      "distractors_in_top": 0,
      "context_chunks": 13,
      "context_chars": 21289,
@@ -5390,7 +5390,7 @@
         "What is the estimated financial liability or exposure associated with the DataFlow litigation?": 0.6627,
         "What is the indemnification deductible or basket amount specified in the merger agreement?": 0.6852
        },
-       "latency_ms": 160.2
+       "latency_ms": 151.8
       }
      },
      "sub_questions": [
@@ -5493,7 +5493,7 @@
       "mrr@10": 0.0,
       "ndcg@10": 0.0
      },
-     "latency_ms": 30.6,
+     "latency_ms": 18.7,
      "top_grades": [
       0,
       0,
@@ -5518,7 +5518,7 @@
       "mrr@10": 0.0,
       "ndcg@10": 0.0
      },
-     "latency_ms": 30.6,
+     "latency_ms": 18.7,
      "top_grades": [
       0,
       0,
@@ -5543,7 +5543,7 @@
       "mrr@10": 0.0,
       "ndcg@10": 0.0
      },
-     "latency_ms": 31.7,
+     "latency_ms": 19.6,
      "top_grades": [
       0,
       0,
@@ -5569,7 +5569,7 @@
       "ndcg@10": 0.0,
       "fact_coverage@context": 0.3333
      },
-     "latency_ms": 201.6,
+     "latency_ms": 169.9,
      "distractors_in_top": 0,
      "context_chunks": 14,
      "context_chars": 18348,
@@ -5589,7 +5589,7 @@
        "facets": {
         "What is the implied EV/EBITDA multiple of the Vertex deal based on the agreed price and Aurora's FY2023 EBITDA?": 0.6146
        },
-       "latency_ms": 65.0
+       "latency_ms": 60.5
       }
      },
      "sub_questions": [],
@@ -5678,7 +5678,7 @@
       "ndcg@10": 0.6131,
       "fact_coverage@context": 0.3333
      },
-     "latency_ms": 568.7,
+     "latency_ms": 512.6,
      "distractors_in_top": 0,
      "context_chunks": 16,
      "context_chars": 21405,
@@ -5701,7 +5701,7 @@
         "How many fully diluted shares and net debt does Aurora have to determine total enterprise value if applicable?": 0.5226,
         "What was Aurora's reported EBITDA for fiscal year 2023?": 0.3167
        },
-       "latency_ms": 169.9
+       "latency_ms": 172.8
       }
      },
      "sub_questions": [
@@ -5805,7 +5805,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 28.4,
+     "latency_ms": 20.5,
      "top_grades": [
       0,
       0,
@@ -5830,7 +5830,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 28.4,
+     "latency_ms": 20.5,
      "top_grades": [
       0,
       0,
@@ -5855,7 +5855,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 29.9,
+     "latency_ms": 21.3,
      "top_grades": [
       0,
       0,
@@ -5881,10 +5881,10 @@
       "ndcg@10": null,
       "fact_coverage@context": null
      },
-     "latency_ms": 165.3,
+     "latency_ms": 183.6,
      "distractors_in_top": 0,
-     "context_chunks": 14,
-     "context_chars": 16665,
+     "context_chunks": 13,
+     "context_chars": 16314,
      "facts_missing_from_context": [],
      "gate": {
       "decision": "refused",
@@ -5954,18 +5954,18 @@
        "reranker_score": 0.0018
       },
       {
+       "chunk_id": "aurora_vertex_2024_d8644901-f51c-510e-9a56-179477663299_0004",
+       "source_file": "regulatory_and_data_privacy_memo.txt",
+       "section_heading": "FOREIGN MERGER CONTROL",
+       "grade": 0,
+       "reranker_score": 0.0015
+      },
+      {
        "chunk_id": "aurora_vertex_2024_d8644901-f51c-510e-9a56-179477663299_0008",
        "source_file": "regulatory_and_data_privacy_memo.txt",
        "section_heading": "GDPR (EUROPEAN UNION)",
        "grade": 0,
        "reranker_score": 0.0014
-      },
-      {
-       "chunk_id": "aurora_vertex_2024_e980cded-f29c-5626-91aa-12618928fd5b_0000",
-       "source_file": "employment_and_retention_agreements.txt",
-       "section_heading": "AURORA TECHNOLOGIES INC. — SCHEDULE OF EXECUTIVE EMPLOYMENT AND RETENTION ARRANGEMENTS",
-       "grade": 0,
-       "reranker_score": 0.0011
       }
      ]
     },
@@ -5981,10 +5981,10 @@
       "ndcg@10": null,
       "fact_coverage@context": null
      },
-     "latency_ms": 165.3,
+     "latency_ms": 183.6,
      "distractors_in_top": 0,
-     "context_chunks": 14,
-     "context_chars": 16665,
+     "context_chunks": 13,
+     "context_chars": 16314,
      "facts_missing_from_context": [],
      "gate": {
       "decision": "refused",
@@ -6054,18 +6054,18 @@
        "reranker_score": 0.0018
       },
       {
+       "chunk_id": "aurora_vertex_2024_d8644901-f51c-510e-9a56-179477663299_0004",
+       "source_file": "regulatory_and_data_privacy_memo.txt",
+       "section_heading": "FOREIGN MERGER CONTROL",
+       "grade": 0,
+       "reranker_score": 0.0015
+      },
+      {
        "chunk_id": "aurora_vertex_2024_d8644901-f51c-510e-9a56-179477663299_0008",
        "source_file": "regulatory_and_data_privacy_memo.txt",
        "section_heading": "GDPR (EUROPEAN UNION)",
        "grade": 0,
        "reranker_score": 0.0014
-      },
-      {
-       "chunk_id": "aurora_vertex_2024_e980cded-f29c-5626-91aa-12618928fd5b_0000",
-       "source_file": "employment_and_retention_agreements.txt",
-       "section_heading": "AURORA TECHNOLOGIES INC. — SCHEDULE OF EXECUTIVE EMPLOYMENT AND RETENTION ARRANGEMENTS",
-       "grade": 0,
-       "reranker_score": 0.0011
       }
      ]
     }
@@ -6092,7 +6092,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 27.0,
+     "latency_ms": 19.5,
      "top_grades": [
       0,
       0,
@@ -6117,7 +6117,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 27.0,
+     "latency_ms": 19.5,
      "top_grades": [
       0,
       0,
@@ -6142,7 +6142,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 28.4,
+     "latency_ms": 20.3,
      "top_grades": [
       0,
       0,
@@ -6168,7 +6168,7 @@
       "ndcg@10": null,
       "fact_coverage@context": null
      },
-     "latency_ms": 157.7,
+     "latency_ms": 137.2,
      "distractors_in_top": 0,
      "context_chunks": 11,
      "context_chars": 16740,
@@ -6185,7 +6185,7 @@
        "facets": {
         "What were Aurora's quarterly revenue figures for Q1 and Q2 of FY2024?": 0.2941
        },
-       "latency_ms": 58.7
+       "latency_ms": 67.2
       }
      },
      "sub_questions": [],
@@ -6274,7 +6274,7 @@
       "ndcg@10": null,
       "fact_coverage@context": null
      },
-     "latency_ms": 157.7,
+     "latency_ms": 137.2,
      "distractors_in_top": 0,
      "context_chunks": 11,
      "context_chars": 16740,
@@ -6291,7 +6291,7 @@
        "facets": {
         "What were Aurora's quarterly revenue figures for Q1 and Q2 of FY2024?": 0.2941
        },
-       "latency_ms": 58.7
+       "latency_ms": 67.2
       }
      },
      "sub_questions": [],
@@ -6391,7 +6391,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 30.0,
+     "latency_ms": 16.0,
      "top_grades": [
       0,
       0,
@@ -6416,7 +6416,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 30.0,
+     "latency_ms": 16.0,
      "top_grades": [
       0,
       0,
@@ -6441,7 +6441,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 31.4,
+     "latency_ms": 16.8,
      "top_grades": [
       0,
       0,
@@ -6467,7 +6467,7 @@
       "ndcg@10": null,
       "fact_coverage@context": null
      },
-     "latency_ms": 148.3,
+     "latency_ms": 131.0,
      "distractors_in_top": 0,
      "context_chunks": 12,
      "context_chars": 13845,
@@ -6484,7 +6484,7 @@
        "facets": {
         "How many employees does Aurora have in each of its international offices?": 0.1803
        },
-       "latency_ms": 57.9
+       "latency_ms": 63.2
       }
      },
      "sub_questions": [],
@@ -6573,7 +6573,7 @@
       "ndcg@10": null,
       "fact_coverage@context": null
      },
-     "latency_ms": 148.3,
+     "latency_ms": 131.0,
      "distractors_in_top": 0,
      "context_chunks": 12,
      "context_chars": 13845,
@@ -6590,7 +6590,7 @@
        "facets": {
         "How many employees does Aurora have in each of its international offices?": 0.1803
        },
-       "latency_ms": 57.9
+       "latency_ms": 63.2
       }
      },
      "sub_questions": [],
@@ -6690,7 +6690,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 26.9,
+     "latency_ms": 20.3,
      "top_grades": [
       0,
       0,
@@ -6715,7 +6715,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 26.9,
+     "latency_ms": 20.3,
      "top_grades": [
       0,
       0,
@@ -6740,7 +6740,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 28.3,
+     "latency_ms": 21.0,
      "top_grades": [
       0,
       0,
@@ -6766,7 +6766,7 @@
       "ndcg@10": null,
       "fact_coverage@context": null
      },
-     "latency_ms": 136.9,
+     "latency_ms": 129.8,
      "distractors_in_top": 0,
      "context_chunks": 10,
      "context_chars": 11687,
@@ -6783,7 +6783,7 @@
        "facets": {
         "Compare Aurora's customer churn rate against its three closest competitors.": 0.5206
        },
-       "latency_ms": 57.2
+       "latency_ms": 62.5
       }
      },
      "sub_questions": [],
@@ -6858,7 +6858,7 @@
       "ndcg@10": null,
       "fact_coverage@context": null
      },
-     "latency_ms": 317.4,
+     "latency_ms": 332.1,
      "distractors_in_top": 0,
      "context_chunks": 11,
      "context_chars": 19810,
@@ -6878,7 +6878,7 @@
         "Who are Aurora's three closest competitors?": 0.5245,
         "What is the customer churn rate for each of Aurora's top three competitors?": 0.5455
        },
-       "latency_ms": 129.4
+       "latency_ms": 140.3
       }
      },
      "sub_questions": [
@@ -6975,7 +6975,7 @@
       "mrr@10": 0.3333,
       "ndcg@10": 0.3066
      },
-     "latency_ms": 29.1,
+     "latency_ms": 22.1,
      "top_grades": [
       0,
       0,
@@ -7000,7 +7000,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 29.1,
+     "latency_ms": 22.1,
      "top_grades": [
       3,
       3,
@@ -7025,7 +7025,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.8503
      },
-     "latency_ms": 30.7,
+     "latency_ms": 23.0,
      "top_grades": [
       3,
       0,
@@ -7051,7 +7051,7 @@
       "ndcg@10": 0.6934,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 171.9,
+     "latency_ms": 175.4,
      "distractors_in_top": 0,
      "context_chunks": 11,
      "context_chars": 16738,
@@ -7068,7 +7068,7 @@
        "facets": {
         "What is Aurora's Adjusted EBITDA for FY2023 and how does it differ from reported EBITDA?": 0.6793
        },
-       "latency_ms": 64.9
+       "latency_ms": 64.4
       }
      },
      "sub_questions": [],
@@ -7157,7 +7157,7 @@
       "ndcg@10": 0.6934,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 171.9,
+     "latency_ms": 175.4,
      "distractors_in_top": 0,
      "context_chunks": 11,
      "context_chars": 16738,
@@ -7174,7 +7174,7 @@
        "facets": {
         "What is Aurora's Adjusted EBITDA for FY2023 and how does it differ from reported EBITDA?": 0.6793
        },
-       "latency_ms": 64.9
+       "latency_ms": 64.4
       }
      },
      "sub_questions": [],
@@ -7274,7 +7274,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 23.8,
+     "latency_ms": 22.4,
      "top_grades": [
       2,
       0,
@@ -7299,7 +7299,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 23.8,
+     "latency_ms": 22.4,
      "top_grades": [
       2,
       0,
@@ -7324,7 +7324,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 25.1,
+     "latency_ms": 23.4,
      "top_grades": [
       2,
       0,
@@ -7350,7 +7350,7 @@
       "ndcg@10": 1.0,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 167.3,
+     "latency_ms": 175.9,
      "distractors_in_top": 0,
      "context_chunks": 11,
      "context_chars": 9233,
@@ -7367,7 +7367,7 @@
        "facets": {
         "What working capital peg did the quality of earnings report recommend at closing?": 0.625
        },
-       "latency_ms": 34.8
+       "latency_ms": 34.7
       }
      },
      "sub_questions": [],
@@ -7456,7 +7456,7 @@
       "ndcg@10": 1.0,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 167.3,
+     "latency_ms": 175.9,
      "distractors_in_top": 0,
      "context_chunks": 11,
      "context_chars": 9233,
@@ -7473,7 +7473,7 @@
        "facets": {
         "What working capital peg did the quality of earnings report recommend at closing?": 0.625
        },
-       "latency_ms": 34.8
+       "latency_ms": 34.7
       }
      },
      "sub_questions": [],
@@ -7573,7 +7573,7 @@
       "mrr@10": 0.0,
       "ndcg@10": 0.0
      },
-     "latency_ms": 29.0,
+     "latency_ms": 21.9,
      "top_grades": [
       0,
       0,
@@ -7598,7 +7598,7 @@
       "mrr@10": 0.25,
       "ndcg@10": 0.4307
      },
-     "latency_ms": 29.0,
+     "latency_ms": 21.9,
      "top_grades": [
       0,
       0,
@@ -7623,7 +7623,7 @@
       "mrr@10": 0.1429,
       "ndcg@10": 0.3333
      },
-     "latency_ms": 30.5,
+     "latency_ms": 22.8,
      "top_grades": [
       0,
       0,
@@ -7649,7 +7649,7 @@
       "ndcg@10": 0.5,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 167.4,
+     "latency_ms": 381.0,
      "distractors_in_top": 0,
      "context_chunks": 13,
      "context_chars": 17611,
@@ -7666,7 +7666,7 @@
        "facets": {
         "How much of Aurora's FY2023 revenue is recurring?": 0.5522
        },
-       "latency_ms": 59.2
+       "latency_ms": 58.3
       }
      },
      "sub_questions": [],
@@ -7755,7 +7755,7 @@
       "ndcg@10": 0.5,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 167.4,
+     "latency_ms": 381.0,
      "distractors_in_top": 0,
      "context_chunks": 13,
      "context_chars": 17611,
@@ -7772,7 +7772,7 @@
        "facets": {
         "How much of Aurora's FY2023 revenue is recurring?": 0.5522
        },
-       "latency_ms": 59.2
+       "latency_ms": 58.3
       }
      },
      "sub_questions": [],
@@ -7872,7 +7872,7 @@
       "mrr@10": 0.3333,
       "ndcg@10": 0.3111
      },
-     "latency_ms": 24.2,
+     "latency_ms": 18.6,
      "top_grades": [
       0,
       0,
@@ -7897,7 +7897,7 @@
       "mrr@10": 0.3333,
       "ndcg@10": 0.1604
      },
-     "latency_ms": 24.2,
+     "latency_ms": 18.6,
      "top_grades": [
       0,
       0,
@@ -7922,7 +7922,7 @@
       "mrr@10": 0.3333,
       "ndcg@10": 0.263
      },
-     "latency_ms": 25.4,
+     "latency_ms": 19.4,
      "top_grades": [
       0,
       0,
@@ -7948,7 +7948,7 @@
       "ndcg@10": 0.5884,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 172.9,
+     "latency_ms": 192.9,
      "distractors_in_top": 0,
      "context_chunks": 11,
      "context_chars": 20189,
@@ -7965,7 +7965,7 @@
        "facets": {
         "Which customer contracts require consent for the change of control, and what revenue do they represent?": 0.6805
        },
-       "latency_ms": 44.5
+       "latency_ms": 40.9
       }
      },
      "sub_questions": [],
@@ -7989,7 +7989,7 @@
        "source_file": "customer_contracts_schedule.txt",
        "section_heading": "SECTION 2: CHANGE OF CONTROL PROVISIONS",
        "grade": 0,
-       "reranker_score": 0.8339
+       "reranker_score": 0.8337
       },
       {
        "chunk_id": "aurora_vertex_2024_87530865-418f-5c4e-b33e-a1562b77765e_0016",
@@ -8054,7 +8054,7 @@
       "ndcg@10": 0.4393,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 575.1,
+     "latency_ms": 394.3,
      "distractors_in_top": 0,
      "context_chunks": 11,
      "context_chars": 20189,
@@ -8073,7 +8073,7 @@
         "Which customer contracts contain change of control clauses requiring consent?": 0.6717,
         "What is the annual revenue associated with each identified customer contract?": 0.4706
        },
-       "latency_ms": 99.1
+       "latency_ms": 93.4
       }
      },
      "sub_questions": [
@@ -8176,7 +8176,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 20.9,
+     "latency_ms": 21.1,
      "top_grades": [
       2,
       1,
@@ -8201,7 +8201,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 20.9,
+     "latency_ms": 21.1,
      "top_grades": [
       2,
       1,
@@ -8226,7 +8226,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 22.2,
+     "latency_ms": 21.9,
      "top_grades": [
       2,
       1,
@@ -8252,7 +8252,7 @@
       "ndcg@10": 0.9502,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 173.1,
+     "latency_ms": 194.2,
      "distractors_in_top": 0,
      "context_chunks": 12,
      "context_chars": 15963,
@@ -8269,7 +8269,7 @@
        "facets": {
         "What open source licensing risk was identified and what will remediation cost?": 0.6019
        },
-       "latency_ms": 43.1
+       "latency_ms": 40.0
       }
      },
      "sub_questions": [],
@@ -8293,7 +8293,7 @@
        "source_file": "ip_portfolio_and_litigation_schedule.txt",
        "section_heading": "SECTION 4: OPEN SOURCE SOFTWARE",
        "grade": 1,
-       "reranker_score": 0.0315
+       "reranker_score": 0.0314
       },
       {
        "chunk_id": "aurora_vertex_2024_cdca644c-7a3e-5074-9554-214b5ad0049e_0003",
@@ -8358,7 +8358,7 @@
       "ndcg@10": 0.9502,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 173.1,
+     "latency_ms": 194.2,
      "distractors_in_top": 0,
      "context_chunks": 12,
      "context_chars": 15963,
@@ -8375,7 +8375,7 @@
        "facets": {
         "What open source licensing risk was identified and what will remediation cost?": 0.6019
        },
-       "latency_ms": 43.1
+       "latency_ms": 40.0
       }
      },
      "sub_questions": [],
@@ -8399,7 +8399,7 @@
        "source_file": "ip_portfolio_and_litigation_schedule.txt",
        "section_heading": "SECTION 4: OPEN SOURCE SOFTWARE",
        "grade": 1,
-       "reranker_score": 0.0315
+       "reranker_score": 0.0314
       },
       {
        "chunk_id": "aurora_vertex_2024_cdca644c-7a3e-5074-9554-214b5ad0049e_0003",
@@ -8475,7 +8475,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.7262
      },
-     "latency_ms": 22.6,
+     "latency_ms": 23.0,
      "top_grades": [
       3,
       0,
@@ -8500,7 +8500,7 @@
       "mrr@10": 0.3333,
       "ndcg@10": 0.5536
      },
-     "latency_ms": 22.6,
+     "latency_ms": 23.0,
      "top_grades": [
       0,
       0,
@@ -8525,7 +8525,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.8755
      },
-     "latency_ms": 23.7,
+     "latency_ms": 23.8,
      "top_grades": [
       3,
       0,
@@ -8548,13 +8548,13 @@
       "recall@10": 1.0,
       "source_hit@10": 1.0,
       "mrr@10": 1.0,
-      "ndcg@10": 0.9167,
+      "ndcg@10": 0.9006,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 125.9,
+     "latency_ms": 162.5,
      "distractors_in_top": 0,
-     "context_chunks": 13,
-     "context_chars": 14095,
+     "context_chunks": 14,
+     "context_chars": 14600,
      "facts_missing_from_context": [],
      "gate": {
       "decision": "llm_fallback",
@@ -8568,7 +8568,7 @@
        "facets": {
         "What happens to the revolving credit facility when the merger closes?": 0.7007
        },
-       "latency_ms": 43.4
+       "latency_ms": 44.4
       }
      },
      "sub_questions": [],
@@ -8586,6 +8586,13 @@
        "section_heading": "SECTION 5: NEGATIVE COVENANTS OF NOTE",
        "grade": 0,
        "reranker_score": 0.1086
+      },
+      {
+       "chunk_id": "aurora_vertex_2024_5329748c-699d-55dd-bbf6-373b745b41cd_0006",
+       "source_file": "credit_agreement_summary.txt",
+       "section_heading": "SECTION 2: REVOLVING CREDIT FACILITY",
+       "grade": 0,
+       "reranker_score": 0.0825
       },
       {
        "chunk_id": "aurora_vertex_2024_cfe5e60a-fd6f-5e37-b2a3-742b188efb06_0005",
@@ -8635,13 +8642,6 @@
        "section_heading": "SECTION 2: CHANGE OF CONTROL SEVERANCE (\"GOLDEN PARACHUTE\")",
        "grade": 0,
        "reranker_score": 0.0093
-      },
-      {
-       "chunk_id": "aurora_vertex_2024_5329748c-699d-55dd-bbf6-373b745b41cd_0003",
-       "source_file": "credit_agreement_summary.txt",
-       "section_heading": "SECTION 2: REVOLVING CREDIT FACILITY",
-       "grade": 0,
-       "reranker_score": 0.0092
       }
      ]
     },
@@ -8654,13 +8654,13 @@
       "recall@10": 1.0,
       "source_hit@10": 1.0,
       "mrr@10": 1.0,
-      "ndcg@10": 0.9167,
+      "ndcg@10": 0.9006,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 125.9,
+     "latency_ms": 162.5,
      "distractors_in_top": 0,
-     "context_chunks": 13,
-     "context_chars": 14095,
+     "context_chunks": 14,
+     "context_chars": 14600,
      "facts_missing_from_context": [],
      "gate": {
       "decision": "llm_fallback",
@@ -8674,7 +8674,7 @@
        "facets": {
         "What happens to the revolving credit facility when the merger closes?": 0.7007
        },
-       "latency_ms": 43.4
+       "latency_ms": 44.4
       }
      },
      "sub_questions": [],
@@ -8692,6 +8692,13 @@
        "section_heading": "SECTION 5: NEGATIVE COVENANTS OF NOTE",
        "grade": 0,
        "reranker_score": 0.1086
+      },
+      {
+       "chunk_id": "aurora_vertex_2024_5329748c-699d-55dd-bbf6-373b745b41cd_0006",
+       "source_file": "credit_agreement_summary.txt",
+       "section_heading": "SECTION 2: REVOLVING CREDIT FACILITY",
+       "grade": 0,
+       "reranker_score": 0.0825
       },
       {
        "chunk_id": "aurora_vertex_2024_cfe5e60a-fd6f-5e37-b2a3-742b188efb06_0005",
@@ -8741,13 +8748,6 @@
        "section_heading": "SECTION 2: CHANGE OF CONTROL SEVERANCE (\"GOLDEN PARACHUTE\")",
        "grade": 0,
        "reranker_score": 0.0093
-      },
-      {
-       "chunk_id": "aurora_vertex_2024_5329748c-699d-55dd-bbf6-373b745b41cd_0003",
-       "source_file": "credit_agreement_summary.txt",
-       "section_heading": "SECTION 2: REVOLVING CREDIT FACILITY",
-       "grade": 0,
-       "reranker_score": 0.0092
       }
      ]
     }
@@ -8774,7 +8774,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.6309
      },
-     "latency_ms": 21.4,
+     "latency_ms": 19.5,
      "top_grades": [
       0,
       4,
@@ -8799,7 +8799,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 21.4,
+     "latency_ms": 19.5,
      "top_grades": [
       4,
       0,
@@ -8824,7 +8824,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 22.4,
+     "latency_ms": 20.2,
      "top_grades": [
       4,
       0,
@@ -8850,7 +8850,7 @@
       "ndcg@10": 0.5,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 143.5,
+     "latency_ms": 151.2,
      "distractors_in_top": 0,
      "context_chunks": 8,
      "context_chars": 12387,
@@ -8867,7 +8867,7 @@
        "facets": {
         "Compare Aurora's reported and adjusted EBITDA margins for FY2022 and FY2023.": 0.5124
        },
-       "latency_ms": 62.5
+       "latency_ms": 59.0
       }
      },
      "sub_questions": [],
@@ -8942,7 +8942,7 @@
       "ndcg@10": 0.5,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 499.0,
+     "latency_ms": 490.3,
      "distractors_in_top": 0,
      "context_chunks": 8,
      "context_chars": 12387,
@@ -8963,7 +8963,7 @@
         "What was Aurora's reported EBITDA margin for FY2023?": 0.4731,
         "What was Aurora's adjusted EBITDA margin for FY2023?": 0.4958
        },
-       "latency_ms": 280.5
+       "latency_ms": 287.4
       }
      },
      "sub_questions": [
@@ -9054,7 +9054,7 @@
       "mrr@10": 0.3333,
       "ndcg@10": 0.4819
      },
-     "latency_ms": 20.6,
+     "latency_ms": 19.6,
      "top_grades": [
       0,
       0,
@@ -9079,7 +9079,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.6592
      },
-     "latency_ms": 20.6,
+     "latency_ms": 19.6,
      "top_grades": [
       0,
       5,
@@ -9104,7 +9104,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.5738
      },
-     "latency_ms": 21.3,
+     "latency_ms": 20.6,
      "top_grades": [
       0,
       1,
@@ -9130,7 +9130,7 @@
       "ndcg@10": 0.5961,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 137.3,
+     "latency_ms": 137.9,
      "distractors_in_top": 0,
      "context_chunks": 9,
      "context_chars": 11692,
@@ -9147,7 +9147,7 @@
        "facets": {
         "Compare the change of control severance multiples across Aurora's executive officers.": 0.6678
        },
-       "latency_ms": 46.1
+       "latency_ms": 51.3
       }
      },
      "sub_questions": [],
@@ -9222,7 +9222,7 @@
       "ndcg@10": 0.5961,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 343.6,
+     "latency_ms": 343.1,
      "distractors_in_top": 0,
      "context_chunks": 9,
      "context_chars": 11692,
@@ -9242,7 +9242,7 @@
         "What is the change of control severance multiple for Aurora's Chief Financial Officer?": 0.5716,
         "What are the change of control severance multiples for other named executive officers of Aurora?": 0.5938
        },
-       "latency_ms": 119.1
+       "latency_ms": 127.1
       }
      },
      "sub_questions": [
@@ -9332,7 +9332,7 @@
       "mrr@10": 0.25,
       "ndcg@10": 0.1186
      },
-     "latency_ms": 21.7,
+     "latency_ms": 18.4,
      "top_grades": [
       0,
       0,
@@ -9357,7 +9357,7 @@
       "mrr@10": 0.1,
       "ndcg@10": 0.0796
      },
-     "latency_ms": 21.7,
+     "latency_ms": 18.4,
      "top_grades": [
       0,
       0,
@@ -9382,7 +9382,7 @@
       "mrr@10": 0.2,
       "ndcg@10": 0.3553
      },
-     "latency_ms": 22.9,
+     "latency_ms": 19.2,
      "top_grades": [
       0,
       0,
@@ -9408,7 +9408,7 @@
       "ndcg@10": 0.1065,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 157.9,
+     "latency_ms": 150.4,
      "distractors_in_top": 0,
      "context_chunks": 12,
      "context_chars": 17261,
@@ -9425,7 +9425,7 @@
        "facets": {
         "Summarize the regulatory approvals required to close this transaction.": 0.6978
        },
-       "latency_ms": 45.0
+       "latency_ms": 46.1
       }
      },
      "sub_questions": [],
@@ -9514,7 +9514,7 @@
       "ndcg@10": 0.1065,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 157.9,
+     "latency_ms": 150.4,
      "distractors_in_top": 0,
      "context_chunks": 12,
      "context_chars": 17261,
@@ -9531,7 +9531,7 @@
        "facets": {
         "Summarize the regulatory approvals required to close this transaction.": 0.6978
        },
-       "latency_ms": 45.0
+       "latency_ms": 46.1
       }
      },
      "sub_questions": [],
@@ -9631,7 +9631,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.4149
      },
-     "latency_ms": 20.3,
+     "latency_ms": 14.3,
      "top_grades": [
       0,
       3,
@@ -9656,7 +9656,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.6577
      },
-     "latency_ms": 20.3,
+     "latency_ms": 14.3,
      "top_grades": [
       3,
       0,
@@ -9681,7 +9681,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.6577
      },
-     "latency_ms": 21.4,
+     "latency_ms": 15.0,
      "top_grades": [
       3,
       0,
@@ -9707,7 +9707,7 @@
       "ndcg@10": 0.6577,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 139.8,
+     "latency_ms": 120.2,
      "distractors_in_top": 0,
      "context_chunks": 13,
      "context_chars": 12081,
@@ -9724,7 +9724,7 @@
        "facets": {
         "Summarize the key person dependency risk at Aurora.": 0.7085
        },
-       "latency_ms": 43.8
+       "latency_ms": 42.2
       }
      },
      "sub_questions": [],
@@ -9813,7 +9813,7 @@
       "ndcg@10": 0.6577,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 139.8,
+     "latency_ms": 120.2,
      "distractors_in_top": 0,
      "context_chunks": 13,
      "context_chars": 12081,
@@ -9830,7 +9830,7 @@
        "facets": {
         "Summarize the key person dependency risk at Aurora.": 0.7085
        },
-       "latency_ms": 43.8
+       "latency_ms": 42.2
       }
      },
      "sub_questions": [],
@@ -9930,7 +9930,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 21.5,
+     "latency_ms": 18.4,
      "top_grades": [
       2,
       2,
@@ -9955,7 +9955,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.9197
      },
-     "latency_ms": 21.5,
+     "latency_ms": 18.4,
      "top_grades": [
       2,
       0,
@@ -9980,7 +9980,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 22.7,
+     "latency_ms": 19.3,
      "top_grades": [
       2,
       2,
@@ -10006,7 +10006,7 @@
       "ndcg@10": 1.0,
       "fact_coverage@context": 0.6667
      },
-     "latency_ms": 189.8,
+     "latency_ms": 198.0,
      "distractors_in_top": 0,
      "context_chunks": 12,
      "context_chars": 20516,
@@ -10025,7 +10025,7 @@
        "facets": {
         "What is the implied EV/EBITDA multiple on adjusted EBITDA rather than reported EBITDA?": 0.7637
        },
-       "latency_ms": 58.4
+       "latency_ms": 59.5
       }
      },
      "sub_questions": [],
@@ -10114,7 +10114,7 @@
       "ndcg@10": 1.0,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 536.1,
+     "latency_ms": 548.8,
      "distractors_in_top": 0,
      "context_chunks": 13,
      "context_chars": 28639,
@@ -10134,7 +10134,7 @@
         "What is the Adjusted EBITDA value for the target company?": 0.7709,
         "What is the Reported EBITDA value for the target company?": 0.5914
        },
-       "latency_ms": 222.1
+       "latency_ms": 223.6
       }
      },
      "sub_questions": [
@@ -10238,7 +10238,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.9066
      },
-     "latency_ms": 21.4,
+     "latency_ms": 19.9,
      "top_grades": [
       1,
       1,
@@ -10263,7 +10263,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.9218
      },
-     "latency_ms": 21.4,
+     "latency_ms": 19.9,
      "top_grades": [
       1,
       1,
@@ -10288,7 +10288,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.9325
      },
-     "latency_ms": 22.6,
+     "latency_ms": 20.7,
      "top_grades": [
       1,
       1,
@@ -10314,7 +10314,7 @@
       "ndcg@10": 0.9469,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 185.0,
+     "latency_ms": 195.1,
      "distractors_in_top": 0,
      "context_chunks": 12,
      "context_chars": 12126,
@@ -10420,7 +10420,7 @@
       "ndcg@10": 0.9218,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 482.4,
+     "latency_ms": 507.4,
      "distractors_in_top": 0,
      "context_chunks": 13,
      "context_chars": 12133,
@@ -10440,7 +10440,7 @@
         "What is the total size and cash requirement of the retention pool at closing?": 0.5613,
         "What is the exact outstanding balance required to repay the revolver at closing?": 0.5338
        },
-       "latency_ms": 135.9
+       "latency_ms": 125.0
       }
      },
      "sub_questions": [
@@ -10544,7 +10544,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.4919
      },
-     "latency_ms": 21.6,
+     "latency_ms": 20.4,
      "top_grades": [
       0,
       4,
@@ -10569,7 +10569,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.4919
      },
-     "latency_ms": 21.6,
+     "latency_ms": 20.4,
      "top_grades": [
       0,
       4,
@@ -10594,7 +10594,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.4919
      },
-     "latency_ms": 22.9,
+     "latency_ms": 21.2,
      "top_grades": [
       0,
       4,
@@ -10620,7 +10620,7 @@
       "ndcg@10": 0.7796,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 191.7,
+     "latency_ms": 192.4,
      "distractors_in_top": 0,
      "context_chunks": 12,
      "context_chars": 22993,
@@ -10637,7 +10637,7 @@
        "facets": {
         "The quality of earnings report adds back DataFlow legal fees. What is the litigation status and is that add-back safe?": 0.649
        },
-       "latency_ms": 70.3
+       "latency_ms": 67.2
       }
      },
      "sub_questions": [],
@@ -10726,7 +10726,7 @@
       "ndcg@10": 0.7796,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 588.4,
+     "latency_ms": 653.8,
      "distractors_in_top": 0,
      "context_chunks": 12,
      "context_chars": 22993,
@@ -10746,7 +10746,7 @@
         "What specific legal fees for DataFlow are included as add-backs in the quality of earnings report?": 0.7362,
         "Are recurring legal expenses associated with DataFlow's litigation appropriate for EBITDA add-backs according to deal standards?": 0.6892
        },
-       "latency_ms": 263.6
+       "latency_ms": 263.3
       }
      },
      "sub_questions": [
@@ -10850,7 +10850,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.6322
      },
-     "latency_ms": 22.4,
+     "latency_ms": 21.7,
      "top_grades": [
       0,
       3,
@@ -10875,7 +10875,7 @@
       "mrr@10": 0.3333,
       "ndcg@10": 0.4359
      },
-     "latency_ms": 22.4,
+     "latency_ms": 21.7,
      "top_grades": [
       0,
       0,
@@ -10900,7 +10900,7 @@
       "mrr@10": 0.5,
       "ndcg@10": 0.5994
      },
-     "latency_ms": 23.8,
+     "latency_ms": 22.5,
      "top_grades": [
       0,
       3,
@@ -10926,7 +10926,7 @@
       "ndcg@10": 0.4669,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 188.3,
+     "latency_ms": 183.1,
      "distractors_in_top": 0,
      "context_chunks": 13,
      "context_chars": 24898,
@@ -10943,7 +10943,7 @@
        "facets": {
         "How does the key person risk around Dr. Wu relate to the DataFlow patent litigation?": 0.698
        },
-       "latency_ms": 60.2
+       "latency_ms": 61.5
       }
      },
      "sub_questions": [],
@@ -11032,7 +11032,7 @@
       "ndcg@10": 0.4669,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 408.1,
+     "latency_ms": 415.0,
      "distractors_in_top": 0,
      "context_chunks": 13,
      "context_chars": 24898,
@@ -11051,7 +11051,7 @@
         "What specific responsibilities does Dr. Wu hold regarding the technology involved in the DataFlow patent litigation?": 0.6164,
         "What are the potential impacts on the DataFlow patent litigation if Dr. Wu departs the company?": 0.6646
        },
-       "latency_ms": 153.2
+       "latency_ms": 155.9
       }
      },
      "sub_questions": [
@@ -11154,7 +11154,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.6799
      },
-     "latency_ms": 22.5,
+     "latency_ms": 18.3,
      "top_grades": [
       5,
       0,
@@ -11179,7 +11179,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.7459
      },
-     "latency_ms": 22.5,
+     "latency_ms": 18.3,
      "top_grades": [
       5,
       0,
@@ -11204,7 +11204,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 0.786
      },
-     "latency_ms": 23.7,
+     "latency_ms": 19.1,
      "top_grades": [
       5,
       0,
@@ -11230,7 +11230,7 @@
       "ndcg@10": 0.7738,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 187.7,
+     "latency_ms": 189.6,
      "distractors_in_top": 0,
      "context_chunks": 15,
      "context_chars": 24372,
@@ -11247,7 +11247,7 @@
        "facets": {
         "What is the Section 280G excise tax exposure and which executives trigger it?": 0.7007
        },
-       "latency_ms": 42.8
+       "latency_ms": 43.6
       }
      },
      "sub_questions": [],
@@ -11336,7 +11336,7 @@
       "ndcg@10": 0.9905,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 546.6,
+     "latency_ms": 553.4,
      "distractors_in_top": 0,
      "context_chunks": 15,
      "context_chars": 24372,
@@ -11356,7 +11356,7 @@
         "What is each executive's base amount threshold under Internal Revenue Code Section 280G?": 0.4998,
         "Which executives receive payments that exceed their 3x base amount threshold, triggering the excise tax?": 0.5169
        },
-       "latency_ms": 119.3
+       "latency_ms": 117.7
       }
      },
      "sub_questions": [
@@ -11460,7 +11460,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 20.8,
+     "latency_ms": 20.0,
      "top_grades": [
       4,
       0,
@@ -11485,7 +11485,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 20.8,
+     "latency_ms": 20.0,
      "top_grades": [
       4,
       0,
@@ -11510,7 +11510,7 @@
       "mrr@10": 1.0,
       "ndcg@10": 1.0
      },
-     "latency_ms": 22.0,
+     "latency_ms": 20.9,
      "top_grades": [
       4,
       0,
@@ -11536,7 +11536,7 @@
       "ndcg@10": 1.0,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 191.1,
+     "latency_ms": 205.3,
      "distractors_in_top": 0,
      "context_chunks": 16,
      "context_chars": 28464,
@@ -11553,7 +11553,7 @@
        "facets": {
         "Customer consents are not a condition to closing. Which customers does that expose the buyer to, and how much revenue is at risk?": 0.6405
        },
-       "latency_ms": 45.5
+       "latency_ms": 44.2
       }
      },
      "sub_questions": [],
@@ -11642,7 +11642,7 @@
       "ndcg@10": 1.0,
       "fact_coverage@context": 1.0
      },
-     "latency_ms": 434.1,
+     "latency_ms": 462.4,
      "distractors_in_top": 0,
      "context_chunks": 16,
      "context_chars": 28464,
@@ -11661,7 +11661,7 @@
         "What customers are listed in the disclosure schedules as having contracts that do not require consent for the transaction?": 0.5875,
         "What is the annual revenue generated by each customer whose contract does not require closing consent?": 0.4999
        },
-       "latency_ms": 105.6
+       "latency_ms": 102.9
       }
      },
      "sub_questions": [
@@ -11764,7 +11764,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 31.3,
+     "latency_ms": 20.1,
      "top_grades": [
       0,
       0,
@@ -11789,7 +11789,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 31.3,
+     "latency_ms": 20.1,
      "top_grades": [
       0,
       0,
@@ -11814,7 +11814,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 32.6,
+     "latency_ms": 20.9,
      "top_grades": [
       0,
       0,
@@ -11840,7 +11840,7 @@
       "ndcg@10": null,
       "fact_coverage@context": null
      },
-     "latency_ms": 163.7,
+     "latency_ms": 156.5,
      "distractors_in_top": 0,
      "context_chunks": 12,
      "context_chars": 13030,
@@ -11857,7 +11857,7 @@
        "facets": {
         "What is Aurora's projected revenue for FY2025 under management's operating plan?": 0.4181
        },
-       "latency_ms": 65.8
+       "latency_ms": 61.8
       }
      },
      "sub_questions": [],
@@ -11946,7 +11946,7 @@
       "ndcg@10": null,
       "fact_coverage@context": null
      },
-     "latency_ms": 163.7,
+     "latency_ms": 156.5,
      "distractors_in_top": 0,
      "context_chunks": 12,
      "context_chars": 13030,
@@ -11963,7 +11963,7 @@
        "facets": {
         "What is Aurora's projected revenue for FY2025 under management's operating plan?": 0.4181
        },
-       "latency_ms": 65.8
+       "latency_ms": 61.8
       }
      },
      "sub_questions": [],
@@ -12063,7 +12063,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 27.6,
+     "latency_ms": 20.3,
      "top_grades": [
       0,
       0,
@@ -12088,7 +12088,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 27.6,
+     "latency_ms": 20.3,
      "top_grades": [
       0,
       0,
@@ -12113,7 +12113,7 @@
       "mrr@10": null,
       "ndcg@10": null
      },
-     "latency_ms": 29.1,
+     "latency_ms": 21.2,
      "top_grades": [
       0,
       0,
@@ -12139,9 +12139,9 @@
       "ndcg@10": null,
       "fact_coverage@context": null
      },
-     "latency_ms": 147.0,
+     "latency_ms": 165.7,
      "distractors_in_top": 0,
-     "context_chunks": 14,
+     "context_chunks": 13,
      "context_chars": 18300,
      "facts_missing_from_context": [],
      "gate": {
@@ -12205,6 +12205,13 @@
        "reranker_score": 0.007
       },
       {
+       "chunk_id": "aurora_vertex_2024_d8644901-f51c-510e-9a56-179477663299_0004",
+       "source_file": "regulatory_and_data_privacy_memo.txt",
+       "section_heading": "FOREIGN MERGER CONTROL",
+       "grade": 0,
+       "reranker_score": 0.0036
+      },
+      {
        "chunk_id": "aurora_vertex_2024_d8644901-f51c-510e-9a56-179477663299_0008",
        "source_file": "regulatory_and_data_privacy_memo.txt",
        "section_heading": "GDPR (EUROPEAN UNION)",
@@ -12215,13 +12222,6 @@
        "chunk_id": "aurora_vertex_2024_d8644901-f51c-510e-9a56-179477663299_0005",
        "source_file": "regulatory_and_data_privacy_memo.txt",
        "section_heading": "FOREIGN MERGER CONTROL",
-       "grade": 0,
-       "reranker_score": 0.0026
-      },
-      {
-       "chunk_id": "aurora_vertex_2024_d8644901-f51c-510e-9a56-179477663299_0009",
-       "source_file": "regulatory_and_data_privacy_memo.txt",
-       "section_heading": "CALIFORNIA (CCPA/CPRA)",
        "grade": 0,
        "reranker_score": 0.0026
       }
@@ -12239,9 +12239,9 @@
       "ndcg@10": null,
       "fact_coverage@context": null
      },
-     "latency_ms": 147.0,
+     "latency_ms": 165.7,
      "distractors_in_top": 0,
-     "context_chunks": 14,
+     "context_chunks": 13,
      "context_chars": 18300,
      "facts_missing_from_context": [],
      "gate": {
@@ -12305,6 +12305,13 @@
        "reranker_score": 0.007
       },
       {
+       "chunk_id": "aurora_vertex_2024_d8644901-f51c-510e-9a56-179477663299_0004",
+       "source_file": "regulatory_and_data_privacy_memo.txt",
+       "section_heading": "FOREIGN MERGER CONTROL",
+       "grade": 0,
+       "reranker_score": 0.0036
+      },
+      {
        "chunk_id": "aurora_vertex_2024_d8644901-f51c-510e-9a56-179477663299_0008",
        "source_file": "regulatory_and_data_privacy_memo.txt",
        "section_heading": "GDPR (EUROPEAN UNION)",
@@ -12315,13 +12322,6 @@
        "chunk_id": "aurora_vertex_2024_d8644901-f51c-510e-9a56-179477663299_0005",
        "source_file": "regulatory_and_data_privacy_memo.txt",
        "section_heading": "FOREIGN MERGER CONTROL",
-       "grade": 0,
-       "reranker_score": 0.0026
-      },
-      {
-       "chunk_id": "aurora_vertex_2024_d8644901-f51c-510e-9a56-179477663299_0009",
-       "source_file": "regulatory_and_data_privacy_memo.txt",
-       "section_heading": "CALIFORNIA (CCPA/CPRA)",
        "grade": 0,
        "reranker_score": 0.0026
       }
@@ -12435,8 +12435,8 @@
     }
    },
    "latency_ms": {
-    "p50": 22.4,
-    "p95": 31.3,
+    "p50": 19.9,
+    "p95": 23.0,
     "n": 41
    }
   },
@@ -12544,8 +12544,8 @@
     }
    },
    "latency_ms": {
-    "p50": 22.4,
-    "p95": 31.3,
+    "p50": 19.9,
+    "p95": 23.0,
     "n": 41
    }
   },
@@ -12653,8 +12653,8 @@
     }
    },
    "latency_ms": {
-    "p50": 23.5,
-    "p95": 32.6,
+    "p50": 20.7,
+    "p95": 23.8,
     "n": 41
    }
   },
@@ -12666,7 +12666,7 @@
     "recall@5": 0.7243542857142857,
     "recall@10": 0.7865314285714285,
     "mrr@10": 0.7723771428571429,
-    "ndcg@10": 0.7380342857142856,
+    "ndcg@10": 0.7375742857142857,
     "source_hit@5": 0.9714285714285714,
     "source_hit@10": 0.9857142857142858,
     "n": 35
@@ -12697,8 +12697,8 @@
      0.8714257142857142
     ],
     "ndcg@10": [
-     0.6523165000000001,
-     0.8157834285714286
+     0.6517021428571428,
+     0.8151809999999999
     ],
     "source_hit@5": [
      0.9142857142857143,
@@ -12741,7 +12741,7 @@
      "recall@5": 0.7128,
      "recall@10": 0.834825,
      "mrr@10": 0.9375,
-     "ndcg@10": 0.8587750000000001,
+     "ndcg@10": 0.8567625,
      "source_hit@5": 1.0,
      "source_hit@10": 1.0,
      "n": 8
@@ -12772,8 +12772,8 @@
     }
    },
    "latency_ms": {
-    "p50": 157.7,
-    "p95": 215.8,
+    "p50": 168.1,
+    "p95": 205.3,
     "n": 41
    },
    "gate": {
@@ -12800,8 +12800,8 @@
      "refused": 1
     },
     "latency_ms": {
-     "p50": 47.1,
-     "p95": 70.85499999999999,
+     "p50": 58.05,
+     "p95": 76.64,
      "n": 38
     }
    }
@@ -12814,7 +12814,7 @@
     "recall@5": 0.7505457142857144,
     "recall@10": 0.81204,
     "mrr@10": 0.7771371428571429,
-    "ndcg@10": 0.7565914285714286,
+    "ndcg@10": 0.7561314285714286,
     "source_hit@5": 0.9857142857142858,
     "source_hit@10": 0.9857142857142858,
     "n": 35,
@@ -12846,8 +12846,8 @@
      0.8723799999999999
     ],
     "ndcg@10": [
-     0.6815536428571427,
-     0.8296418571428572
+     0.6811615000000001,
+     0.8293287857142857
     ],
     "source_hit@5": [
      0.9571428571428572,
@@ -12892,7 +12892,7 @@
      "recall@5": 0.7128,
      "recall@10": 0.852675,
      "mrr@10": 0.8541625,
-     "ndcg@10": 0.8401375,
+     "ndcg@10": 0.838125,
      "source_hit@5": 1.0,
      "source_hit@10": 1.0,
      "n": 8,
@@ -12926,8 +12926,8 @@
     }
    },
    "latency_ms": {
-    "p50": 186.5,
-    "p95": 575.1,
+    "p50": 194.2,
+    "p95": 553.4,
     "n": 41
    },
    "gate": {
@@ -12954,8 +12954,8 @@
      "refused": 1
     },
     "latency_ms": {
-     "p50": 67.3,
-     "p95": 249.47000000000003,
+     "p50": 74.0,
+     "p95": 265.21000000000004,
      "n": 39
     }
    }
@@ -13670,9 +13670,9 @@
      ]
     },
     "ndcg@10": {
-     "mean": 0.04172571428571428,
-     "low": -0.021731428571428547,
-     "high": 0.10773835714285711,
+     "mean": 0.04126571428571428,
+     "low": -0.02210071428571429,
+     "high": 0.10716078571428564,
      "n": 35,
      "improved": 15,
      "regressed": 13,
@@ -13781,7 +13781,7 @@
       {
        "id": "legal_08",
        "before": 0.8755,
-       "after": 0.9167
+       "after": 0.9006
       },
       {
        "id": "comp_04",
@@ -14078,509 +14078,10 @@
   "chars": 58432,
   "tokens": 12643
  },
- "total_seconds": 54.8,
+ "total_seconds": 45.6,
  "baseline_check": {
   "baseline": "eval/baseline.json",
   "tolerance": 0.02,
   "failures": []
- },
- "comparison": {
-  "previous_generated_at": "2026-11-14T18:55:23+00:00",
-  "previous_command": "python -m eval.run_retrieval_eval --update-baseline --compare C:/Users/makil/AppData/Local/Temp/claude/2dfca26b6f8f7d45/3425be34-4316-458a-8bc5-aab2095be578/scratchpad/baseline/recovered_from_main/retrieval_2026-11-14.json",
-  "same_golden_set": true,
-  "ablations": {
-   "dense": {
-    "fact_coverage@5": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "fact_coverage@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "recall@5": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "recall@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "mrr@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "ndcg@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "source_hit@5": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "source_hit@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    }
-   },
-   "sparse": {
-    "fact_coverage@5": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "fact_coverage@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "recall@5": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "recall@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "mrr@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "ndcg@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "source_hit@5": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "source_hit@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    }
-   },
-   "hybrid_rrf": {
-    "fact_coverage@5": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "fact_coverage@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "recall@5": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "recall@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "mrr@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "ndcg@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "source_hit@5": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "source_hit@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    }
-   },
-   "production": {
-    "fact_coverage@5": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "fact_coverage@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "fact_coverage@context": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "recall@5": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "recall@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "mrr@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "ndcg@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "source_hit@5": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "source_hit@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    }
-   },
-   "production_decomp": {
-    "fact_coverage@5": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "fact_coverage@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "fact_coverage@context": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "recall@5": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "recall@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "mrr@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "ndcg@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "source_hit@5": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    },
-    "source_hit@10": {
-     "mean": 0.0,
-     "low": 0.0,
-     "high": 0.0,
-     "n": 35,
-     "improved": 0,
-     "regressed": 0,
-     "clears_zero": false,
-     "changed": []
-    }
-   }
-  },
-  "latency_ms": {
-   "dense": {
-    "before": {
-     "p50": 19.9,
-     "p95": 24.8,
-     "n": 41
-    },
-    "after": {
-     "p50": 22.4,
-     "p95": 31.3,
-     "n": 41
-    }
-   },
-   "sparse": {
-    "before": {
-     "p50": 19.9,
-     "p95": 24.8,
-     "n": 41
-    },
-    "after": {
-     "p50": 22.4,
-     "p95": 31.3,
-     "n": 41
-    }
-   },
-   "hybrid_rrf": {
-    "before": {
-     "p50": 20.7,
-     "p95": 25.6,
-     "n": 41
-    },
-    "after": {
-     "p50": 23.5,
-     "p95": 32.6,
-     "n": 41
-    }
-   },
-   "production": {
-    "before": {
-     "p50": 144.0,
-     "p95": 181.6,
-     "n": 41
-    },
-    "after": {
-     "p50": 157.7,
-     "p95": 215.8,
-     "n": 41
-    }
-   },
-   "production_decomp": {
-    "before": {
-     "p50": 153.0,
-     "p95": 511.9,
-     "n": 41
-    },
-    "after": {
-     "p50": 186.5,
-     "p95": 575.1,
-     "n": 41
-    }
-   }
-  }
  }
 }
