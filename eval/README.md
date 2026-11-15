@@ -34,6 +34,33 @@ The run writes `eval/results/retrieval_<date>.json` with full per-question detai
 
 **Baseline.** `eval/baseline.json` holds the overall gated metrics for `production` and `production_decomp`. With `--baseline`, a drop larger than the tolerance (default 2pp, `--tolerance` to override) exits 1. After an intentional retrieval change, rerun with `--update-baseline` and commit the new file alongside the change. The CI job (`retrieval-eval` in `.github/workflows/ci.yml`: manual and weekly) runs on CPU against a baseline recorded on a GPU, so it uses a 3pp tolerance.
 
+## Real documents: LegalBench-RAG and FinanceBench
+
+`python -m eval.run_realdocs_eval {legalbench|financebench}` runs the same production retrieval path on two public benchmarks of real documents, with zero LLM calls. The sample data room cannot do this: it fits in one prompt, and every PDF claim elsewhere in this repository rests on generated fixtures.
+
+**Data.** `python -m eval.realdocs_data` downloads both into the evaluation cache (`REDLINE_EVAL_CACHE`, default `~/.cache/redline-eval`; ~256 MB) and verifies them. Nothing is ever committed: the licences allow evaluation use, not redistribution here.
+- *LegalBench-RAG* (Pipitone & Houir Alami, arXiv 2408.10343; code MIT): real contracts with character-span ground truth, in four sub-corpora that keep their own licences — CUAD and MAUD (The Atticus Project, CC BY 4.0), ContractNLI (CC BY 4.0), PrivacyQA (MIT per its repository). The authors publish one zip on Dropbox; Dropbox links are not versioned, so its SHA-256 is pinned and a different file is refused. The run uses the authors' own *mini* selection (their `benchmark.py`: 194 queries per sub-corpus, ordered so that few documents are used), 776 queries over 72 documents and 8.7M characters, reproduced exactly by `select_legalbench_mini`. Spans are offsets into text read in Python text mode, so the loader translates `\r\n`; without that, 306 snippets point at the wrong characters. Files are read from the zip because 17 names contain characters Windows rejects.
+- *FinanceBench* (Islam et al., arXiv 2311.11944; Patronus AI, **CC BY-NC 4.0** per its dataset card — non-commercial): the open 150 questions with evidence pages over 84 real 10-K / 10-Q / 8-K / earnings PDFs (12,013 pages), from one pinned commit; each PDF is checked against its git blob id.
+
+**What runs.** Every document goes through `index_document` into an in-memory Qdrant (LegalBench-RAG as uploaded `.txt`, FinanceBench through the production PDF path), then each question through `dense`, `sparse`, `hybrid_rrf` and `production`, as in the golden-set harness. The retrieval config is `RETRIEVAL_CONFIGS["legal"]` / `["financial"]` with no filters. Decomposition is **not** measured: neither benchmark ships sub-questions and generating them needs an LLM. Laya's ingest decisions are off; rule-based PII flagging still applies, and the share of ground truth inside a reachable chunk is reported as the ceiling.
+
+**Metrics.** LegalBench-RAG: chunks are aligned back to character offsets of their source file (`eval/span_alignment.py`; whitespace-insensitive, piecewise where the pipeline altered the text, with the unplaced share reported), then the benchmark's own character-level precision and recall at k (retrieved spans merged — this pipeline's chunks overlap, the benchmark's do not), snippet recall, hit@k, MRR@10, document hit, and the same on the final context exactly as the synthesizer would receive it. FinanceBench: the evidence page of the right filing among the top-k chunks and in the final context, and the share of the annotator's evidence tokens present in the context. Two ingestion numbers come with it: evidence tokens present in *anything* the index holds for the evidence page, against PyMuPDF's plain text of that page — the gap is what parsing loses. Intervals resample **documents**, not questions (mini has ~10 queries per document), with paired intervals for stage effects and for `--compare`.
+
+**Run.** LegalBench-RAG takes about 16 minutes on an RTX 5070 Ti (indexing 4 min). Parsing and indexing all 84 filings took 57 minutes (0.28 s a page), and the 150 questions another 18 minutes against the 44,655-chunk local store, so FinanceBench either samples filings (`--max-documents N`, seeded; every question about a sampled filing is kept) or ingests in batches into an on-disk store and asks the questions once at the end:
+
+```bash
+python -m eval.realdocs_data                                    # download + verify
+python -m eval.run_realdocs_eval legalbench
+python -m eval.run_realdocs_eval financebench --max-documents 15
+python -m eval.run_realdocs_eval financebench --store ~/.cache/redline-eval/fb_store --ingest-only --max-new-documents 14   # repeat
+python -m eval.run_realdocs_eval financebench --store ~/.cache/redline-eval/fb_store                                     # questions
+python -m eval.run_realdocs_eval legalbench --compare eval/results/realdocs_legalbench_<date>.json                # paired before/after
+```
+
+Each run writes `eval/results/realdocs_<benchmark>_<date>.{json,md}`.
+
+**Limits.** LegalBench-RAG has no unanswerable queries, so the refusal gate is only tested for false refusals. FinanceBench's evidence extracts come from a different PDF parser, so token recall is a lower bound; its page numbers are the PDF's, which the pipeline uses too. Local-mode Qdrant searches exactly and slowly (about 0.2 s a search at 5K points, over 1.5 s at 45K); latencies here are not the server's.
+
 ## Laya decisions on the query path
 
 Two local Laya checks (see `src/decisions/`) are measured here, both LLM-free and deterministic.
