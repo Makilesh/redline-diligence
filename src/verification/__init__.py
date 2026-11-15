@@ -7,7 +7,8 @@ reproducible and free to run:
 - numeric_grounding: every figure in an answer traced to a figure in the
   retrieved context, after unit normalisation.
 - claims: splitting an answer into atomic, checkable claims.
-- nli: a local cross-encoder NLI model scoring claim-vs-evidence entailment.
+- nli: a local model scoring claim-vs-evidence support — the FactCG grounding
+  checker on GPU, a cross-encoder NLI model on CPU.
 - claim_checker: combines the above, calling an LLM judge only for the claims
   neither deterministic check could decide.
 - prompt_safety: delimiting untrusted document text inside prompts.
