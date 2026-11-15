@@ -36,7 +36,9 @@ from src.llm.model_registry import (
     LOCAL_MODEL,
     SYNTHESIS_LADDER,
     is_local,
+    is_retired,
     quota_day,
+    same_backend,
     rpm_for,
     usable_rpd,
     usable_tpm,
@@ -77,6 +79,16 @@ RATE_LIMIT_COOLDOWN_SECONDS = 60.0
 # neither spin the selector nor park a slot for hours.
 MIN_RATE_LIMIT_COOLDOWN_SECONDS = 1.0
 MAX_RATE_LIMIT_COOLDOWN_SECONDS = 300.0
+
+# Startup credential check (BudgetTracker.check_keys).
+_KEY_CHECK_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+KEY_CHECK_TIMEOUT_SECONDS = 5.0
+
+
+def _env_flag(name: str) -> bool:
+    """True when an environment variable is set to 1/true/yes/on."""
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
 
 # Models the current request has asked not to be offered again, as
 # {model: monotonic time of the skip}. Held in a ContextVar so it belongs to one
@@ -385,6 +397,8 @@ class BudgetTracker:
                     )
                     instance._is_mock = True
                     instance._mock_budgets = {}
+                if _env_flag("GEMINI_KEY_CHECK_AT_STARTUP"):
+                    await instance.check_keys()
                 cls._instance = instance
                 logger.info("BudgetTracker initialized successfully")
         return cls._instance
@@ -765,6 +779,11 @@ class BudgetTracker:
         Called by the call wrapper when it sees the provider fail (503, timeout,
         5xx, a dropped stream) — never for a response a caller merely disliked.
 
+        Every id the provider serves with the same model is cooled with it
+        (model_registry.SERVED_BY): an outage of the backend is one fact, and
+        learning it once per id cost a second refused request in each of the
+        four incidents of the 2026-11-15 run.
+
         Args:
             model: Upstream model the provider reported as unavailable.
         """
@@ -775,17 +794,22 @@ class BudgetTracker:
         if not hasattr(self, "_model_failures"):
             self._model_failures = {}
 
-        failures = self._model_failures.get(model, 0) + 1
-        self._model_failures[model] = failures
+        family = same_backend(model)
+        failures = max(self._model_failures.get(m, 0) for m in family) + 1
         backoff = min(
             SERVICE_COOLDOWN_SECONDS * (2 ** (failures - 1)),
             MAX_SERVICE_COOLDOWN_SECONDS,
         )
-        self._model_cooldowns[model] = time.monotonic() + backoff
+        until = time.monotonic() + backoff
+        for m in family:
+            self._model_failures[m] = failures
+            self._model_cooldowns[m] = until
         logger.info(
             "Model cooling down after consecutive failures",
             extra={"model": model, "consecutive_failures": failures,
-                   "cooldown_seconds": backoff},
+                   "cooldown_seconds": backoff,
+                   **({"also_cooled": [m for m in family if m != model]}
+                      if len(family) > 1 else {})},
         )
 
     def note_model_healthy(self, model: str) -> None:
@@ -796,15 +820,19 @@ class BudgetTracker:
         after a bad spell would stay side-lined for up to half an hour. One good
         answer is sufficient evidence that the outage is over.
 
+        Clears every id served by the same model, for the same reason
+        report_model_unavailable cools them together.
+
         Args:
             model: Upstream model that just returned a usable response.
         """
         failures = getattr(self, "_model_failures", None)
-        if failures:
-            failures.pop(model, None)
         cooldowns = getattr(self, "_model_cooldowns", None)
-        if cooldowns:
-            cooldowns.pop(model, None)
+        for m in same_backend(model):
+            if failures:
+                failures.pop(m, None)
+            if cooldowns:
+                cooldowns.pop(m, None)
 
     def _models_in_cooldown(self) -> set[str]:
         """Models currently skipped after a provider-side unavailability."""
@@ -856,6 +884,12 @@ class BudgetTracker:
             ModelChoice naming the model and the key to bill it to.
         """
         cooled = self._models_in_cooldown()
+        # An id past its retirement date is not offered at all: from that day
+        # the provider serves something else under its name (gemini-2.5-flash
+        # becomes gemini-3.5-flash-lite on 2026-12-01), so ranking it by the
+        # model it used to be would be wrong in both quality and quota.
+        retired = frozenset(m for m in ladder if is_retired(m))
+        exclude = frozenset(exclude) | retired
         # A request-scoped skip means "offer me a different rung". On a ladder
         # of one — a pinned run — there is no different rung, and honouring the
         # skip would silently substitute the local model for the pin.
@@ -965,6 +999,13 @@ class BudgetTracker:
         # the pin exists to remove, and the substitution is invisible in the
         # results — the run would simply report a number nobody could interpret.
         # A loud failure is recoverable; a quietly confounded measurement is not.
+        if is_retired(pin):
+            raise RuntimeError(
+                f"SYNTHESIS_MODEL_PIN={pin} is past its retirement date "
+                f"(model_registry.RETIREMENTS): the provider no longer serves that "
+                f"model under this id, so a pinned measurement on it would measure "
+                f"something else. Pin another model."
+            )
         if pin not in SYNTHESIS_LADDER:
             logger.warning(
                 "SYNTHESIS_MODEL_PIN names a model absent from SYNTHESIS_LADDER",
@@ -1196,6 +1237,65 @@ class BudgetTracker:
             extra={"model": model, "slots": sorted(also_refused + [slot]),
                    "locally_counted": used, "limit": self._slot_limit(slot)},
         )
+
+    async def check_keys(
+        self, timeout: float = KEY_CHECK_TIMEOUT_SECONDS, transport=None
+    ) -> list[int]:
+        """
+        Retires every configured key the provider rejects, before any request.
+
+        One ListModels call per key (GET v1beta/models?pageSize=1): read-only
+        and outside the generation quotas, so it costs no request against any
+        model. A key answering 401/403 — or 400 "API key not valid", Gemini's
+        other way of saying it — is retired exactly as mark_key_unusable does on
+        first use. Anything else (a timeout, no network, a 5xx) leaves the key
+        alone: that is not evidence about the key, and first-use retirement
+        still applies.
+
+        Without it a dead key is found by the first request routed to it — one
+        refused generation request per process, at whatever moment the ladder
+        first reaches that key (key index 2 in the 2026-11-15 run, retired at
+        00:55:01, twelve minutes into the run). Opt-in through
+        GEMINI_KEY_CHECK_AT_STARTUP because it is a network call: a test or CI
+        run with placeholder keys must not reach the provider.
+
+        Args:
+            timeout: Seconds allowed per key.
+            transport: Optional httpx transport (tests).
+
+        Returns:
+            Indices of the keys retired.
+        """
+        import httpx  # deferred: only needed when the check runs
+
+        async def rejected(client: "httpx.AsyncClient", key: str) -> bool:
+            try:
+                response = await client.get(
+                    _KEY_CHECK_URL, params={"pageSize": 1},
+                    headers={"x-goog-api-key": key},
+                )
+            except Exception as e:  # noqa: BLE001 — not evidence about the key
+                logger.warning("Key check could not reach the provider",
+                               extra={"error": type(e).__name__})
+                return False
+            if response.status_code in (401, 403):
+                return True
+            body = response.text.lower() if response.status_code == 400 else ""
+            return "api_key_invalid" in body or "api key not valid" in body
+
+        live = [(i, k) for i, k in enumerate(self._api_keys) if k]
+        if not live:
+            return []
+        async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+            verdicts = await asyncio.gather(*(rejected(client, k) for _, k in live))
+        retired = [i for (i, _), dead in zip(live, verdicts) if dead]
+        for i in retired:
+            self.mark_key_unusable(i)
+        logger.info(
+            "API keys checked at startup",
+            extra={"checked": len(live), "retired_key_indices": retired},
+        )
+        return retired
 
     def mark_key_unusable(self, key_index: int) -> None:
         """

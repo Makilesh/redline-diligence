@@ -651,13 +651,18 @@ class TestRequestTimeouts:
         (measured across the 41-question evaluation). A timeout tight enough to
         cut those would trade a slow answer for no answer, which is the wrong
         direction for a tool whose whole premise is not guessing.
+
+        The structured floor was 30s; it is now 15s. The 2026-11-15 run's 118
+        structured calls took at most 2.5s, and the worst a healthy Lite model
+        can take — a doubled 3,000-token repair budget spent entirely on
+        thinking at the slowest healthy rate measured, 214 tokens/s — is ~14s.
         """
         from src.llm.litellm_wrapper import (
             PROSE_TIMEOUT_SECONDS,
             STRUCTURED_TIMEOUT_SECONDS,
         )
 
-        assert STRUCTURED_TIMEOUT_SECONDS >= 30
+        assert STRUCTURED_TIMEOUT_SECONDS >= 15
         assert PROSE_TIMEOUT_SECONDS >= 60
         assert PROSE_TIMEOUT_SECONDS > STRUCTURED_TIMEOUT_SECONDS
 
@@ -898,6 +903,9 @@ class TestLadderModelsExist:
         # individually rather than dropping the model.
         "gemini/gemini-2.5-flash",
         "gemini/gemini-2.5-flash-lite",
+        # 2026-11-15: streamed generateContent through LiteLLM 1.89.3 with the
+        # synthesis settings answered (key index 0; 138.7s to first token).
+        "gemini/gemini-3.8-flash",
         "gemini/gemini-3.7-flash",
         "gemini/gemini-3.6-flash",
         "gemini/gemini-3.5-flash",
@@ -992,7 +1000,9 @@ class TestLadderModelsExist:
         """
         from src.llm.model_registry import SYNTHESIS_LADDER
 
-        assert SYNTHESIS_LADDER[0] == "gemini/gemini-3.7-flash"
+        # gemini-3.8-flash since 2026-11-15: the provider serves 3.7-flash with
+        # it, and it answered a live probe (model_registry, SERVED_BY).
+        assert SYNTHESIS_LADDER[0] == "gemini/gemini-3.8-flash"
 
 
 class TestUnavailableModelIsNotRetried:

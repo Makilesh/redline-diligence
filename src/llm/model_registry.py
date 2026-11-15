@@ -17,6 +17,7 @@ The numbers below are the free-tier quotas and they are lopsided in a way that
 dictates the whole routing strategy:
 
     model                    RPM     TPM      RPD
+    gemini-3.8-flash           5    250K       20     (assumed — see below)
     gemini-3.6-flash           5    250K       20
     gemini-3.5-flash           5    250K       20
     gemini-3-flash             5    250K       20
@@ -102,6 +103,18 @@ MODEL_LIMITS: dict[str, ModelLimits] = {
     # what a catalogue says.
     #
     # Reasoning tier — 5 RPM / 250K TPM / 20 RPD each, newest first.
+    #
+    # gemini-3.8-flash: added 2026-11-15. Advertised by ListModels on all four
+    # live keys (version "3.0", 1,048,576 input / 65,536 output tokens,
+    # thinking), listed "Stable" on the provider's models page (released
+    # 2026-09-02, no shutdown date), and answered a streamed generateContent
+    # through LiteLLM 1.89.3 with this project's synthesis settings — slowly:
+    # 138.7s to the first token that day, the same backend gemini-3.7-flash was
+    # hanging on (see SERVED_BY). Its limits are ASSUMED to be the reasoning
+    # tier's: per-model free-tier numbers are shown only in the AI Studio
+    # console and were not re-read. If they differ, the first 429 corrects the
+    # count for that slot.
+    "gemini/gemini-3.8-flash":        ModelLimits(rpm=5,  tpm=250_000, rpd=20,  reasoning=True),
     "gemini/gemini-3.7-flash":        ModelLimits(rpm=5,  tpm=250_000, rpd=20,  reasoning=True),
     "gemini/gemini-3.6-flash":        ModelLimits(rpm=5,  tpm=250_000, rpd=20,  reasoning=True),
     "gemini/gemini-3.5-flash":        ModelLimits(rpm=5,  tpm=250_000, rpd=20,  reasoning=True),
@@ -148,11 +161,18 @@ SAFETY_MARGIN = 0.95
 # per key, then it falls through. The lite model is last so synthesis degrades
 # gracefully rather than failing once the reasoning models are spent.
 SYNTHESIS_LADDER: list[str] = [
+    # 3.8 above 3.7: the provider serves gemini-3.7-flash WITH gemini-3.8-flash
+    # (SERVED_BY), so this rung was already the top rung's model; naming it
+    # directly asks for what is served. 3.7-flash stays below it because
+    # whether the two ids share one daily quota is not published — if they do
+    # not, it is twenty more requests a day per key of the same model; if they
+    # do, its first 429 marks each slot spent and costs one refused request.
+    "gemini/gemini-3.8-flash",
     "gemini/gemini-3.7-flash",
     "gemini/gemini-3.6-flash",
     "gemini/gemini-3.5-flash",
     "gemini/gemini-3-flash-preview",
-    "gemini/gemini-2.5-flash",
+    "gemini/gemini-2.5-flash",       # until 2026-12-01 — see RETIREMENTS
     "gemini/gemini-3.5-flash-lite",
     "gemini/gemini-3.1-flash-lite",
     LOCAL_MODEL,
@@ -169,6 +189,107 @@ AGENT_LADDER: list[str] = [
     "gemini/gemini-2.5-flash-lite",
     LOCAL_MODEL,
 ]
+
+
+# ─── Ids the provider serves with another model ──────────────────────────────
+#
+# Provider deprecations page (https://aistudio.google.com/docs/deprecations,
+# read 2026-11-15): gemini-3.7-flash "is no longer available in Google AI
+# Studio; the endpoint is not shutting down and automatically routes API
+# requests to gemini-3.8-flash", and gemini-3.5-flash likewise "routes API
+# requests to gemini-3.6-flash".
+#
+# What that changes is HEALTH, not quota: two ids on one backend fail
+# together, so an outage seen on either must cool both. The live run of
+# 2026-11-15 shows exactly that — in all four incidents gemini-3.6-flash and
+# gemini-3.5-flash returned 503 within 3-8s of each other, and the ladder paid
+# a second refused request (3-8s) to learn it twice. Quota stays per id:
+# whether the provider counts a routed request against the id asked for or the
+# model that served it is not published.
+#
+# Not verified end to end: a raw generateContent to gemini-3.7-flash (to read
+# the response's modelVersion) hung for 150s without answering on the day.
+SERVED_BY: dict[str, str] = {
+    "gemini/gemini-3.7-flash": "gemini/gemini-3.8-flash",
+    "gemini/gemini-3.5-flash": "gemini/gemini-3.6-flash",
+}
+
+
+def serving_model(model: str) -> str:
+    """The model the provider actually serves for `model`."""
+    return SERVED_BY.get(model, model)
+
+
+def same_backend(model: str) -> tuple[str, ...]:
+    """
+    Every known id served by the same model as `model`, `model` included.
+
+    Args:
+        model: Upstream model id.
+
+    Returns:
+        The ids whose health is one fact, in registry order.
+    """
+    backend = serving_model(model)
+    ids = [m for m in MODEL_LIMITS if serving_model(m) == backend]
+    return tuple(ids) if model in ids else (model, *ids)
+
+
+# ─── Known retirements ───────────────────────────────────────────────────────
+#
+# A dated entry, not a calendar reminder: from its date the selector stops
+# offering the id (BudgetTracker._select_from_ladder), and
+# tests/test_model_ladder_dates.py fails until it is taken off the ladders.
+
+
+@dataclass(frozen=True)
+class Retirement:
+    """When an id stops serving the model it names, and what replaces it."""
+
+    on: date               # first day the id no longer serves as itself
+    becomes: str | None    # what the provider serves instead; None = shut down
+    source: str
+
+
+RETIREMENTS: dict[str, Retirement] = {
+    # "Effective December 1, 2026, all API requests to gemini-2.5-flash will
+    # automatically route to gemini-3.5-flash-lite" (models page and
+    # deprecations page, read 2026-11-15), "billed at Gemini 3.5 Flash-Lite
+    # rates". From then on the synthesis rung would silently be a Lite model
+    # under a 20-RPD reasoning cap, ranked above the real Lite rungs.
+    "gemini/gemini-2.5-flash": Retirement(
+        on=date(2026, 12, 1), becomes="gemini/gemini-3.5-flash-lite",
+        source="https://aistudio.google.com/docs/deprecations",
+    ),
+    # Shutdown listed for May 7, 2027 — "the earliest possible date", with
+    # gemini-3.5-flash-lite as the replacement.
+    "gemini/gemini-3.1-flash-lite": Retirement(
+        on=date(2027, 5, 7), becomes=None,
+        source="https://aistudio.google.com/docs/deprecations",
+    ),
+}
+
+
+def is_retired(model: str, now: datetime | None = None) -> bool:
+    """
+    True once `model` has reached its retirement date.
+
+    Judged on the UTC calendar, which reaches a date before Pacific time does:
+    the provider names a day but not a timezone, and retiring a rung a few
+    hours early costs less than serving a substituted model under its old name.
+
+    Args:
+        model: Upstream model id.
+        now: An aware datetime; defaults to the current time.
+
+    Returns:
+        True when the id should no longer be offered.
+    """
+    retirement = RETIREMENTS.get(model)
+    if retirement is None:
+        return False
+    moment = now if now is not None else datetime.now(timezone.utc)
+    return moment.astimezone(timezone.utc).date() >= retirement.on
 
 
 # Where the provider's daily quota turns over.
