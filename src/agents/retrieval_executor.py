@@ -501,6 +501,11 @@ async def retrieval_executor_node(state: AgentState) -> dict:
                 "sources": sorted(
                     {c.get("source_file", "") for c in reranked} - {""}
                 ),
+                # The context the answer is written and verified from, in order,
+                # so a recorded run can be replayed exactly (expansion is
+                # deterministic given these). Without it, eval/run_answer_replay.py
+                # has to search again and check that it found the same passages.
+                "retrieved_chunk_ids": [c.get("chunk_id") for c in reranked],
                 **({"table_siblings_missing": siblings_missing} if siblings_missing else {}),
                 **({"section_tables_missing": section_tables_missing}
                    if section_tables_missing else {}),
