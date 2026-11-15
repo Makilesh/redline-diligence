@@ -158,11 +158,12 @@ The Gemini free tier is lopsided in a way that dictates the whole design: every 
 
 | Model | RPM | RPD | Role |
 |---|---|---|---|
-| `gemini-3.7-flash` | 5 | 20 | Synthesis (newest reasoning) |
+| `gemini-3.8-flash` | 5 | 20 | Synthesis (newest reasoning; free-tier limits assumed, Decision 61) |
+| `gemini-3.7-flash` | 5 | 20 | Synthesis (served by 3.8's backend) |
 | `gemini-3.6-flash` | 5 | 20 | Synthesis |
 | `gemini-3.5-flash` | 5 | 20 | Synthesis |
 | `gemini-3-flash-preview` | 5 | 20 | Synthesis |
-| `gemini-2.5-flash` | 5 | 20 | Synthesis — grandfathered keys only |
+| `gemini-2.5-flash` | 5 | 20 | Synthesis — grandfathered keys only, retired from the ladder on 2026-12-01 |
 | `gemini-3.5-flash-lite` | 15 | **500** | Agents — volume tier |
 | `gemini-3.1-flash-lite` | 15 | **500** | Agents — volume tier |
 | `gemini-2.5-flash-lite` | 10 | 20 | Agents — grandfathered keys only |
@@ -334,7 +335,7 @@ Without a Qdrant server (development only), set `QDRANT_MODE=local` to use an em
 ### 4. Tests and evaluation
 
 ```bash
-pytest                                                    # offline suite (~1,250 tests, ~30 s) — what CI runs
+pytest                                                    # offline suite (~1,430 tests, ~35 s) — what CI runs
 python -m eval.run_verification_eval --no-nli --baseline eval/verification_baseline.json  # verification gate, no models
 python -m eval.run_retrieval_eval --baseline eval/baseline.json   # retrieval regression gate
 python tests/run_end_to_end_validation.py                 # live 41-question golden set (spends quota)
@@ -399,7 +400,7 @@ A few decisions driven by measurement rather than intuition. The full record —
 - [x] Let the grounding checker veto a figure-only confirmation — adopted on CPU (cue-bearing claims); measured and not adopted on GPU
 - [ ] Header-aware evidence for the GPU figure veto: score table rows with their column headers (a dev-only lead, not yet measured on held-out data)
 - [ ] Gemini-native response schemas, validated per rung with live calls
-- [ ] Probe and add `gemini-3.8-flash`; move `gemini-2.5-flash` off the reasoning rungs before it starts routing to a Lite model (1 December 2026)
+- [x] Probe and add `gemini-3.8-flash`; retire `gemini-2.5-flash` from the reasoning rungs on its routing date (1 December 2026, Decision 61)
 - [x] Calibrate the quality gate per reranker model (the CPU host runs MiniLM)
 - [ ] A better CPU reranker, or choose the answerability gate's passages independently of the reranker, so the gate can run on the CPU host
 - [ ] Qdrant Query API (server-side prefetch + fusion) — evaluated, not adopted: its weighted RRF is a different function, and the candidate stage is ~20 ms of a ~150 ms pass; revisit against a remote cluster
