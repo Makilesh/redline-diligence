@@ -5,8 +5,11 @@ Pipeline, cheapest first:
 
 1. Split the answer into atomic claims (src/verification/claims.py).
 2. Ground every figure deterministically (numeric_grounding.py).
-3. Score each claim against its evidence with a local NLI model (nli.py).
-   Evidence is sentence-sized windows from the chunks the claim cites, plus the
+3. Score each claim against its evidence with a local model (nli.py): the
+   FactCG grounding checker on GPU, an NLI cross-encoder on CPU. "Entailment"
+   below is the checker's support probability; each model has its own
+   thresholds (thresholds_for). Evidence is sentence-sized windows from the
+   chunks the claim cites, plus the
    best lexical matches across all retrieved chunks, so a correct claim with a
    sloppy citation is not failed for the citation alone.
 4. Only claims neither step could decide go to an LLM judge — batched into ONE
@@ -25,14 +28,14 @@ names):
     a figure the context gives for another row
       or period                                    -> LLM judge
     a quantity the context does not state          -> LLM judge
-    NLI entailment >= ENTAIL_THRESHOLD and no
+    NLI entailment >= entail threshold and no
       figure merely present elsewhere              -> supported     (nli)
     every figure confirmed                         -> supported     (numeric)
-    NLI contradiction >= CONTRADICTION_THRESHOLD
+    NLI contradiction >= contradiction threshold
       and entailment < 0.1                         -> LLM judge (suspected
                                                       contradiction)
-    NLI clearly neutral (entailment below
-      CLEAR_NEUTRAL_MAX_ENTAIL, contradiction low,
+    NLI clearly neutral (entailment below the
+      clear-neutral line, contradiction low,
       no figures)                                  -> unsupported   (nli)
     otherwise                                      -> LLM judge
 
@@ -88,6 +91,57 @@ ENTAIL_THRESHOLD = 0.5
 CONTRADICTION_THRESHOLD = 0.9
 CLEAR_NEUTRAL_MAX_ENTAIL = 0.02
 CLEAR_NEUTRAL_MAX_CONTRADICTION = 0.5
+
+
+@dataclass(frozen=True)
+class Thresholds:
+    """Where the decision rules draw their lines on one model's scores."""
+
+    entail: float
+    contradiction: float
+    clear_neutral_entail: float
+    clear_neutral_contradiction: float
+
+
+# The values above are the cross-encoders'. A grounding checker's support
+# probability is on another scale. FactCG's were chosen on the dev half of
+# eval/verification_set.json by a rule fixed before any checker was scored —
+# the fewest wrong claims passed while passing at least as many correct claims
+# locally as nli-deberta-v3-small — then the warn line that catches the most
+# wrong claims with no more false alarms than -small's; reported once on the
+# test half (DECISIONS_LOG). It has no contradiction output, so that rule never
+# fires for it. A low support score is a far better "not supported" signal
+# than a cross-encoder's neutral: on dev, wrong claims caught locally (warn or
+# fail) rose from 46 to 102 of 167 at the same three false alarms, so they no
+# longer wait for the judge.
+CROSS_ENCODER_THRESHOLDS = Thresholds(
+    ENTAIL_THRESHOLD, CONTRADICTION_THRESHOLD,
+    CLEAR_NEUTRAL_MAX_ENTAIL, CLEAR_NEUTRAL_MAX_CONTRADICTION,
+)
+MODEL_THRESHOLDS = {
+    # 0.432 sits in a narrow gap on dev: a wrong claim scores 0.4305 and a
+    # correct one 0.4326. fp16 moves scores by at most 0.002 on the benchmark
+    # and changes no decision; a recalibration should start here.
+    nli.FACTCG: Thresholds(
+        entail=0.432, contradiction=CONTRADICTION_THRESHOLD,
+        clear_neutral_entail=0.2, clear_neutral_contradiction=CLEAR_NEUTRAL_MAX_CONTRADICTION,
+    ),
+}
+
+
+def thresholds_for(model: str | None) -> Thresholds:
+    """
+    The thresholds calibrated for `model`'s scores.
+
+    Args:
+        model: The model that produced the scores (nli.loaded_model_name());
+            None or an unlisted model gets the cross-encoder thresholds — which
+            is also what an injected scorer gets when no model is loaded.
+
+    Returns:
+        Thresholds.
+    """
+    return MODEL_THRESHOLDS.get(model or "", CROSS_ENCODER_THRESHOLDS)
 # Share of a claim's content tokens a premise window must contain before its
 # contradiction score is believed (see the note where it is applied).
 CONTRADICTION_MIN_OVERLAP = 0.5
@@ -404,6 +458,9 @@ async def verify_answer(
             report.notes.append(f"NLI unavailable: {e}")
     elif not use_nli:
         report.notes.append("NLI disabled (VERIFY_NLI=0)")
+    # The lines follow the model that actually scored: a checker that failed
+    # to load was replaced by a cross-encoder (nli._get_model).
+    th = thresholds_for(nli.loaded_model_name() if nli_available else None)
 
     # Best evidence per claim.
     best: dict[int, dict] = {}
@@ -507,7 +564,7 @@ async def verify_answer(
                 reason="not stated in the retrieved documents: " + ", ".join(missing_quantities),
                 suspected_misattribution=True,
             )
-        elif ev and entail >= ENTAIL_THRESHOLD and not unbound:
+        elif ev and entail >= th.entail and not unbound:
             # Not when a figure of the claim sits in the context only somewhere
             # the claim does not name. The entailment model reads a window that
             # holds the value and calls the claim entailed whatever the value is
@@ -541,9 +598,9 @@ async def verify_answer(
                 evidence=first.evidence_snippet if first else "",
                 evidence_source=first.evidence_source if first else "",
             )
-            if contra >= CONTRADICTION_THRESHOLD:
+            if contra >= th.contradiction:
                 check["nli_contradiction"] = round(contra, 3)
-        elif ev and contra >= CONTRADICTION_THRESHOLD and entail < 0.1:
+        elif ev and contra >= th.contradiction and entail < 0.1:
             # A suspected contradiction, confirmed by the judge before it can
             # fail the answer. Measured on the 35 RESULTS.md answers against the
             # sample data room: every one of the NLI model's >= 0.9
@@ -563,8 +620,8 @@ async def verify_answer(
             )
         elif (
             ev
-            and entail < CLEAR_NEUTRAL_MAX_ENTAIL
-            and contra < CLEAR_NEUTRAL_MAX_CONTRADICTION
+            and entail < th.clear_neutral_entail
+            and contra < th.clear_neutral_contradiction
             and not nums
         ):
             check.update(

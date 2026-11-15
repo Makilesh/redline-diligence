@@ -4,6 +4,7 @@ Verification benchmark — does the validator pass what it should, and only that
     python -m eval.run_verification_eval                      # dev + test, NLI as configured
     python -m eval.run_verification_eval --split dev          # tuning runs: dev only
     python -m eval.run_verification_eval --no-nli             # deterministic stages alone (no model)
+    python -m eval.run_verification_eval --nli-model cross-encoder/nli-deberta-v3-small  # another scorer
     python -m eval.run_verification_eval --baseline eval/verification_baseline.json   # exit 1 on regression
     python -m eval.run_verification_eval --answers tests/e2e_validation_results.json  # recorded answers
 
@@ -52,6 +53,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import random
 import sys
 import time
@@ -565,6 +567,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--split", choices=("dev", "test", "all"), default="all")
     parser.add_argument("--no-nli", action="store_true",
                         help="deterministic stages only; loads no model")
+    parser.add_argument("--nli-model",
+                        help="model id to score claims with (sets NLI_MODEL), e.g. "
+                        "cross-encoder/nli-deberta-v3-small to compare against the GPU default")
     parser.add_argument("--no-random-figures", action="store_true",
                         help="skip the random-figure grounding measurement")
     parser.add_argument("--answers", help="recorded answers to re-verify "
@@ -584,6 +589,9 @@ def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     args = parse_args(argv)
+    if args.nli_model:
+        # Read when the model is first loaded, so set before anything scores.
+        os.environ["NLI_MODEL"] = args.nli_model
     if not args.verbose:
         logging.disable(logging.WARNING)
     report = asyncio.run(run(args))

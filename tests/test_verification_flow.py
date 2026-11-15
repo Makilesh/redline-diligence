@@ -690,7 +690,13 @@ class TestTracingHook:
 
 @pytest.mark.models
 class TestRealNLIModel:
-    def test_obvious_entailment_and_contradiction(self):
+    def test_obvious_entailment_and_contradiction(self, monkeypatch):
+        # The cross-encoder specifically: on a GPU the default is the FactCG
+        # checker, which has no contradiction output (test_grounding_checker).
+        monkeypatch.setenv("NLI_MODEL", "cross-encoder/nli-deberta-v3-small")
+        monkeypatch.setattr(nli, "_model", None)
+        monkeypatch.setattr(nli, "_model_name", None)
+        monkeypatch.setattr(nli, "_load_failed", False)
         scores = nli.score_pairs([
             ("Revenue was $452.8 million in FY2023.", "FY2023 revenue was $452.8 million."),
             ("The merger agreement contains no financing condition.",
