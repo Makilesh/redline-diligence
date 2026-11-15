@@ -118,6 +118,7 @@ function normalizeClaim(raw: unknown): ClaimCheck | null {
     nli_contradiction: numOrNull(raw.nli_contradiction) ?? undefined,
     suspected_contradiction: raw.suspected_contradiction === true || undefined,
     suspected_misattribution: raw.suspected_misattribution === true || undefined,
+    suspected_misstatement: raw.suspected_misstatement === true || undefined,
     absence: raw.absence === true || undefined,
   };
 }
@@ -172,6 +173,9 @@ export function normalizeQueryResponse(raw: unknown): QueryResponse | null {
     .filter((t): t is NodeTiming => t !== null);
   return {
     answer: raw.answer,
+    // Only an explicit true marks an answer as cut off. A server that predates
+    // the field cannot say either way; its verdict still stands on its own.
+    answer_truncated: raw.answer_truncated === true,
     query_type: str(raw.query_type, "summary"),
     confidence_score: Math.min(1, Math.max(0, num(raw.confidence_score))),
     // Passed through as sent. An unexpected value is handled where the verdict

@@ -379,14 +379,15 @@ def test_query_path_retries_with_more_room_and_traces_it(tracker, monkeypatch):
 
 
 def test_query_path_cut_twice_tries_the_next_rung_for_this_request_only(tracker, monkeypatch):
-    provider = _install(monkeypatch, Provider({M38: LOOPS, M37: Model(think=1500, answer=1200)}))
+    # M37 is served by M38 (SERVED_BY), so it is skipped with it (Decision 69).
+    provider = _install(monkeypatch, Provider({M38: LOOPS, M36: Model(think=1500, answer=1200)}))
 
     result, _ = run_virtual(synth.synthesize_answer(_state()))
 
-    assert result["agent_trace"][0]["model"] == M37
+    assert result["agent_trace"][0]["model"] == M36
     assert result["generated_answer"] == _text(1200)
-    assert provider.budgets == [(M38, 8192), (M38, 16384), (M37, 8192)]
-    assert _units(tracker) == {(M38, 0): 2, (M37, 0): 1}
+    assert provider.budgets == [(M38, 8192), (M38, 16384), (M36, 8192)]
+    assert _units(tracker) == {(M38, 0): 2, (M36, 0): 1}
     assert tracker._models_in_cooldown() == set(), "nothing is cooled for being verbose"
 
 

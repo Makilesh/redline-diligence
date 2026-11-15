@@ -85,6 +85,12 @@ export interface ClaimCheck {
   suspected_contradiction?: boolean;
   /** A figure was found under a different row or period than the claim names. */
   suspected_misattribution?: boolean;
+  /**
+   * Every figure checked out, but the local checker doubted the statement as
+   * worded (another party, a flipped negation) and sent it to the LLM judge.
+   * The verdict in `status` is the judge's; this records that it was doubted.
+   */
+  suspected_misstatement?: boolean;
   /** The claim says the documents do not contain something. */
   absence?: boolean;
 }
@@ -122,6 +128,12 @@ export interface NodeTiming extends NodePerf {
 
 export interface QueryResponse {
   answer: string;
+  /**
+   * The answer stopped at the model's output limit rather than where the model
+   * ended it (streamed route only). The server never reports such an answer as
+   * "passed"; the page also says plainly that the text is incomplete.
+   */
+  answer_truncated: boolean;
   query_type: string;
   confidence_score: number;
   validation_status: ValidationStatus;

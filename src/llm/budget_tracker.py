@@ -747,6 +747,25 @@ class BudgetTracker:
         scope the skip to, and writing it into a long-lived context would turn
         it back into the global side effect this method exists to avoid.
 
+        The skip covers every id the provider serves with the same model
+        (model_registry.SERVED_BY), whatever the reason for it, because the
+        next selection is meant to be a DIFFERENT model and an alias is not one:
+          - a failure (503, timeout, a dropped stream) is the backend's. The
+            wrapper already cools aliases together (report_model_unavailable),
+            but that cooldown lasts 90 s and any other request's success clears
+            it, so on its own it did not keep THIS request off the alias;
+          - a reply cut off twice, at twice the budget, is how the model
+            behaves on this prompt, and the alias is that model — Decision 66
+            found every rung tried for mh_06, legal_05 and mh_04 cut off, with
+            gemini-3.5-flash served by gemini-3.6-flash's backend; on the alias
+            it would cost two more 20-RPD units to learn it again;
+          - an uncited draft is one sample, but the alias draws from the same
+            model at the same temperature on the same prompt. When the guard
+            wrongly rejected correct declines, gemini-3.6-flash and then its
+            alias gemini-3.5-flash returned the same decline (_DECLINES_TO_ANSWER
+            in answer_synthesizer) — a 20-RPD unit spent to learn nothing
+            (Decision 69).
+
         Args:
             model: Upstream model this request should not be offered again.
         """
@@ -760,7 +779,9 @@ class BudgetTracker:
         if skips is None:
             skips = {}
             _request_skips.set(skips)
-        skips[model] = time.monotonic()
+        now = time.monotonic()
+        for m in same_backend(model):
+            skips[m] = now
 
     def report_model_unavailable(self, model: str) -> None:
         """

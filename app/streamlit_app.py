@@ -262,6 +262,7 @@ def render_results(result: dict, deal_id: str) -> None:
                 rewrite_iterations=result.get("rewrite_iterations", 0),
                 claim_checks=result.get("claim_checks", []),
                 outcome=outcome,
+                answer_truncated=result.get("answer_truncated") is True,
             )
 
     with tab_cites:
