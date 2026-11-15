@@ -259,7 +259,7 @@ python tests/run_end_to_end_validation.py
 Then restart the API with the deployed retrieval profile and repeat:
 
 ```bash
-SYNTHESIS_MODEL_PIN=gemini/gemini-3.7-flash RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2 RERANKER_MAX_LENGTH=512 python run_api.py
+SYNTHESIS_MODEL_PIN=gemini/gemini-3.7-flash RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2 python run_api.py
 ```
 
 The report records both the retrieval profile and the pin under **Run
