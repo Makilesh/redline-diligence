@@ -1,0 +1,2000 @@
+{
+ "_about": "Hand labels for eval/run_answer_replay.py (Decision 72). One labeller; see guide.",
+ "provenance": {
+  "labeller": "single annotator (verify5, Decision 72), 2026-11-16",
+  "claims_from": "python -m eval.run_answer_replay (main 3476281, --as-of pm-run, FactCG-DeBERTa-v3-Large fp16 on GPU, judge stubbed); runs pm and am, context-reproduced answers only",
+  "sample_seed": 72,
+  "sample_rule": "every flagged claim; random.Random(72).sample of 70 judge-bound and 70 locally passed claims (population sorted by key)",
+  "reference_documents": "data/sample_deal (9 files)"
+ },
+ "guide": {
+  "reference": "The nine documents of data/sample_deal (the whole data room), not the replayed context.",
+  "unit": "One claim exactly as src/verification/claims.py produced it (clean text), read in its answer: a bullet under a lead-in is read with the lead-in when the lead-in supplies its predicate (\"The documents do not include: - Quarterly statements for FY2024\" is the claim that the room lacks FY2024 quarterly statements).",
+  "labels": {
+   "supported": "Every assertion in the claim is stated in the documents, or follows from them by simple arithmetic (sum, difference, ratio, percentage change, multiple) correct to the precision written. Paraphrase is fine. A statement attributed to a document (\"the QoE report notes ...\") must be in that document. A figure on which documents disagree is supported when the claim states one document's value without contradicting itself or misattributing it. A statement of absence (\"the documents do not disclose X\") is supported when no document states X. A recommendation or inference is supported when it is a reasonable reading of what the documents say and the facts it relies on are right.",
+   "not_supported": "At least one assertion is contradicted by the documents, or is stated nowhere and does not follow from them: a wrong figure, period, party, document attribution or direction; a calculation that does not reproduce; a statement of absence about something a document does state; a fact the documents do not contain (even if plausible).",
+   "not_checkable": "Asserts nothing about the deal or the documents that could be true or false: a heading or label without a predicate (\"Deductible / Basket Threshold\", \"Atlas Data Holdings (Private Equity Consortium - DECLINE)\"), a formula fragment or a marker-only line (\"(Derived/Computed metric) [COMPUTED: $716.6M / $92.8M]\" is NOT this - it asserts a computation), generic advice not attributed to the documents (\"Buyers should confirm X in diligence\"), or a question restated."
+  },
+  "multi_fact": "One wrong part makes the whole claim not_supported; the reason names the part.",
+  "rounding": "A figure rounded to the precision written is supported ($716.6M / $92.8M = 7.72x; 7.7x also fine). A figure stated more precisely than the documents allow is supported only if it reproduces.",
+  "causes": {
+   "_about": "Recorded for every claim labelled supported or not_checkable that the verifier flags or leaves for the judge, and for every not_supported claim it passes. One primary cause.",
+   "arithmetic": "the claim states a correct derivation (written-out formula, a ratio or sum of document figures, a percentage change) that numeric grounding could not reproduce",
+   "multi_fact": "several facts in one claim, no single short premise window states them all",
+   "table_without_headers": "a table row (or Label: value line) whose cells only mean something with their column headers",
+   "fragment": "not_checkable text the splitter kept",
+   "decline": "a correct statement of absence phrased in a way the absence pattern misses, scored as an ordinary claim",
+   "paraphrase": "one fact, reworded beyond what the entailment model recognises",
+   "conflict_in_documents": "the documents disagree and the claim states one side",
+   "inference": "a reasonable inference or recommendation; no passage states it",
+   "other": "anything else; the note says what",
+   "context_dependent": "the claim's subject lives in a heading, a bullet lead-in or the previous sentence ('Procedural Posture: Mediation scheduled for May 2024' under the Hartley bullet; 'Amount: $13.92 million')",
+   "date_from_header": "the claim repeats the document's as-of date from its header, which no premise window holds",
+   "absence_by_design": "a statement of absence already recognised as one; it goes to the judge by design"
+  },
+  "ambiguity": "Labelled once by one labeller (no second annotator). Cases where the label turns on a judgement call carry ambiguous=true and a note; rates are also reported with those excluded.",
+  "sampling": "Strata are the BASELINE replay outcome (main at 3476281, as-of pm-run, FactCG): every flagged claim and every judge-bound claim of reproduced answers is labelled (or a seeded sample of the judge stratum where noted), plus a seeded random sample (random.Random(72)) of locally passed claims. Each label carries its stratum; rates weight a label by stratum population / labelled count."
+ },
+ "strata": {
+  "flag": {
+   "population": 113,
+   "labelled": 113,
+   "weight": 1.0
+  },
+  "judge": {
+   "population": 306,
+   "labelled": 70,
+   "weight": 4.371429
+  },
+  "pass": {
+   "population": 694,
+   "labelled": 70,
+   "weight": 9.914286
+  }
+ },
+ "labels": {
+  "am:comp_01:0b3ee42d90": {
+   "claim": "Based on the provided strategic review and merger documents, the three bidders for Aurora Technologies Inc. are compared below regarding their offer ranges and transaction certainty.",
+   "stratum": "flag",
+   "label": "not_checkable",
+   "evidence": "announces the comparison that follows",
+   "cause": "fragment"
+  },
+  "am:comp_01:f3a312f968": {
+   "claim": "Regulatory Requirements: While Vertex is the preferred bidder with high certainty, the transaction still requires HSR regulatory approval.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "Slide 3/5 Vertex preferred, certainty HIGH; memo S4 HSR expiry is a closing condition",
+   "cause": "multi_fact"
+  },
+  "am:comp_03:b3ece1a7f2": {
+   "claim": "Aurora Technologies Inc. experienced margin expansion across both gross and operating levels between FY2022 and FY2023.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "gross margin 59.1% -> 60.0%, operating margin 13.3% -> 15.0%",
+   "cause": "inference"
+  },
+  "am:ctrl_02:11cf3bf80a": {
+   "claim": "Management's Q1 or Q2 FY2024 flash reports or performance updates.",
+   "stratum": "flag",
+   "label": "supported",
+   "evidence": "under 'The data room currently lacks:'; none in the room",
+   "cause": "decline"
+  },
+  "am:ctrl_02:2a41ae99d0": {
+   "claim": "Interim financial statements for FY2024.",
+   "stratum": "flag",
+   "label": "supported",
+   "evidence": "under 'lacks:'; none in the room",
+   "cause": "decline"
+  },
+  "am:ctrl_02:9720d2113b": {
+   "claim": "Subsequent Events: While the documents mention events occurring in early 2024—specifically a Board of Directors meeting on February 15, 2024, to explore strategic alternatives and the issuance of a Quality of Earnings report on February 28, 2024—neither document includes actual financial performance results for the 2024 quarters .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "Note 12 Feb 15 2024 board; QoE dated Feb 28 2024; no 2024 quarterly results anywhere",
+   "cause": "decline"
+  },
+  "am:ctrl_02:ae6a83de1b": {
+   "claim": "Scope of Financials: The provided financial statements and Quality of Earnings report only cover the fiscal years ended December 31, 2022, and December 31, 2023 .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "financials FY2023/FY2022; QoE period FY2022-FY2023",
+   "cause": "paraphrase"
+  },
+  "am:ctrl_02:ae8d2d4a2f": {
+   "claim": "Quarterly revenue breakdowns for any period following Q4 FY2023.",
+   "stratum": "flag",
+   "label": "supported",
+   "evidence": "under 'lacks:'; none in the room",
+   "cause": "decline"
+  },
+  "am:ctrl_02:f586c3b9d9": {
+   "claim": "Based on the provided documents, there is no information available regarding Aurora's quarterly revenue figures for Q1 or Q2 of FY2024.",
+   "stratum": "flag",
+   "label": "supported",
+   "evidence": "no 2024 quarterly figures in the room",
+   "cause": "decline"
+  },
+  "am:ctrl_04:40ce8d9caf": {
+   "claim": "No competitor churn/retention data: There are no figures provided for the churn rates or retention rates of Palantir, Snowflake, Databricks, or DataRobot.",
+   "stratum": "flag",
+   "label": "supported",
+   "evidence": "no competitor churn or retention figures anywhere",
+   "cause": "decline"
+  },
+  "am:ctrl_05:3c53822b43": {
+   "claim": "Strategic Context: As of February 15, 2024, the Board of Directors approved the exploration of strategic alternatives, including a potential sale, but no specific financial forecasts for FY2025 were disclosed in this announcement .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "Note 12: Feb 15 2024 board approved exploration of strategic alternatives incl. potential sale; no FY2025 forecast",
+   "cause": "multi_fact"
+  },
+  "am:ctrl_05:b37cefec77": {
+   "claim": "FY2025 Revenue Projections: There are no financial tables or narrative descriptions forecasting revenue beyond the FY2023 actuals.",
+   "stratum": "flag",
+   "label": "supported",
+   "evidence": "no revenue forecast beyond FY2023 in any document",
+   "cause": "decline"
+  },
+  "am:fin_01:babd2ba633": {
+   "claim": "Sustainability of Licenses: The Quality of Earnings report notes that perpetual license revenue is declining and advises that buyers should not model this revenue stream as sustainable due to the company's shift to subscription pricing .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S4 perpetual decline, migration to subscription, not sustainable",
+   "cause": "paraphrase"
+  },
+  "am:fin_02:1d8598b7bb": {
+   "claim": "[Sources: 📄 quality_of_earnings_report_fy2023.txt; 📄 aurora_financials_fy2023.txt]",
+   "stratum": "flag",
+   "label": "not_checkable",
+   "evidence": "sources line",
+   "cause": "fragment"
+  },
+  "am:fin_04:9bc359db27": {
+   "claim": "If settled at the high end, this would represent a potential cash outflow impacting future net debt .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "exposure up to $8.0M, not accrued; a settlement would be a cash outflow",
+   "cause": "inference"
+  },
+  "am:fin_04:ffff8464c1": {
+   "claim": "Component Discrepancy: There is a conflict between the audited financial statements and the credit agreement summary regarding the components of net debt for FY2023.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "credit_agreement_summary.txt",
+   "evidence": "financials debt 110.0/cash 89.4 vs credit 91.4/70.8",
+   "cause": "conflict_in_documents"
+  },
+  "am:fin_05:569fd963d9": {
+   "claim": "Interest Rate: Term SOFR plus an applicable margin based on a net leverage grid.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "credit_agreement_summary.txt",
+   "evidence": "S2 Term SOFR plus applicable margin; margin grid by net leverage",
+   "cause": "paraphrase"
+  },
+  "am:fin_06:2f16686e85": {
+   "claim": "Because the litigation is unresolved, these costs may continue into FY2024, potentially overstating the \"non-recurring\" nature of the adjustment .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "Note 2 unresolved, future fees, non-recurring only if concluded",
+   "cause": "paraphrase"
+  },
+  "am:legal_02:387392694f": {
+   "claim": "The termination fee provisions in the Merger Agreement specify two distinct scenarios where the Company (Aurora Technologies Inc.) must pay a fee to the Buyer (Vertex Capital Partners LLC).",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S7.2 Termination Fee (7.1(d)) and reverse fee (7.1(c)), both paid by Company to Buyer",
+   "cause": "multi_fact"
+  },
+  "am:legal_02:7b87f34d91": {
+   "claim": "Trigger: Termination by the Company to enter into an agreement for a Superior Proposal after complying with the \"No-Shop\" provisions in Section 5.3 .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S7.1(d) by the Company to accept a Superior Proposal; S5.3 allows Superior Proposal talks",
+   "cause": "inference",
+   "ambiguous": true,
+   "note": "'after complying with the No-Shop' is not stated in 7.1(d)"
+  },
+  "am:legal_03:461319763f": {
+   "claim": "Aggregate Merger Consideration: Value $696,000,000; % of Merger Consideration 100%; Citation [Section 1.2]",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S1.2 approximately $696 million",
+   "cause": "table_without_headers"
+  },
+  "am:legal_03:ada08e9b32": {
+   "claim": "The indemnification provisions for the Aurora-Vertex merger include a general cap, a higher cap for fundamental representations, and a deductible that functions on a \"first dollar\" basis once reached.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S8.2 General Cap / Fundamental cap; S8.3 deductible then liable from the first dollar",
+   "cause": "multi_fact"
+  },
+  "am:legal_04:502a5f7458": {
+   "claim": "Aurora Technologies Inc. is currently a defendant in two active lawsuits and is involved in two additional legal disputes or administrative proceedings.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "DataFlow + Hartley (defendant), EMEA dispute + EU opposition",
+   "cause": "multi_fact"
+  },
+  "am:legal_04:8d3e8afbbf": {
+   "claim": "As of March 15, 2024, no legal proceedings have been commenced.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S3 item 2 EMEA dispute: 'No proceedings have been commenced'; schedule as of March 15, 2024",
+   "cause": "context_dependent"
+  },
+  "am:legal_04:ca5ece4a9e": {
+   "claim": "Venue: Santa Clara County Superior Court, filed November 2023 .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "Hartley: Santa Clara County Superior Court, November 2023",
+   "cause": "context_dependent"
+  },
+  "am:legal_05:5e36d133f3": {
+   "claim": "Key Person Risk: Dr. James Wu (CTO) has not executed a post-closing employment agreement.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "employment_and_retention_agreements.txt",
+   "evidence": "S4 Wu has NOT executed a post-closing employment agreement",
+   "cause": "paraphrase"
+  },
+  "am:legal_05:6913cd8cc4": {
+   "claim": "As of March 15, 2024, this consent is not yet obtained .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "customer_contracts_schedule.txt",
+   "evidence": "S2 Northstar 'NOT YET OBTAINED'; schedule as of March 15, 2024",
+   "cause": "context_dependent"
+  },
+  "am:legal_05:76c26c43f4": {
+   "claim": "Aurora Technologies Inc. has several material contracts containing change of control (CoC) provisions, ranging from mandatory consent and termination rights to notice requirements and executive compensation triggers.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S9.2, customer schedule S2, employment S2/S5",
+   "cause": "multi_fact"
+  },
+  "am:legal_05:b7749cb014": {
+   "claim": "Contains no change of control provision .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S9.2(c) AWS 'no change of control provision'",
+   "cause": "context_dependent"
+  },
+  "am:legal_06:3eb2f38d77": {
+   "claim": "Risk Allocation: The regulatory_and_data_privacy_memo.txt states that there is no condition relating to obtaining customer consents in the merger agreement, and the Buyer therefore bears the risk of those consents not being obtained.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "regulatory_and_data_privacy_memo.txt",
+   "evidence": "S4 'There is no condition relating to obtaining customer consents ... Buyer therefore bears the risk'",
+   "cause": "paraphrase"
+  },
+  "am:legal_06:567407166a": {
+   "claim": "The board_deck_strategic_review_mar2024.txt also identifies \"Customer consent requirements for Northstar and Pacific Data contracts\" as a key risk factor .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "Slide 6 Key Risk Factors, verbatim",
+   "cause": "paraphrase"
+  },
+  "am:legal_06:fe94c839b1": {
+   "claim": "The customer_contracts_schedule.txt explicitly lists \"Northstar Financial Group\" and \"Pacific Data Systems\" under the \"CONSENT REQUIRED\" section for change of control provisions, detailing their respective FY2023 revenues and consent status .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "customer_contracts_schedule.txt",
+   "evidence": "S2 CONSENT REQUIRED: Northstar $54.3M, Pacific $38.5M, NOT YET OBTAINED",
+   "cause": "multi_fact"
+  },
+  "am:legal_07:18455948b0": {
+   "claim": "The primary open source licensing risk identified is the use of an AGPL-licensed graph rendering library within the company's customer-facing analytics module.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S4 item 2 AGPL graph rendering library in customer-facing analytics module, MATERIAL FINDING",
+   "cause": "paraphrase"
+  },
+  "am:legal_07:46960d8c05": {
+   "claim": "Because it is not distributed to customers, counsel determined no copyleft obligation is triggered .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S4 item 1 GPL driver 'Not distributed to customers. No copyleft obligation is triggered.'",
+   "cause": "context_dependent"
+  },
+  "am:legal_07:48b358b524": {
+   "claim": "Representation Discrepancy: While the IP disclosure schedule references a qualification to \"Section 3.9(f)\" of the merger agreement , the provided Merger Agreement text lists Intellectual Property representations under Section 3.12 .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "IP schedule cites S3.9(f); merger agreement IP rep is S3.12",
+   "cause": "conflict_in_documents"
+  },
+  "am:legal_07:6e315885af": {
+   "claim": "Remediation Status: The documents state the company \"is replacing\" the component, but as of the March 15, 2024, agreement date, the work is not yet complete .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S4 'is replacing the component ... targeted for completion in Q3 2024'",
+   "cause": "inference"
+  },
+  "am:mh_01:0ed18701d4": {
+   "claim": "The restructuring charge is a primary normalization adjustment used to bridge Reported EBITDA to Adjusted EBITDA.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S2 restructuring $4.5M is the largest add-back in the bridge",
+   "cause": "inference"
+  },
+  "am:mh_02:b7413567ed": {
+   "claim": "Inconsistencies: There are no internal inconsistencies noted between the Merger Agreement and the Disclosure Schedules regarding these limits.",
+   "stratum": "flag",
+   "label": "supported",
+   "evidence": "the schedules say nothing about survival or caps, so nothing conflicts",
+   "cause": "decline",
+   "ambiguous": true,
+   "note": "absence claim about inconsistencies"
+  },
+  "am:mh_02:c3df9e5713": {
+   "claim": "Classification: Section 3.5 (Financial Statements) is explicitly designated as a \"Fundamental Representation\" .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S8.1 includes 3.5 among Fundamental Representations",
+   "cause": "paraphrase"
+  },
+  "am:mh_03:fe95ba8cd5": {
+   "claim": "The estimated financial exposure from the DataFlow Systems litigation is higher than the merger agreement's indemnification deductible.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "$3.5M-$8.0M vs deductible $3.48M",
+   "cause": "inference"
+  },
+  "am:mh_04:e8c868fdcc": {
+   "claim": "To determine the implied EV/EBITDA multiple for the Vertex Capital Partners deal, we must identify the agreed Enterprise Value (EV) and the FY2023 EBITDA.",
+   "stratum": "flag",
+   "label": "not_checkable",
+   "evidence": "states a method, not a fact",
+   "cause": "fragment"
+  },
+  "am:mh_05:1d4e8746ff": {
+   "claim": "This figure is derived from the Quality of Earnings report, which provides a detailed bridge of normalization adjustments .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S2 Adjusted EBITDA $99.0M from the normalization bridge",
+   "cause": "context_dependent"
+  },
+  "am:mh_05:5f0d7d335b": {
+   "claim": "For M&A due diligence, the more comprehensive adjustments from the Quality of Earnings report are typically used.",
+   "stratum": "flag",
+   "label": "not_checkable",
+   "evidence": "generic practice statement, not attributed to the documents",
+   "cause": "inference"
+  },
+  "am:mh_06:4621ba38f7": {
+   "claim": "The total cash required at closing for executive severance, the retention pool, and repaying the revolver is $105,495,000.",
+   "stratum": "flag",
+   "label": "not_supported",
+   "doc": "employment_and_retention_agreements.txt",
+   "evidence": "sum = 11,545,000 (option acceleration) + 2,400,000 (280G tax) + 6,500,000 + 85,000,000 + 50,000; executive cash severance is $9,065,750 and is not in it",
+   "ambiguous": true,
+   "note": "arithmetic reproduces from the answer's own components; 'executive severance' mislabelled"
+  },
+  "am:mh_07:2c87577c60": {
+   "claim": "The add-back is only considered \"non-recurring\" if the litigation concludes; otherwise, Adjusted EBITDA for FY2023 is effectively overstated relative to the company's actual forward-looking cash requirements .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "Note 2 non-recurring only if concluded; Obs 2 overstated if litigation continues",
+   "cause": "paraphrase"
+  },
+  "am:mh_07:cd7ff8bb1d": {
+   "claim": "Buyer Risk: If the litigation continues through the trial estimate of Q3 2025, these \"non-recurring\" fees will persist for at least two more fiscal years .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "trial no earlier than Q3 2025 -> fees in FY2024 and FY2025",
+   "cause": "inference"
+  },
+  "am:mh_08:20a682072a": {
+   "claim": "Litigation Accrual Inconsistency: There is a conflict regarding the financial treatment of the DataFlow litigation.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "board deck $5.0M reserve in accrued liabilities vs IP schedule no accrual",
+   "cause": "conflict_in_documents"
+  },
+  "am:mh_08:66ef0ada10": {
+   "claim": "The IP and Litigation Schedule states the Company has not recorded a loss accrual under ASC 450 .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S2 has NOT recorded a loss accrual (ASC 450)",
+   "cause": "paraphrase"
+  },
+  "am:mh_08:90237de2d7": {
+   "claim": "Because the litigation is unresolved, comparable fees are expected in FY2024, which may impact Adjusted EBITDA if Dr. Wu is not present to assist in an efficient defense .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S2 comparable fees likely in FY2024; Wu's role in the defence is the answer's speculation",
+   "cause": "inference",
+   "ambiguous": true,
+   "note": "second half is speculation"
+  },
+  "am:mh_08:b0dfb4371e": {
+   "claim": "The key person risk regarding Dr. James Wu is directly linked to the DataFlow patent litigation because Dr. Wu is the primary inventor of the technology under dispute and his continued employment is not contractually secured post-closing.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "employment_and_retention_agreements.txt",
+   "evidence": "S4 Wu first inventor of the four patents under the litigated engine; no post-closing agreement",
+   "cause": "multi_fact"
+  },
+  "am:mh_08:e58ddb1124": {
+   "claim": "This may reduce his incentive to remain through the duration of the litigation.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "employment_and_retention_agreements.txt",
+   "evidence": "full acceleration ($3,595,000) at the effective time; incentive effect is a reasonable inference",
+   "cause": "inference"
+  },
+  "am:mh_09:7c6aa80879": {
+   "claim": "Trigger Mechanism: While all five named executive officers have \"double trigger\" agreements (requiring both a change of control and a qualifying termination), CEO Elena Marsh has already indicated her intention to depart at closing, which will trigger her severance.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "employment_and_retention_agreements.txt",
+   "evidence": "S2 all five double trigger; S4 Marsh intends to depart, severance expected to be triggered",
+   "cause": "multi_fact"
+  },
+  "am:sum_01:d9f51cf1dd": {
+   "claim": "Based on the board materials from March 10, 2024, the Board of Directors of Aurora Technologies Inc. has authorized management to proceed with Vertex Capital Partners as the preferred bidder for a potential transaction.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "Board resolution March 10 2024: exclusivity to Vertex, negotiate",
+   "cause": "paraphrase"
+  },
+  "pm:comp_04:3687b83ae1": {
+   "claim": "Aurora's reported and adjusted EBITDA margins for FY2022 and FY2023 differ depending on whether the figures are drawn from the company's internal management metrics or the third-party Quality of Earnings (QoE) report prepared by Grant Thornton LLP.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "financials EBITDA margin 20.5/19.1, adj 21.5; QoE 20.5/19.2, adj 21.9/19.1; QoE by Grant Thornton",
+   "cause": "multi_fact"
+  },
+  "pm:ctrl_02:012329a963": {
+   "claim": "Any revenue projections or preliminary results for Q1 or Q2 FY2024.",
+   "stratum": "flag",
+   "label": "supported",
+   "evidence": "under 'lacks:'; none in the room",
+   "cause": "decline"
+  },
+  "pm:ctrl_02:0be4dc3b6b": {
+   "claim": "Scope of Financials: The consolidated financial statements and the Quality of Earnings report only cover the fiscal years ended December 31, 2022, and December 31, 2023 .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "financials header FY2023/FY2022; QoE S1 period FY2022-FY2023",
+   "cause": "paraphrase"
+  },
+  "pm:ctrl_02:7423ebdc59": {
+   "claim": "Interim management reports or trading updates for the first half of 2024.",
+   "stratum": "flag",
+   "label": "supported",
+   "evidence": "under 'lacks:'; none in the room",
+   "cause": "decline"
+  },
+  "pm:ctrl_02:94d903eec7": {
+   "claim": "Quarterly financial statements for FY2024.",
+   "stratum": "flag",
+   "label": "supported",
+   "evidence": "under 'the provided context ... lacks:'; no FY2024 quarterly statements in the room",
+   "cause": "decline"
+  },
+  "pm:ctrl_02:f586c3b9d9": {
+   "claim": "Based on the provided documents, there is no information available regarding Aurora's quarterly revenue figures for Q1 or Q2 of FY2024.",
+   "stratum": "flag",
+   "label": "supported",
+   "evidence": "no 2024 quarterly figures anywhere (merger S3.5 mentions Q1 2024 statements were delivered, but no figures are in the room)",
+   "cause": "decline"
+  },
+  "pm:ctrl_04:53afe96060": {
+   "claim": "[Sources: 📄 aurora_financials_fy2023.txt; 📄 board_deck_strategic_review_mar2024.txt]",
+   "stratum": "flag",
+   "label": "not_checkable",
+   "evidence": "sources line",
+   "cause": "fragment"
+  },
+  "pm:ctrl_04:5bb6a86645": {
+   "claim": "Competitor Churn Data: There are no mentions of churn rates, retention rates, or any specific customer health metrics for Palantir, Snowflake, Databricks, or DataRobot.",
+   "stratum": "flag",
+   "label": "supported",
+   "evidence": "no competitor churn/retention metrics anywhere",
+   "cause": "decline"
+  },
+  "pm:ctrl_05:13f4f8323b": {
+   "claim": "FY2024 Data: There is no data provided for the intervening fiscal year (FY2024) which would be necessary to extrapolate or verify a multi-year projection.",
+   "stratum": "flag",
+   "label": "supported",
+   "evidence": "no FY2024 financial data in the room",
+   "cause": "decline"
+  },
+  "pm:ctrl_05:141ca70e1f": {
+   "claim": "Based on the provided documents, there is no information available regarding Aurora's projected revenue for FY2025 or management's operating plan for that period.",
+   "stratum": "flag",
+   "label": "supported",
+   "evidence": "no FY2025 projection or operating plan",
+   "cause": "decline"
+  },
+  "pm:fin_01:bdfa46609a": {
+   "claim": "The Quality of Earnings report notes this decline is consistent with the planned migration to subscription pricing and cautions buyers not to model perpetual license revenue as sustainable .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S4: perpetual decline 'consistent with the Company's stated migration to subscription pricing. Buyer should not model perpetual license revenue as sustainable.'",
+   "cause": "paraphrase"
+  },
+  "pm:fin_03:673e86d349": {
+   "claim": "While peer practice is predominantly to expense software development costs, the QoE report applies this downward adjustment to EBITDA rather than providing an adjusted FCF presentation.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "Note 5: peer practice predominantly to expense; EBITDA reduced by the capitalised amount; the QoE has no FCF presentation",
+   "cause": "multi_fact"
+  },
+  "pm:fin_08:d67cefda60": {
+   "claim": "The Quality of Earnings report notes that prospective buyers should not model perpetual license revenue as sustainable .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S4 'Buyer should not model perpetual license revenue as sustainable'",
+   "cause": "paraphrase"
+  },
+  "pm:legal_02:b481804bb6": {
+   "claim": "Absence of Buyer Termination Fee: The provided agreement contains no provision requiring the Buyer to pay a reverse termination fee to the Company (e.g., for Buyer financing failure or regulatory non-approval) .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S7.2: both fees are payable by the Company to Buyer; no Buyer-payable fee exists",
+   "cause": "decline"
+  },
+  "pm:legal_03:11795aec9a": {
+   "claim": "Fundamental Sections Covered: Sections 3.1 (Organization), 3.2 (Capitalization), 3.5 (Financial Statements), and 3.12 (Intellectual Property) .",
+   "stratum": "flag",
+   "label": "not_supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S8.1 lists 3.1, 3.2, 3.5, 3.12; the titles 'Organization' and 'Capitalization' for 3.1/3.2 are stated nowhere",
+   "ambiguous": true,
+   "note": "section numbers right, two section titles invented"
+  },
+  "pm:legal_03:feb5f80cf3": {
+   "claim": "Deductible / Basket Threshold",
+   "stratum": "flag",
+   "label": "not_checkable",
+   "evidence": "heading fragment",
+   "cause": "fragment"
+  },
+  "pm:legal_04:16f8d1d17e": {
+   "claim": "As of March 15, 2024, Aurora Technologies Inc. faces two formal pending court litigations, one unfiled commercial dispute, and one administrative trademark opposition.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S2 DataFlow + S3 Hartley (court), EMEA dispute 'No proceedings have been commenced', S5 EU opposition",
+   "cause": "multi_fact"
+  },
+  "pm:legal_04:603c415aaf": {
+   "claim": "Core registered software/service classes (Class 9 and Class 42) are unaffected, and counsel assesses the overall risk as low .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S5: opposition 'does not affect the Company's core classes and counsel assesses the risk as low'; AURORA registered in Class 9 and 42",
+   "cause": "multi_fact"
+  },
+  "pm:legal_04:6b13dd9146": {
+   "claim": "Procedural Posture: Mediation scheduled for May 2024 .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S3 Hartley: 'Mediation scheduled for May 2024'",
+   "cause": "context_dependent"
+  },
+  "pm:legal_05:418c079b72": {
+   "claim": "Customer Contracts (Schedule 3.14(a)): Two major customer contracts require consent (neither obtained yet), one requires consent only if the acquirer is a competitor (not applicable to Vertex Capital Partners), and three require prior written notice only.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "customer_contracts_schedule.txt",
+   "evidence": "S2: Northstar, Pacific consent NOT YET OBTAINED; Ironbridge only if competitor, NOT APPLICABLE; Meridian, Cascade, Summit notice only",
+   "cause": "multi_fact"
+  },
+  "pm:legal_05:5d95a3015f": {
+   "claim": "The company’s material contracts contain several change of control (CoC) provisions requiring written consent, advance notice, or granting termination rights upon closing of the transaction.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "customer_contracts_schedule.txt",
+   "evidence": "S2 consent / notice / termination rights; merger S9.2",
+   "cause": "paraphrase"
+  },
+  "pm:legal_05:64fff00777": {
+   "claim": "Provision: Contains no Change of Control provision .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S9.2(c) AWS 'no change of control provision' (also four customers in schedule S2)",
+   "cause": "context_dependent"
+  },
+  "pm:legal_07:4f720890e8": {
+   "claim": "Note that while Section 3.12 of the Merger Agreement represents that the company owns or has valid licenses to all necessary Intellectual Property, this is subject to the exceptions listed in the disclosure schedules .",
+   "stratum": "flag",
+   "label": "not_supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S3.12 as given carries no 'except as set forth' qualifier; the IP schedule qualifies reps 3.9(c)/(f), not 3.12",
+   "ambiguous": true,
+   "note": "plausible but not stated"
+  },
+  "pm:legal_08:2917a4c038": {
+   "claim": "Lien Releases: As a condition to the Buyer’s obligation to close, the merger agreement requires the delivery of a customary payoff letter and the release of all liens (which currently include a first priority lien on substantially all assets and intellectual property) .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "credit_agreement_summary.txt",
+   "evidence": "S4 payoff letter and lien releases as condition to Buyer's obligation; S2 first priority lien incl. IP pledge",
+   "cause": "multi_fact"
+  },
+  "pm:legal_08:576ffcecf6": {
+   "claim": "Upon the closing of the merger, the revolving credit facility will be terminated and the outstanding balance must be repaid in full.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "credit_agreement_summary.txt",
+   "evidence": "S4: commitments terminate; full $85M drawn balance must be repaid at closing",
+   "cause": "paraphrase"
+  },
+  "pm:legal_08:b02f24db03": {
+   "claim": "However, such requirements are standard in the \"customary adjustments\" or closing deliverables typically found in sections not fully provided in the excerpts.",
+   "stratum": "flag",
+   "label": "not_checkable",
+   "evidence": "speculation about what unseen sections typically contain",
+   "cause": "inference",
+   "ambiguous": true,
+   "note": "'customary adjustments' in S1.2 refers to consideration adjustments, so the reading is also doubtful"
+  },
+  "pm:legal_08:e1b75f7987": {
+   "claim": "The merger constitutes a \"Change of Control\" under the existing Credit Agreement, triggering an automatic Event of Default that accelerates all payment obligations.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "credit_agreement_summary.txt",
+   "evidence": "S4: merger is a change of control; Event of Default; principal and interest immediately due",
+   "cause": "multi_fact"
+  },
+  "pm:legal_08:eaba090c48": {
+   "claim": "While the Credit Agreement summary states the merger agreement requires a payoff letter as a condition to close , the provided excerpts of the Merger Agreement (Article VI) do not explicitly list the payoff letter in the \"Conditions to Closing\" section, which focuses on regulatory approvals .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "regulatory_and_data_privacy_memo.txt",
+   "evidence": "memo S4 lists Article VI conditions (HSR, no injunction, no law); no excerpt lists the payoff letter as a condition",
+   "cause": "decline"
+  },
+  "pm:legal_08:fcfdf9c6da": {
+   "claim": "Lack of Waiver: As of the current reporting, the Company has not sought a consent or waiver from the lending syndicate (led by JPMorgan Chase Bank, N.A.) regarding the Change of Control .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "credit_agreement_summary.txt",
+   "evidence": "S4 'NOT sought a consent or waiver from the lending syndicate'; JPMorgan lead arranger",
+   "cause": "multi_fact"
+  },
+  "pm:mh_01:8c022d7785": {
+   "claim": "This is because the QoE report includes five additional normalization adjustments beyond the restructuring charge .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S2: six normalization adjustments, restructuring is one",
+   "cause": "inference"
+  },
+  "pm:mh_02:2cf1f9abf8": {
+   "claim": "If this accounting treatment is later deemed a violation of GAAP, it could trigger a breach of the Section 3.5 representation.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S3.5(i) statements prepared in accordance with GAAP",
+   "cause": "inference"
+  },
+  "pm:mh_02:35fd1ed4b3": {
+   "claim": "Classification: Section 8.1 explicitly lists Section 3.5 (Financial Statements) alongside Sections 3.1, 3.2, and 3.12 as \"Fundamental Representations\" .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S8.1",
+   "cause": "multi_fact"
+  },
+  "pm:mh_02:8b6c5a3021": {
+   "claim": "Financial statement representations are classified as Fundamental Representations under the Merger Agreement.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S8.1 Fundamental Representations (Sections 3.1, 3.2, 3.5, 3.12); 3.5 = Financial Statements",
+   "cause": "multi_fact"
+  },
+  "pm:mh_03:4795c3f923": {
+   "claim": "The litigation schedule states the Company has not recorded a loss accrual because no loss is \"both probable and reasonably estimable within the meaning of ASC 450\" .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S2: 'has NOT recorded a loss accrual, on the basis that no loss is both probable and reasonably estimable within the meaning of ASC 450'",
+   "cause": "paraphrase"
+  },
+  "pm:mh_03:733a2d8102": {
+   "claim": "The DataFlow Systems litigation exposure is estimated at a range that begins above the merger agreement's indemnification deductible.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "exposure $3.5M-$8.0M (S3.15(c)) vs Deductible $3.48M (S8.3)",
+   "cause": "inference"
+  },
+  "pm:mh_04:08696c05c9": {
+   "claim": "If that $2.8 million add-back is excluded, Adjusted EBITDA would be $96.2 million, implying an EV/EBITDA multiple of 7.45x [📊 COMPUTED: $716.6M / $96.2M].",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "99.0-2.8=96.2; 716.6/96.2=7.45",
+   "cause": "arithmetic"
+  },
+  "pm:mh_04:2a09e50979": {
+   "claim": "(Derived/Computed metric) [📊 COMPUTED: $716.6M / $92.8M]",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "computation marker $716.6M / $92.8M; both operands right",
+   "cause": "arithmetic"
+  },
+  "pm:mh_04:45033c07c5": {
+   "claim": "7.24x based on FY2023 Quality of Earnings (QoE) Adjusted EBITDA ($99.0 million).",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "716.6/99.0=7.24",
+   "cause": "arithmetic"
+  },
+  "pm:mh_04:492eb08a69": {
+   "claim": "(Derived/Computed metric) [📊 COMPUTED: $716.6M / $99.0M]",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "computation marker $716.6M / $99.0M",
+   "cause": "arithmetic"
+  },
+  "pm:mh_04:68b397426f": {
+   "claim": "$$\\frac{\\$716.6\\text{ million}}{\\$92.8\\text{ million}} = \\mathbf{7.72x} \\quad (7.72198\\text{x})$$",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "716.6/92.8=7.72198",
+   "cause": "arithmetic"
+  },
+  "pm:mh_04:b3249da752": {
+   "claim": "7.72x based on FY2023 Reported EBITDA ($92.8 million).",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "EV 696+20.6=716.6; 716.6/92.8=7.72",
+   "cause": "arithmetic"
+  },
+  "pm:mh_04:d3144c3dcf": {
+   "claim": "$$\\frac{\\$716.6\\text{ million}}{\\$97.3\\text{ million}} = \\mathbf{7.36x} \\quad (7.36485\\text{x})$$",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "716.6/97.3=7.36485",
+   "cause": "arithmetic"
+  },
+  "pm:mh_04:eafed8042a": {
+   "claim": "$$\\frac{\\$716.6\\text{ million}}{\\$99.0\\text{ million}} = \\mathbf{7.24x} \\quad (7.23838\\text{x})$$",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "716.6/99.0=7.23838",
+   "cause": "arithmetic"
+  },
+  "pm:mh_04:f1070a1529": {
+   "claim": "(Derived/Computed metric) [📊 COMPUTED: $716.6M / $97.3M]",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "computation marker $716.6M / $97.3M",
+   "cause": "arithmetic"
+  },
+  "pm:mh_04:f408b74ebb": {
+   "claim": "7.36x based on FY2023 Company Adjusted EBITDA ($97.3 million).",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "716.6/97.3=7.36",
+   "cause": "arithmetic"
+  },
+  "pm:mh_06:60763518b1": {
+   "claim": "The merger with Vertex Capital Partners constitutes a change of control, triggering an Event of Default that requires the full repayment of the revolving credit facility at closing .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "credit_agreement_summary.txt",
+   "evidence": "S4 change of control, Event of Default, full $85M repaid at closing",
+   "cause": "multi_fact"
+  },
+  "pm:mh_06:8ea970bcd1": {
+   "claim": "Revolver Balance Inconsistency: There is a discrepancy regarding the outstanding revolver balance.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "credit_agreement_summary.txt",
+   "evidence": "$110M drawn (financials Note 7) vs $85M (credit S2)",
+   "cause": "conflict_in_documents"
+  },
+  "pm:mh_07:352e996234": {
+   "claim": "Disclosure vs. Accrual: The litigation schedule states the Company has NOT recorded a loss accrual because the loss is not \"probable and reasonably estimable\" under ASC 450 .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S2 NOT recorded a loss accrual, ASC 450",
+   "cause": "paraphrase"
+  },
+  "pm:mh_07:753da58d4a": {
+   "claim": "The matter (DataFlow Systems Inc. v. Aurora Technologies Inc., Case No. 2023-CV-04821) was filed on September 14, 2023, in the U.S. District Court, Northern District of California .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S2 Caption / Case Number / Court / Filed: September 14, 2023",
+   "cause": "multi_fact"
+  },
+  "pm:mh_09:605361dc75": {
+   "claim": "The Company expects that Elena Marsh, Dr. James Wu, and Robert Chen will exceed the Section 280G safe harbor limits for \"golden parachute\" payments .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "employment_and_retention_agreements.txt",
+   "evidence": "S2 'Marsh, Wu and Chen are expected to exceed the Section 280G safe harbour'",
+   "cause": "paraphrase"
+  },
+  "pm:mh_09:8bb42de682": {
+   "claim": "Trigger Mechanism: While the executive employment agreements are \"double trigger\" (requiring both a change of control and a qualifying termination), CEO Elena Marsh has already indicated her intention to depart at closing, which will trigger her severance and the associated tax exposure .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "employment_and_retention_agreements.txt",
+   "evidence": "S2 double trigger; S4 Marsh to depart, severance expected to be triggered; Marsh in the 280G group",
+   "cause": "multi_fact"
+  },
+  "pm:mh_10:e42f4f826d": {
+   "claim": "Notice-Only Contracts: Three other major customers (Meridian Health Networks, Cascade Logistics Corp, and Summit Insurance Holdings) require notice of the change of control but do not have associated termination rights .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "customer_contracts_schedule.txt",
+   "evidence": "S2 NOTICE ONLY (no termination right): Meridian, Cascade, Summit",
+   "cause": "paraphrase"
+  },
+  "pm:mh_10:f7f308c0a8": {
+   "claim": "Naming and Value Inconsistency: There is a discrepancy between the Merger Agreement and the Disclosure Schedules regarding these entities.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S9.2 Northstar Defense Systems / Pacific Data Corp vs schedule Northstar Financial Group / Pacific Data Systems",
+   "cause": "conflict_in_documents"
+  },
+  "pm:sum_01:45a04380ff": {
+   "claim": "This action follows the joint recommendation of Aurora's management team and financial advisor, Goldman Sachs, to proceed with Vertex Capital Partners as the preferred bidder while maintaining Meridian Software Corp as a backup bidder and declining Atlas Data Holdings .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "Slide 5 management and Goldman Sachs recommend: proceed Vertex, maintain Meridian as backup, decline Atlas",
+   "cause": "multi_fact"
+  },
+  "pm:sum_01:72d0d91bb4": {
+   "claim": "Atlas Data Holdings (Private Equity Consortium — DECLINE)",
+   "stratum": "flag",
+   "label": "not_checkable",
+   "evidence": "bullet lead-in 'Name (descriptor)'",
+   "cause": "fragment"
+  },
+  "pm:sum_01:bf56ca5d7c": {
+   "claim": "At the Special Meeting of the Board of Directors on March 10, 2024, the Board of Directors of Aurora Technologies Inc. unanimously voted (7-0) to pass resolutions authorizing management to pursue a strategic transaction with Vertex Capital Partners .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "Board resolution, special meeting March 10, 2024, vote 7-0: exclusivity to Vertex, data room, Skadden, negotiate above $55 floor",
+   "cause": "multi_fact"
+  },
+  "pm:sum_01:e62a7f9ac8": {
+   "claim": "Rationale: Represents the highest offer range, provides all-cash consideration (eliminating stock price risk for shareholders), has high certainty of closing supported by committed debt financing from JPMorgan and Goldman Sachs, and offers the shortest timeline to signing .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "Slide 5 rationale list; Slide 3 committed financing from JPMorgan and Goldman Sachs",
+   "cause": "multi_fact"
+  },
+  "pm:sum_01:e9f9d78915": {
+   "claim": "Regulatory Approval: Standard HSR antitrust filing expected without a second request.",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "Slide 6: 'HSR antitrust review (expected standard clearance, no second request)'",
+   "cause": "paraphrase"
+  },
+  "pm:sum_02:0496641917": {
+   "claim": "DataFlow Systems Patent Infringement Lawsuit: Aurora is a defendant in DataFlow Systems Inc. v. Aurora Technologies Inc. (Case No. 2023-CV-04821, U.S. District Court, Northern District of California), alleging patent infringement against Aurora's real-time data reconciliation engine .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S3.15(c) defendant, case no, N.D. Cal., patent infringement; IP schedule S2 accused real-time data reconciliation engine",
+   "cause": "multi_fact"
+  },
+  "pm:sum_02:30303cbbf8": {
+   "claim": "IP Assignment Gaps: Missing executed proprietary information and invention assignment agreements for 3 former contractors engaged between 2019 and 2020 (work related to internal tooling; residual risk assessed as low but qualified in representations) .",
+   "stratum": "flag",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S6: 3 former contractors 2019-2020, internal tooling, residual risk low, rep 3.9(c) qualified",
+   "cause": "multi_fact"
+  },
+  "am:fin_04:af510d72d3": {
+   "claim": "The financial statements report $110.0 million in debt and $89.4 million in cash .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "Net Debt: total debt $110.0, cash $89.4",
+   "cause": "multi_fact"
+  },
+  "pm:sum_02:dc3ed04a05": {
+   "claim": "$20.88 million Termination Fee (3.0% of the aggregate $696M Merger Consideration) payable by Aurora if terminated to accept a Superior Proposal .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S7.2 $20.88M, 3.0% of aggregate consideration, 7.1(d) Superior Proposal",
+   "cause": "multi_fact"
+  },
+  "am:mh_02:5d3e656608": {
+   "claim": "Indemnification Cap: The aggregate liability for Fundamental Representations is capped at $174.0 million, which represents 25% of the approximately $696 million aggregate Merger Consideration .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S8.2 Fundamental cap $174.0M (25%); S1.2 ~$696M",
+   "cause": "multi_fact"
+  },
+  "pm:ctrl_04:7f69c97185": {
+   "claim": "Based on the provided documents, a direct comparison of customer churn rates is not possible because the data room does not contain churn metrics for Aurora's competitors.",
+   "stratum": "judge",
+   "label": "supported",
+   "evidence": "no competitor churn metrics in the room",
+   "cause": "absence_by_design"
+  },
+  "pm:mh_06:d92a4ceca1": {
+   "claim": "One financial note states the drawn balance was $110.0 million as of December 31, 2023 .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "Note 7: $110M drawn as of December 31, 2023",
+   "cause": "conflict_in_documents"
+  },
+  "pm:fin_02:4d2f3916ef": {
+   "claim": "Management Adjusted EBITDA Margin: 21.5% ($97.3M / $452.8M)",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "Adjusted EBITDA Margin 21.5%; 97.3/452.8",
+   "cause": "arithmetic"
+  },
+  "pm:comp_04:8049c13f7a": {
+   "claim": "Internal Financials: Only adjust for restructuring charges ($0.0M in FY2022; $4.5M in FY2023), resulting in FY2023 Adjusted EBITDA of $97.3M (21.5% margin) .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "Adjusted EBITDA (excluding restructuring) $4.5/$0.0 add-back, $97.3, 21.5%",
+   "cause": "multi_fact"
+  },
+  "am:legal_02:012e68bd3e": {
+   "claim": "Amount: $13.92 million",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S7.2 reverse termination fee $13.92 million",
+   "cause": "context_dependent"
+  },
+  "pm:ctrl_04:78e2b600ce": {
+   "claim": "Aurora Customer Churn: While Aurora's total customer count grew from 2,412 in FY2022 to 2,847 in FY2023 , the documents do not disclose the number of lost customers (gross churn) or the percentage of the customer base that churned during the period.",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "Total Customers 2,847 (up from 2,412); no churn count anywhere",
+   "cause": "decline"
+  },
+  "am:mh_08:498f08c132": {
+   "claim": "Dr. Wu’s expertise as the inventor is likely critical for the \"vigorous\" defense the Company intends to mount .",
+   "stratum": "judge",
+   "label": "not_checkable",
+   "evidence": "speculation; only 'intends to vigorously defend' is stated",
+   "cause": "inference",
+   "ambiguous": true
+  },
+  "pm:fin_02:c14e70de35": {
+   "claim": "Reported EBITDA Margin: 20.5% ($92.8M / $452.8M)",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "EBITDA Margin 20.5%; 92.8/452.8",
+   "cause": "arithmetic"
+  },
+  "am:legal_02:ffb2ca09c5": {
+   "claim": "Amount: $20.88 million",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S7.2 $20.88 million",
+   "cause": "context_dependent"
+  },
+  "am:ctrl_04:89b75c9b95": {
+   "claim": "The provided context is insufficient to answer the comparative portion of the question.",
+   "stratum": "judge",
+   "label": "supported",
+   "evidence": "no competitor data, so the comparison cannot be made",
+   "cause": "absence_by_design"
+  },
+  "am:mh_07:521714fdf8": {
+   "claim": "The matter (DataFlow Systems Inc. v. Aurora Technologies Inc., Case No. 2023-CV-04821) involves allegations that Aurora’s real-time data reconciliation engine infringes U.S. Patent Nos. 9,847,221 and 10,112,905 .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S2 engine infringes U.S. Patent Nos. 9,847,221 and 10,112,905",
+   "cause": "multi_fact"
+  },
+  "pm:legal_04:eaa1f311ae": {
+   "claim": "EMEA Reseller Dispute: Claim Amount / Demand EUR 310,000; Accrued Loss EUR 180,000; Counsel Exposure Estimate EUR 180,000 (accrued); FY2023 Expense Unspecified",
+   "stratum": "judge",
+   "label": "not_supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "EUR 310,000 disputed and EUR 180,000 accrued are right; no counsel exposure estimate is given for this dispute",
+   "ambiguous": true,
+   "note": "table cell invents a 'counsel exposure estimate'"
+  },
+  "am:comp_03:fe7a468448": {
+   "claim": "The gross margin increased by 90 basis points, while the operating margin improved by 170 basis points.",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "59.1->60.0 = 90 bps; 13.3->15.0 = 170 bps",
+   "cause": "arithmetic"
+  },
+  "pm:legal_03:999c0d84cd": {
+   "claim": "Survival Period: General representations and warranties survive Closing for 18 months, while Fundamental Representations survive for 36 months .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S8.1 eighteen (18) / thirty-six (36) months",
+   "cause": "multi_fact"
+  },
+  "am:fin_04:3505824338": {
+   "claim": "If the leverage ratio were calculated using Adjusted EBITDA, the ratio would be lower at approximately 0.21x .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "20.6/97.3 = 0.21",
+   "cause": "arithmetic"
+  },
+  "pm:comp_03:8d27f8dedb": {
+   "claim": "Excluding restructuring charges, normalized operating income for FY2023 would be $72.5M ($68.0M + $4.5M), translating to an adjusted operating margin of ~16.0%.",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "68.0+4.5=72.5; 72.5/452.8=16.0%",
+   "cause": "arithmetic"
+  },
+  "am:fin_05:80a6d8f404": {
+   "claim": "The current margin is 225 basis points .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "credit_agreement_summary.txt",
+   "evidence": "S2 'currently billed at 225 basis points'",
+   "cause": "paraphrase"
+  },
+  "pm:mh_01:893895240e": {
+   "claim": "Adjustment: The $4.5 million charge, which was originally recorded as an operating expense, is added back because it is considered non-recurring .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "Restructuring in operating expenses; Note 1 non-recurring add-back",
+   "cause": "multi_fact"
+  },
+  "pm:comp_04:a2ef3b8389": {
+   "claim": "QoE Report: Performs broader normalization adjustments (legal fees, founder compensation, SOC 2 remediation, capitalized software, deferred revenue reversals), resulting in net adjustments of ($0.4M) in FY2022 (Adjusted EBITDA of $73.8M / 19.1% margin) and +$6.2M in FY2023 (Adjusted EBITDA of $99.0M / 21.9% margin) .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S2 adjustments; totals ($0.4)/$6.2; Adjusted $73.8 (19.1%) / $99.0 (21.9%)",
+   "cause": "multi_fact"
+  },
+  "am:comp_04:6275054d6f": {
+   "claim": "Adjusted EBITDA Margin: FY2023 (as per Doc 1) 21.5%; FY2023 (as per Doc 5) 21.9%; FY2022 (as per Doc 1) 19.1%; FY2022 (as per Doc 5) 19.1%",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "financials 21.5/19.1; QoE 21.9/19.1",
+   "cause": "table_without_headers"
+  },
+  "pm:legal_01:6873613a76": {
+   "claim": "Aggregate Consideration: Value $696,000,000; Reference / Scale Context ~$696 million total equity purchase price; Source [📄 merger_agreement_v2_final.txt \\; Section 1.2 — Consideration]",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S1.2 approximately $696 million",
+   "cause": "table_without_headers"
+  },
+  "am:mh_10:beeba5c461": {
+   "claim": "Northstar Financial Group: $54.3 million (12.0% of total revenue) .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "customer_contracts_schedule.txt",
+   "evidence": "S1 Northstar $54.3M, 12.0%",
+   "cause": "context_dependent"
+  },
+  "pm:comp_01:07fbaac7ea": {
+   "claim": "Complex consortium structure creates execution risk .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "Slide 3 Atlas certainty LOW: complex consortium structure; Slide 5 execution risk",
+   "cause": "paraphrase"
+  },
+  "pm:ctrl_04:c3469c62aa": {
+   "claim": "The provided documents do not state the customer churn rates for Aurora’s three closest competitors (Palantir, Snowflake, and either Databricks or DataRobot).",
+   "stratum": "judge",
+   "label": "supported",
+   "evidence": "no competitor churn rates in the room",
+   "cause": "absence_by_design"
+  },
+  "pm:fin_02:024fdad85c": {
+   "claim": "QofE Adjusted EBITDA Margin: 21.9% ($99.0M / $452.8M)",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "QoE Adjusted EBITDA Margin 21.9%; 99.0/452.8",
+   "cause": "arithmetic"
+  },
+  "am:mh_06:9beb44cced": {
+   "claim": "Accelerated Unvested Options for Named Executives: $11,545,000",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "employment_and_retention_agreements.txt",
+   "evidence": "S2/S5 equity acceleration total $11,545,000 for named executives",
+   "cause": "context_dependent"
+  },
+  "pm:legal_06:47ff705fb7": {
+   "claim": "The Customer Contracts Schedule and Regulatory Memo identify \"Northstar Financial Group\" at $54.3M and \"Pacific Data Systems\" at $38.5M .",
+   "stratum": "judge",
+   "label": "not_supported",
+   "doc": "regulatory_and_data_privacy_memo.txt",
+   "evidence": "the memo names both customers with a combined $92.8M only; the individual $54.3M/$38.5M are in the schedule alone",
+   "ambiguous": true,
+   "note": "attribution to the memo too broad"
+  },
+  "am:mh_10:1a7d10b00a": {
+   "claim": "Regulatory Memo and Customer Schedules: Consistently identify the entities as \"Northstar Financial Group\" ($54.3M) and \"Pacific Data Systems\" ($38.5M) .",
+   "stratum": "judge",
+   "label": "not_supported",
+   "doc": "regulatory_and_data_privacy_memo.txt",
+   "evidence": "memo gives only the combined $92.8M",
+   "ambiguous": true,
+   "note": "attribution to the memo too broad"
+  },
+  "pm:ctrl_05:487194697a": {
+   "claim": "FY2025 Revenue Projections: No forward-looking financial statements or projections are included in the documents.",
+   "stratum": "judge",
+   "label": "supported",
+   "evidence": "no revenue projections in the room",
+   "cause": "absence_by_design"
+  },
+  "pm:sum_02:c860afa388": {
+   "claim": "Financial Exposure: Outside legal counsel (Wilson Sonsini) assesses probable exposure between $3.5 million and $8.0 million, with an expected licensing settlement outcome between $4 million and $6 million .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S2 outside counsel (Wilson Sonsini) $3.5M-$8.0M; settlement $4M-$6M most likely",
+   "cause": "multi_fact"
+  },
+  "pm:legal_07:617e91f514": {
+   "claim": "Two GPL command-line utilities: Invoked as separate processes, which counsel advises avoids derivative work treatment .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S4 items 3-4",
+   "cause": "context_dependent"
+  },
+  "am:mh_01:ef9ed5b435": {
+   "claim": "Missing Detail: The documents do not provide a specific dollar-value breakdown between the \"severance\" and \"facility exit cost\" portions of the $4.5 million total.",
+   "stratum": "judge",
+   "label": "supported",
+   "evidence": "Note 1 gives only the $4.5M total",
+   "cause": "decline"
+  },
+  "pm:comp_03:ec5031c952": {
+   "claim": "Gross Profit: FY2022 $228.8M; FY2023 $271.7M; YoY Change +$42.9M (+18.7%); Source Citation [📄 aurora_financials_fy2023.txt; FY2023; CONSOLIDATED INCOME STATEMENT (in millions of USD)]",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "228.8 -> 271.7, +42.9, 18.75% written as 18.7%",
+   "cause": "table_without_headers"
+  },
+  "pm:fin_04:8ddefd87ea": {
+   "claim": "Quality of Earnings (QoE) Adjusted EBITDA Basis ($99.0M in FY2023 / $73.8M in FY2022) :",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "QoE Adjusted EBITDA $99.0 / $73.8",
+   "cause": "context_dependent"
+  },
+  "pm:mh_10:55064fb83f": {
+   "claim": "Northstar Financial Group: $54.3 million in FY2023 revenue (12.0% of total revenue).",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "customer_contracts_schedule.txt",
+   "evidence": "S1 Northstar FY2023 revenue $54.3M, 12.0%",
+   "cause": "context_dependent"
+  },
+  "pm:ctrl_04:1ed8735392": {
+   "claim": "Total Customers: Aurora Value 2,847; Scale/Context As of Dec 31, 2023",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "Total Customers 2,847 (FY2023 key metrics)",
+   "cause": "table_without_headers"
+  },
+  "am:legal_04:86d37fa793": {
+   "claim": "Claim: Alleged infringement of U.S. Patent Nos. 9,847,221 and 10,112,905 regarding the company's real-time data reconciliation engine .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S2 patents 9,847,221 and 10,112,905; reconciliation engine",
+   "cause": "context_dependent"
+  },
+  "pm:legal_04:8dca5bb492": {
+   "claim": "Hartley Employment Claim: Claim Amount / Demand $450,000; Accrued Loss $0.00 specified; Counsel Exposure Estimate < $150,000; FY2023 Expense Unspecified",
+   "stratum": "judge",
+   "label": "not_supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "demand $450,000 and exposure below $150,000 right; no accrual figure is stated for Hartley ('$0.00 specified')",
+   "ambiguous": true,
+   "note": "table cell invents an accrual"
+  },
+  "am:mh_05:3bececbf23": {
+   "claim": "The quality_of_earnings_report_fy2023.txt document reports Adjusted EBITDA as $99.0 million for FY2023, which includes several normalization adjustments beyond just restructuring charges (e.g., non-recurring legal fees, SOC 2 remediation, founder compensation, capitalized software adjustment, deferred revenue haircut reversal) .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S2 bridge adjustments; Adjusted $99.0",
+   "cause": "multi_fact"
+  },
+  "am:ctrl_05:8c7363dd02": {
+   "claim": "The provided context is limited to historical financial data for FY2022 and FY2023 and does not include forward-looking projections or the management operating plan.",
+   "stratum": "judge",
+   "label": "supported",
+   "evidence": "historical FY2022-FY2023 only; no plan or projections",
+   "cause": "absence_by_design"
+  },
+  "am:fin_02:03e8bf4855": {
+   "claim": "Founder Replacement Costs: The $1.9 million founder compensation add-back assumes both founders remain; if they depart, replacement costs may exceed this normalization .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S6 obs 4",
+   "cause": "paraphrase"
+  },
+  "pm:comp_05:ae9489268a": {
+   "claim": "Equity Treatment: Unvested options for named executives are accelerated in full and cashed out based on the merger consideration of $58.00 per share.",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "employment_and_retention_agreements.txt",
+   "evidence": "S5 unvested options accelerated in full and cashed out; $58.00",
+   "cause": "multi_fact"
+  },
+  "pm:legal_01:765dadd13e": {
+   "claim": "Baseline Share Price: Value $40.85; Reference / Scale Context 90-day VWAP as of March 14, 2024; Source [📄 merger_agreement_v2_final.txt \\; Section 1.2 — Consideration]",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S1.2 90-day VWAP $40.85 as of March 14, 2024",
+   "cause": "table_without_headers"
+  },
+  "am:fin_03:542e2b42f8": {
+   "claim": "Operating Cash Flow Discrepancy: There is a significant inconsistency regarding the operating cash flow component.",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "credit_agreement_summary.txt",
+   "evidence": "financials cash from operations $78.4M vs credit $52.1M operating cash flow",
+   "cause": "conflict_in_documents"
+  },
+  "pm:fin_02:b3dc1c6da0": {
+   "claim": "Management's disclosure in the financial statements only adds back $4.5 million of restructuring charges to arrive at $97.3 million .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "Adjusted EBITDA (excluding restructuring) adds back $4.5 to reach $97.3",
+   "cause": "paraphrase"
+  },
+  "am:legal_03:e9e00b7dd1": {
+   "claim": "General Representations: 18 months following the Closing.",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S8.1 eighteen (18) months",
+   "cause": "context_dependent"
+  },
+  "pm:comp_03:e31ee5f384": {
+   "claim": "Outside counsel notes comparable legal fees are likely in FY2024 as litigation remains unresolved .",
+   "stratum": "judge",
+   "label": "not_supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "'comparable fees are likely in FY2024' is the General Counsel's schedule, not outside counsel",
+   "ambiguous": true,
+   "note": "attribution"
+  },
+  "pm:legal_03:7a8a5ef014": {
+   "claim": "Mechanism: Tipping basket; stockholders become liable for all Losses from the first dollar once the aggregate threshold of $3.48 million is exceeded .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S8.3 $3.48M, liable for all Losses from the first dollar",
+   "cause": "paraphrase"
+  },
+  "pm:legal_06:ebb954547a": {
+   "claim": "Pacific Data Systems: Represents $38.5 million in FY2023 revenue (8.5% of total revenue).",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "customer_contracts_schedule.txt",
+   "evidence": "S1 Pacific $38.5M, 8.5%",
+   "cause": "context_dependent"
+  },
+  "pm:mh_06:4b88d6caf8": {
+   "claim": "However, multiple other sections and the credit agreement summary state the drawn balance is $85.0 million, noting a $25.0 million voluntary paydown occurred in Q4 FY2023 .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "credit_agreement_summary.txt",
+   "evidence": "S1/S2/S4 $85.0M drawn; $25.0M voluntary paydown Q4 FY2023",
+   "cause": "conflict_in_documents"
+  },
+  "pm:mh_07:b852eb4de5": {
+   "claim": "DataFlow alleges that Aurora’s real-time data reconciliation engine infringes U.S. Patent Nos. 9,847,221 and 10,112,905 .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S2",
+   "cause": "multi_fact"
+  },
+  "pm:fin_04:04701cca26": {
+   "claim": "The Net Debt/EBITDA leverage ratio for Aurora Technologies Inc. is 0.2x as of FY2023 (reported as 0.22x under the Credit Agreement financial covenant calculation).",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "credit_agreement_summary.txt",
+   "evidence": "financials 0.2x; credit covenant actual 0.22x",
+   "cause": "conflict_in_documents"
+  },
+  "am:legal_01:6ef2476573": {
+   "claim": "Negotiation Range: The final price of $58.00 falls within the high end of Vertex Capital Partners' initial non-binding offer range of $55.00–$60.00 per share .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "Slide 3 $55-$60; merger $58.00",
+   "cause": "inference"
+  },
+  "pm:legal_07:9dfc859373": {
+   "claim": "This was classified as a \"MATERIAL FINDING\" during the software composition analysis performed by Black Duck in January 2024 .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S4 Black Duck January 2024; 'THIS IS A MATERIAL FINDING'",
+   "cause": "multi_fact",
+   "ambiguous": true,
+   "note": "the schedule, not Black Duck, calls it material"
+  },
+  "pm:mh_09:044477084d": {
+   "claim": "This exposure is triggered by three specific executives: Elena Marsh (CEO), Dr. James Wu (CTO), and Robert Chen (CFO).",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "employment_and_retention_agreements.txt",
+   "evidence": "S2 Marsh, Wu and Chen; S1 titles",
+   "cause": "context_dependent"
+  },
+  "am:fin_05:2f09ce7d42": {
+   "claim": "Security: First priority lien on substantially all assets, including a pledge of intellectual property .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "credit_agreement_summary.txt",
+   "evidence": "S2 Security",
+   "cause": "context_dependent"
+  },
+  "am:sum_01:d131718ab9": {
+   "claim": "For context, the company's stock price was $41.20 as of March 8, 2024 .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "Slide 4 Current Price (Mar 8, 2024) $41.20",
+   "cause": "paraphrase"
+  },
+  "pm:ctrl_02:adb8915a84": {
+   "claim": "Subsequent Events: While the documents include a \"Subsequent Events\" note dated February 15, 2024, it only discusses the Board's decision to explore strategic alternatives and does not disclose any 2024 financial performance .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "Note 12 Feb 15 2024 strategic alternatives, no 2024 performance",
+   "cause": "decline"
+  },
+  "pm:legal_06:006845e296": {
+   "claim": "This contract requires written consent, and the customer has an \"absolute right\" to withhold consent in its sole discretion.",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "customer_contracts_schedule.txt",
+   "evidence": "S2 Pacific: written consent, absolute right to withhold",
+   "cause": "context_dependent"
+  },
+  "am:fin_05:3b505a98c6": {
+   "claim": "Maximum Total Net Leverage Ratio: 3.50x (Actual at Dec 31, 2023: 0.22x) .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "credit_agreement_summary.txt",
+   "evidence": "S3 3.50x, actual 0.22x",
+   "cause": "context_dependent"
+  },
+  "pm:comp_04:1243a4a459": {
+   "claim": "Reported EBITDA Margin: FY2022 (Internal) 19.1%; FY2022 (QoE) 19.2%; FY2023 (Internal) 20.5%; FY2023 (QoE) 20.5%",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "financials 19.1/20.5; QoE 19.2/20.5",
+   "cause": "table_without_headers"
+  },
+  "pm:comp_04:806ee1a5a0": {
+   "claim": "Internal financials state FY2022 Reported EBITDA as $74.0M (19.1% margin) .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "EBITDA FY2022 $74.0, margin 19.1%",
+   "cause": "conflict_in_documents"
+  },
+  "pm:fin_01:869b1243c3": {
+   "claim": "Note: All values in millions of USD ($M).",
+   "stratum": "judge",
+   "label": "not_checkable",
+   "evidence": "formatting note",
+   "cause": "fragment"
+  },
+  "am:mh_08:9ef026e5a3": {
+   "claim": "Defense Continuity: The DataFlow litigation is unresolved, with a Markman hearing scheduled for August 2024 and a trial estimated no earlier than Q3 2025 .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S2 Markman August 2024; trial no earlier than Q3 2025",
+   "cause": "multi_fact"
+  },
+  "am:mh_02:6872899129": {
+   "claim": "Deductible (Normalized): $3,480,000 (0.5% of transaction value).",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S8.3 $3.48M, 0.5%",
+   "cause": "context_dependent"
+  },
+  "pm:legal_08:4cec54aac7": {
+   "claim": "Automatic Termination and Acceleration: The merger with Vertex Capital Partners meets the definition of a Change of Control under Section 8.1(k) of the Credit Agreement (acquisition of more than 35% of voting equity).",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "credit_agreement_summary.txt",
+   "evidence": "S4 Section 8.1(k), more than 35% of voting equity",
+   "cause": "multi_fact"
+  },
+  "am:sum_01:fa32e55985": {
+   "claim": "Litigation: The outcome of DataFlow patent litigation could impact valuation; a $5.0M reserve is currently reflected on the balance sheet .",
+   "stratum": "judge",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "Slide 6 litigation could impact valuation; speaker notes $5.0M reserve (IP schedule says no accrual)",
+   "cause": "conflict_in_documents"
+  },
+  "am:legal_04:33bec7fa30": {
+   "claim": "Financial Exposure: Demand of $450,000; counsel assesses actual exposure below $150,000 .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "Hartley demand $450,000, exposure below $150,000"
+  },
+  "am:fin_06:15245a4b58": {
+   "claim": "Restructuring Charges: Impact Add-back; Amount (USD) +$4.5M; Description Severance and facility exit costs for the Austin development center [📊 quality_of_earnings_report_fy2023.txt; SECTION 3; Note 1].",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S2 / Note 1"
+  },
+  "pm:fin_02:c66016a522": {
+   "claim": "Less: Deferred Revenue Haircut Reversal: FY2023 Amount ($M) ($1.4)",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S2 ($1.4)"
+  },
+  "pm:sum_02:11b7de11fa": {
+   "claim": "Trademark Opposition: European Union opposition filed against the \"AURORA\" trademark in Class 35 by an unrelated party (assessed as low risk to core classes) .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S5"
+  },
+  "am:comp_01:f467d36411": {
+   "claim": "Certainty: Certainty is rated as \"HIGH\" because the buyer is experienced and has secured committed debt financing .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "Slide 3 Certainty: HIGH - experienced buyer, financing secured"
+  },
+  "am:fin_02:44af6b8654": {
+   "claim": "The reported EBITDA of $92.8 million is derived from the following consolidated income statement figures:",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "EBITDA $92.8 reconciliation"
+  },
+  "pm:mh_10:6322674e74": {
+   "claim": "Because customer consents are not a condition to closing, the Buyer is exposed to the potential termination of contracts with Northstar Financial Group and Pacific Data Systems, representing a total of $92.8 million in revenue (20.5% of FY2023 revenue) .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "regulatory_and_data_privacy_memo.txt",
+   "evidence": "S4 no consent condition; $92.8M, 20.5%"
+  },
+  "pm:legal_04:2f17d419ec": {
+   "claim": "Filing Date: September 14, 2023 .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S2 Filed: September 14, 2023"
+  },
+  "am:mh_01:650c25003f": {
+   "claim": "Less: Capitalized Software Adjustment: Value (USD millions) ($3.2)",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S2 ($3.2)"
+  },
+  "pm:mh_02:0bd4c8756e": {
+   "claim": "Deductible: Claims are subject to an aggregate deductible of $3.48 million (0.5% of the aggregate Merger Consideration).",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S8.3"
+  },
+  "am:comp_03:6116b11e28": {
+   "claim": "Capitalized Software Adjustment: A deduction of $3.2 million in FY2023 (compared to $2.7 million in FY2022) was applied to normalize EBITDA .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S2 ($3.2) / ($2.7)"
+  },
+  "pm:comp_02:bc949a6cb3": {
+   "claim": "Discounted Cash Flow (DCF): Key Assumptions WACC: 10.5%, TGR: 3.0%; Low $47.00; Mid $54.00; High $63.00",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "Slide 4 DCF row"
+  },
+  "am:mh_01:521f2c2946": {
+   "claim": "Adjusted EBITDA: Value (USD millions) $99.0",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S2 $99.0"
+  },
+  "pm:mh_08:9d7ee96e1b": {
+   "claim": "Enforceability: Dr. Wu's 12-month non-competition covenant is of \"uncertain enforceability\" in California, where he resides .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "employment_and_retention_agreements.txt",
+   "evidence": "S4"
+  },
+  "am:mh_01:f79807cd02": {
+   "claim": "Reported EBITDA: Value (USD millions) $92.8",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S2 $92.8"
+  },
+  "am:legal_01:090243b442": {
+   "claim": "Aggregate Value: The total merger consideration is approximately $696 million, subject to customary adjustments .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S1.2"
+  },
+  "pm:comp_02:dff24b11ac": {
+   "claim": "DataFlow Litigation Add-Back: The FY2023 legal fee add-back of $2.8 million is qualified; if the litigation continues into FY2024, Adjusted EBITDA is overstated by that amount .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S6 obs 2"
+  },
+  "pm:fin_04:d1b06d1cb8": {
+   "claim": "FY2023 Ratio: 0.21x [COMPUTED: $20.6M Net Debt / $97.3M Company Adjusted EBITDA]",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "20.6/97.3=0.21"
+  },
+  "am:mh_07:ac3e8f5747": {
+   "claim": "FY2023 Legal Fee Add-back: Value $2.8M; Context Qualified as non-recurring [Note 2]",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "Note 2 QUALIFIED ADJUSTMENT $2.8M"
+  },
+  "pm:comp_04:6e57d6d517": {
+   "claim": "Restructuring Charges: +$4.5M",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "add back restructuring $4.5"
+  },
+  "pm:mh_03:eebe3794d8": {
+   "claim": "Conversely, Board of Directors meeting notes from March 2024 state that General Counsel Maria Rodriguez confirmed a \"DataFlow litigation reserve of $5.0M is reflected in the FY2023 balance sheet under Accrued Liabilities\" .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "speaker notes, GC Maria Rodriguez"
+  },
+  "pm:sum_01:8ecd158b8a": {
+   "claim": "Target Closing Date: September 15, 2024 .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "Slide 6"
+  },
+  "am:mh_01:07ef3155bf": {
+   "claim": "Personnel Impact: The closure affected 32 employees .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "Note 1 32 employees"
+  },
+  "am:comp_01:951f7e038b": {
+   "claim": "Atlas Data Holdings: Offer Range (Per Share) $48.00 – $52.00; Consideration Type Cash; Certainty Level Low; Key Financing/Execution Factors Uncommitted financing with a ~30% equity shortfall; complex consortium structure.",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "Slide 3 Party C"
+  },
+  "pm:legal_05:bcd7d81f06": {
+   "claim": "Annual Value: $12.4M",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S9.2(a) $12.4M"
+  },
+  "pm:mh_08:391d4ee34c": {
+   "claim": "Probable Litigation Exposure: $3,500,000 – $8,000,000 .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S2"
+  },
+  "pm:legal_04:41e8df9543": {
+   "claim": "A commercial dispute with a former reseller in the EMEA region regarding approximately EUR 310,000 in disputed commissions .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S3 item 2"
+  },
+  "am:legal_05:0e39921734": {
+   "claim": "Cascade Logistics Corp ($21.7M): 60 days' written notice required .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "customer_contracts_schedule.txt",
+   "evidence": "S2"
+  },
+  "pm:ctrl_04:3ebb9a0355": {
+   "claim": "Palantir: Market leader with 18.4% share .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "Slide 2"
+  },
+  "am:fin_06:21daf7f9ae": {
+   "claim": "Adjusted EBITDA Growth: 34.1% YoY (from $73.8M in FY2022)",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S2 34.1%, $73.8"
+  },
+  "pm:mh_04:05f0743437": {
+   "claim": "Per Share Consideration: $58.00 per share in cash .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S1.2"
+  },
+  "pm:mh_08:eb3291aa04": {
+   "claim": "Financial Exposure: Outside counsel assesses the probable exposure for the DataFlow litigation at $3.5 million to $8.0 million .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S2"
+  },
+  "pm:comp_03:e00f53d5a6": {
+   "claim": "Gross Margin: FY2022 59.1%; FY2023 60.0%; YoY Change +0.9% (+90 bps); Source Citation [📄 aurora_financials_fy2023.txt; FY2023; CONSOLIDATED INCOME STATEMENT (in millions of USD)]",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "59.1 -> 60.0"
+  },
+  "pm:comp_01:e82b678831": {
+   "claim": "Vertex Capital Partners (Party A): Offered $55.00 – $60.00 per share (all-cash), evaluated with HIGH certainty .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "Slide 3 Party A"
+  },
+  "pm:legal_02:ac02a30c89": {
+   "claim": "Termination Fee (Superior Proposal): $20.88 million (representing 3.0% of the aggregate Merger Consideration), triggered if the Company terminates the agreement under Section 7.1(d) to accept a Superior Proposal .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S7.2"
+  },
+  "pm:legal_08:f4f605c17f": {
+   "claim": "Total Commitment: Value $150 million [📄 credit_agreement_summary.txt; SECTION 2]",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "credit_agreement_summary.txt",
+   "evidence": "S2 Commitment $150 million"
+  },
+  "am:legal_05:dc860dcb7b": {
+   "claim": "Northstar Financial Group ($54.3M): Requires written consent at least 30 days prior to closing.",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "customer_contracts_schedule.txt",
+   "evidence": "S2"
+  },
+  "am:sum_01:7946a3d0f5": {
+   "claim": "Negotiation Parameters: Authorizing management to negotiate with a price floor of $55.00 per share .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "board_deck_strategic_review_mar2024.txt",
+   "evidence": "resolution (4) $55.00 floor"
+  },
+  "am:comp_04:d298575e5f": {
+   "claim": "FY2022 Adjusted EBITDA Margin: 19.1% [📄",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "19.1%"
+  },
+  "pm:sum_02:6489aeb800": {
+   "claim": "Aurora management only has an undocumented verbal indication that he will remain for a 12-month transition period .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "employment_and_retention_agreements.txt",
+   "evidence": "S4 verbal indication, not documented"
+  },
+  "pm:legal_02:b0208ae2df": {
+   "claim": "Outside Date: Either party may terminate if the Merger is not consummated by September 15, 2024 .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S7.1(b) September 15, 2024 (the memo says December 31, 2024)"
+  },
+  "am:legal_05:7f84a41483": {
+   "claim": "Amazon Web Services (Cloud Infrastructure): Annual value of $6.2 million.",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S9.2(c)"
+  },
+  "pm:legal_05:5f81dc41e5": {
+   "claim": "Pacific Data Systems retains absolute discretion to refuse consent .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "customer_contracts_schedule.txt",
+   "evidence": "S2"
+  },
+  "pm:legal_05:0940575f60": {
+   "claim": "Priya Raghavan: Severance Multiple 2.0x; Cash Severance $1,428,000; Equity Acceleration $1,370,000; Total Potential Cost $2,798,000",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "employment_and_retention_agreements.txt",
+   "evidence": "S2 Raghavan row"
+  },
+  "pm:fin_02:737b0781a2": {
+   "claim": "Add: Founder Compensation Above Market: FY2023 Amount ($M) $1.9",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S2 $1.9"
+  },
+  "pm:ctrl_05:3bc0b8584d": {
+   "claim": "The provided financial documents only contain historical data for the fiscal years ended December 31, 2022, and December 31, 2023.",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "FY2022/FY2023 only"
+  },
+  "am:comp_04:f6caf60e52": {
+   "claim": "FY2023 Adjusted EBITDA Margin: 21.5%",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "21.5%"
+  },
+  "pm:comp_04:6cb224bd07": {
+   "claim": "FY2023 Reported EBITDA Margin: 20.5% ($92.8M EBITDA on $452.8M revenue)",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "20.5%"
+  },
+  "am:fin_04:3e34a94152": {
+   "claim": "EBITDA Growth: Reported EBITDA grew 25.4% year-over-year, from $74.0 million in FY2022 to $92.8 million in FY2023 .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "18.8/74.0 = 25.4%"
+  },
+  "am:legal_06:ea3be34a2b": {
+   "claim": "While management represents it has not been triggered, buyer diligence identified one FY2023 arrangement (Continental Retail Group) priced 4% below the Northstar rate at a lower volume tier.",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "customer_contracts_schedule.txt",
+   "evidence": "S3"
+  },
+  "pm:legal_04:db0acbb61d": {
+   "claim": "Allegation: Wrongful termination claim brought by a former employee .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S3 item 1"
+  },
+  "pm:legal_08:a9a4268d20": {
+   "claim": "Net Debt / FY2023 EBITDA: Value 0.2x [📄 credit_agreement_summary.txt; SECTION 1]",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "credit_agreement_summary.txt",
+   "evidence": "S1 0.2x"
+  },
+  "pm:fin_02:fb46570667": {
+   "claim": "Management Adjusted EBITDA: $97.3 million (21.5% margin) — includes only the add-back for restructuring charges",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "$97.3, 21.5%"
+  },
+  "pm:comp_04:d3f4eea211": {
+   "claim": "Operating Income (EBIT): $68.0M",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "$68.0"
+  },
+  "pm:fin_08:3babf38a00": {
+   "claim": "In FY2023, $331.7 million of Aurora's total revenue was recurring, representing 73.3% of total FY2023 revenue ($452.8 million) .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S4 $331.7, 73.3%"
+  },
+  "am:ctrl_04:d949f1f1b6": {
+   "claim": "While the documents do not explicitly state a \"customer churn rate\" (the percentage of customers lost), they provide a Net Revenue Retention (NRR) rate of 118% for FY2023.",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "NRR 118%; no churn rate"
+  },
+  "pm:legal_05:c206bb4ce8": {
+   "claim": "Status: NOT YET OBTAINED .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "customer_contracts_schedule.txt",
+   "evidence": "S2"
+  },
+  "am:mh_02:459fc5945b": {
+   "claim": "Accounting Risk: Buyer's accounting advisors have flagged the lack of an accrual under ASC 450 as an \"area of judgement\" .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S2 'area of judgement'"
+  },
+  "pm:mh_07:b39e5ee45b": {
+   "claim": "Exposure: Outside counsel (Wilson Sonsini) estimates a probable exposure range of $3.5 million to $8.0 million, with a licensing settlement of $4 million to $6 million considered the most likely outcome .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "ip_portfolio_and_litigation_schedule.txt",
+   "evidence": "S2"
+  },
+  "pm:comp_03:203a444c77": {
+   "claim": "Total Operating Expenses: FY2022 $177.4M; FY2023 $203.7M; YoY Change +$26.3M (+14.8%); Source Citation [📄 aurora_financials_fy2023.txt; FY2023; CONSOLIDATED INCOME STATEMENT (in millions of USD)]",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "177.4 -> 203.7, 14.8%"
+  },
+  "am:comp_04:ee70af95d1": {
+   "claim": "FY2023 Reported EBITDA Margin: 20.5% and",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "aurora_financials_fy2023.txt",
+   "evidence": "20.5%"
+  },
+  "pm:comp_04:9002dbd38e": {
+   "claim": "Total Normalization Adjustments: ($0.4M)",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "FY2022 ($0.4)"
+  },
+  "pm:sum_02:d5261d8adb": {
+   "claim": "Outside Date: The deal is subject to termination if not consummated by September 15, 2024 .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S7.1(b)"
+  },
+  "pm:mh_02:be11d8169c": {
+   "claim": "Deductible: Value $3,480,000; Context 0.5% of Consideration [Section 8.3]",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S8.3"
+  },
+  "am:fin_02:9d8efd2b23": {
+   "claim": "Restructuring Charges: +$4.5 million (Severance and facility exit costs for the Austin development center)",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "Note 1"
+  },
+  "am:legal_02:cd303b86a7": {
+   "claim": "If the Company terminates the agreement to accept a Superior Proposal pursuant to Section 7.1(d), the Company is required to pay a termination fee.",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "merger_agreement_v2_final.txt",
+   "evidence": "S7.2"
+  },
+  "am:fin_06:81078135d5": {
+   "claim": "Non-recurring Legal Fees: Impact Add-back; Amount (USD) +$2.8M; Description External counsel for DataFlow Systems patent litigation [📊 quality_of_earnings_report_fy2023.txt; SECTION 3; Note 2].",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "Note 2"
+  },
+  "pm:fin_02:87923e930d": {
+   "claim": "Total Normalization Adjustments: FY2023 Amount ($M) $6.2",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S2 $6.2"
+  },
+  "am:ctrl_05:f5a92df229": {
+   "claim": "Accrued Liabilities (FY2023): Reported as $34.7 million in the financial statements but as $34.2 million in the QofE report .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "balance sheet $34.7 vs QoE NWC $34.2"
+  },
+  "am:fin_07:fb72d792d8": {
+   "claim": "DSO Contradiction: Section 5 of the report contains a logical inconsistency regarding collection metrics, stating that Days Sales Outstanding (DSO) \"increased from 65 days in FY2022 to 63 days in FY2023,\" despite 63 being a lower value than 65 .",
+   "stratum": "pass",
+   "label": "supported",
+   "doc": "quality_of_earnings_report_fy2023.txt",
+   "evidence": "S5 DSO wording"
+  }
+ }
+}
