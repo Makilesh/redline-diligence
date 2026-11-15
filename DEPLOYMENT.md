@@ -29,7 +29,8 @@ above that.
 
 The backend is the constraint, and it is not close. `bge-m3` alone is 2.27GB
 resident and the whole API holds about 5–6GB once the reranker and NLI model are
-loaded. The 512MB free tiers at Render, Fly and Koyeb are not near-misses — they
+loaded (the CPU host uses the small `nli-deberta-v3-xsmall`; on a GPU machine the
+FactCG grounding checker adds about 0.6GB of GPU memory at peak). The 512MB free tiers at Render, Fly and Koyeb are not near-misses — they
 are an order of magnitude short. What fits is a VM with at least 8GB of RAM:
 Oracle Cloud's Always Free ARM instance (2 OCPU / 12GB) is the free option, and
 co-locating Qdrant and Postgres on it removes two external accounts.
