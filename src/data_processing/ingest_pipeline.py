@@ -23,8 +23,9 @@ Payload fields written per child chunk (see _child_payload):
     superseded_by, is_redline, context_header, plus format extras (sheet_name,
     currency, scale_factor, scale_label, slide_number, page_range, metrics,
     redline_base_doc_id), plus, for a public filing only, filing_form,
-    filing_period_end / filing_date, filing_fiscal_years, filing_entity_keys
-    and filing_company (filing_metadata.py; read from the cover page).
+    filing_period_end / filing_date, filing_fiscal_years, filing_fiscal_quarter,
+    filing_entity_keys and filing_company (filing_metadata.py; read from the
+    cover page).
 
 `text` is always the exact source text. `context_header` ("Document: ... /
 Section: ...", see chunk_context.py; written only when CHUNK_CONTEXT_HEADERS
