@@ -1,0 +1,2531 @@
+{
+ "generated_at": "2026-11-15T09:34:17+00:00",
+ "command": "python -m eval.decisions.run_reranker_calibration ",
+ "dev_set": "eval\\answerability_dev.json",
+ "reference": "BAAI/bge-reranker-v2-m3",
+ "target": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+ "questions": 58,
+ "noise_prompts": 24,
+ "analysis": {
+  "pairs": 1145,
+  "labelled_pairs": 570,
+  "positive_pairs": 27,
+  "spearman": 0.8229,
+  "distribution": {
+   "reference": {
+    "p10": 0.0001,
+    "p25": 0.0005,
+    "p50": 0.0026,
+    "p75": 0.0241,
+    "p90": 0.22,
+    "p95": 0.68,
+    "p99": 0.9873
+   },
+   "target_raw": {
+    "p10": 0.0,
+    "p25": 0.0,
+    "p50": 0.0002,
+    "p75": 0.0136,
+    "p90": 0.3349,
+    "p95": 0.8031,
+    "p99": 0.996
+   },
+   "target_quantile_mapped": {
+    "p10": 0.0001,
+    "p25": 0.0005,
+    "p50": 0.0026,
+    "p75": 0.0241,
+    "p90": 0.22,
+    "p95": 0.6766,
+    "p99": 0.9874
+   }
+  },
+  "positives_median": {
+   "reference": 0.9352,
+   "target_raw": 0.9054
+  },
+  "others_median": {
+   "reference": 0.0024,
+   "target_raw": 0.0002
+  },
+  "maps": {
+   "quantile": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     1e-05,
+     1.6e-05
+    ],
+    [
+     1.2e-05,
+     5.8e-05
+    ],
+    [
+     1.4e-05,
+     0.000136
+    ],
+    [
+     1.8e-05,
+     0.000218
+    ],
+    [
+     2.3e-05,
+     0.000354
+    ],
+    [
+     2.9e-05,
+     0.000515
+    ],
+    [
+     3.7e-05,
+     0.000707
+    ],
+    [
+     5e-05,
+     0.000964
+    ],
+    [
+     7.4e-05,
+     0.001336
+    ],
+    [
+     0.000119,
+     0.001866
+    ],
+    [
+     0.000199,
+     0.002621
+    ],
+    [
+     0.000364,
+     0.003786
+    ],
+    [
+     0.000456,
+     0.004807
+    ],
+    [
+     0.000633,
+     0.005651
+    ],
+    [
+     0.000924,
+     0.006771
+    ],
+    [
+     0.001463,
+     0.008972
+    ],
+    [
+     0.002381,
+     0.011517
+    ],
+    [
+     0.004065,
+     0.014107
+    ],
+    [
+     0.008282,
+     0.017986
+    ],
+    [
+     0.013612,
+     0.024099
+    ],
+    [
+     0.022937,
+     0.031297
+    ],
+    [
+     0.033304,
+     0.045066
+    ],
+    [
+     0.056346,
+     0.06657
+    ],
+    [
+     0.099354,
+     0.096501
+    ],
+    [
+     0.180805,
+     0.143068
+    ],
+    [
+     0.334914,
+     0.219975
+    ],
+    [
+     0.422197,
+     0.279864
+    ],
+    [
+     0.538052,
+     0.318714
+    ],
+    [
+     0.677247,
+     0.465336
+    ],
+    [
+     0.752603,
+     0.535851
+    ],
+    [
+     0.803109,
+     0.680027
+    ],
+    [
+     0.877229,
+     0.762417
+    ],
+    [
+     0.942212,
+     0.886532
+    ],
+    [
+     0.985228,
+     0.958679
+    ],
+    [
+     0.996033,
+     0.987272
+    ],
+    [
+     0.997981,
+     0.996085
+    ],
+    [
+     0.999904,
+     0.99877
+    ],
+    [
+     1.0,
+     1.0
+    ]
+   ],
+   "probability_matched": [
+    [
+     0.0,
+     0.0
+    ],
+    [
+     1.2e-05,
+     1.7e-05
+    ],
+    [
+     2.1e-05,
+     0.035411
+    ],
+    [
+     0.040161,
+     0.211743
+    ],
+    [
+     0.589968,
+     0.316475
+    ],
+    [
+     0.776341,
+     0.716219
+    ],
+    [
+     0.988924,
+     0.978875
+    ],
+    [
+     1.0,
+     1.0
+    ]
+   ]
+  },
+  "refusal_ceiling": {
+   "chosen": 0.0175,
+   "lowest_answerable_best": 0.0244,
+   "lowest_answerable_id": "dev_a34",
+   "sweep": [
+    {
+     "ceiling": 0.005,
+     "answerable_refused": [],
+     "unanswerable_refused": 1,
+     "noise_refused": 24,
+     "noise": 24
+    },
+    {
+     "ceiling": 0.0075,
+     "answerable_refused": [],
+     "unanswerable_refused": 1,
+     "noise_refused": 24,
+     "noise": 24
+    },
+    {
+     "ceiling": 0.01,
+     "answerable_refused": [],
+     "unanswerable_refused": 1,
+     "noise_refused": 24,
+     "noise": 24
+    },
+    {
+     "ceiling": 0.0125,
+     "answerable_refused": [],
+     "unanswerable_refused": 1,
+     "noise_refused": 24,
+     "noise": 24
+    },
+    {
+     "ceiling": 0.015,
+     "answerable_refused": [],
+     "unanswerable_refused": 2,
+     "noise_refused": 24,
+     "noise": 24
+    },
+    {
+     "ceiling": 0.0175,
+     "answerable_refused": [],
+     "unanswerable_refused": 2,
+     "noise_refused": 24,
+     "noise": 24
+    },
+    {
+     "ceiling": 0.02,
+     "answerable_refused": [],
+     "unanswerable_refused": 2,
+     "noise_refused": 24,
+     "noise": 24
+    },
+    {
+     "ceiling": 0.025,
+     "answerable_refused": [
+      "dev_a34"
+     ],
+     "unanswerable_refused": 2,
+     "noise_refused": 24,
+     "noise": 24
+    },
+    {
+     "ceiling": 0.03,
+     "answerable_refused": [
+      "dev_a34"
+     ],
+     "unanswerable_refused": 3,
+     "noise_refused": 24,
+     "noise": 24
+    },
+    {
+     "ceiling": 0.04,
+     "answerable_refused": [
+      "dev_a34",
+      "dev_a39"
+     ],
+     "unanswerable_refused": 3,
+     "noise_refused": 24,
+     "noise": 24
+    },
+    {
+     "ceiling": 0.05,
+     "answerable_refused": [
+      "dev_a34",
+      "dev_a39"
+     ],
+     "unanswerable_refused": 3,
+     "noise_refused": 24,
+     "noise": 24
+    }
+   ]
+  },
+  "gate": {
+   "summary": {
+    "reference": {
+     "counts": {
+      "answerable": {
+       "admitted": 25,
+       "llm_fallback": 2,
+       "refused": 0
+      },
+      "unanswerable": {
+       "admitted": 19,
+       "llm_fallback": 7,
+       "refused": 2
+      },
+      "retrieval_miss": {
+       "admitted": 2,
+       "llm_fallback": 0,
+       "refused": 0
+      },
+      "excluded": {
+       "admitted": 0,
+       "llm_fallback": 1,
+       "refused": 0
+      },
+      "noise": {
+       "admitted": 0,
+       "llm_fallback": 0,
+       "refused": 24
+      }
+     },
+     "agrees_with_reference": 82,
+     "n": 82,
+     "disagreements": []
+    },
+    "target_raw": {
+     "counts": {
+      "answerable": {
+       "admitted": 21,
+       "llm_fallback": 2,
+       "refused": 4
+      },
+      "unanswerable": {
+       "admitted": 21,
+       "llm_fallback": 3,
+       "refused": 4
+      },
+      "retrieval_miss": {
+       "admitted": 1,
+       "llm_fallback": 1,
+       "refused": 0
+      },
+      "excluded": {
+       "admitted": 1,
+       "llm_fallback": 0,
+       "refused": 0
+      },
+      "noise": {
+       "admitted": 0,
+       "llm_fallback": 0,
+       "refused": 24
+      }
+     },
+     "agrees_with_reference": 68,
+     "n": 82,
+     "disagreements": [
+      "dev_u04 llm_fallback->admitted (ref max 0.239, max 0.5827)",
+      "dev_u06 llm_fallback->refused (ref max 0.1071, max 0.3223)",
+      "dev_u08 llm_fallback->refused (ref max 0.0736, max 0.0431)",
+      "dev_u12 refused->admitted (ref max 0.3143, max 0.4192)",
+      "dev_u16 llm_fallback->admitted (ref max 0.1555, max 0.397)",
+      "dev_a25 admitted->llm_fallback (ref max 0.7526, max 0.0696)",
+      "dev_u26 admitted->llm_fallback (ref max 0.504, max 0.1765)",
+      "dev_u27 llm_fallback->admitted (ref max 0.2531, max 0.4826)",
+      "dev_u28 llm_fallback->refused (ref max 0.146, max 0.0167)",
+      "dev_a34 admitted->refused (ref max 0.74, max 0.014)",
+      "dev_a36 admitted->llm_fallback (ref max 0.9337, max 0.2156)",
+      "dev_a37 admitted->refused (ref max 0.347, max 0.0452)",
+      "dev_a39 admitted->refused (ref max 0.5996, max 0.0262)",
+      "dev_a41 llm_fallback->refused (ref max 0.0561, max 0.0008)"
+     ]
+    },
+    "target_quantile": {
+     "counts": {
+      "answerable": {
+       "admitted": 21,
+       "llm_fallback": 3,
+       "refused": 3
+      },
+      "unanswerable": {
+       "admitted": 16,
+       "llm_fallback": 9,
+       "refused": 3
+      },
+      "retrieval_miss": {
+       "admitted": 1,
+       "llm_fallback": 1,
+       "refused": 0
+      },
+      "excluded": {
+       "admitted": 1,
+       "llm_fallback": 0,
+       "refused": 0
+      },
+      "noise": {
+       "admitted": 0,
+       "llm_fallback": 0,
+       "refused": 24
+      }
+     },
+     "agrees_with_reference": 68,
+     "n": 82,
+     "disagreements": [
+      "dev_u01 admitted->refused (ref max 0.3211, max 0.3008)",
+      "dev_u04 llm_fallback->admitted (ref max 0.239, max 0.3658)",
+      "dev_u09 admitted->llm_fallback (ref max 0.5101, max 0.2933)",
+      "dev_u12 refused->llm_fallback (ref max 0.3143, max 0.2778)",
+      "dev_u19 admitted->llm_fallback (ref max 0.5068, max 0.2369)",
+      "dev_a25 admitted->llm_fallback (ref max 0.7526, max 0.0758)",
+      "dev_u26 admitted->llm_fallback (ref max 0.504, max 0.1406)",
+      "dev_u27 llm_fallback->admitted (ref max 0.2531, max 0.3001)",
+      "dev_u28 llm_fallback->refused (ref max 0.146, max 0.0265)",
+      "dev_a34 admitted->refused (ref max 0.74, max 0.0244)",
+      "dev_a36 admitted->llm_fallback (ref max 0.9337, max 0.1604)",
+      "dev_a37 admitted->llm_fallback (ref max 0.347, max 0.0562)",
+      "dev_a39 admitted->refused (ref max 0.5996, max 0.0357)",
+      "dev_a41 llm_fallback->refused (ref max 0.0561, max 0.0063)"
+     ]
+    },
+    "target_quantile_ceiling": {
+     "counts": {
+      "answerable": {
+       "admitted": 21,
+       "llm_fallback": 5,
+       "refused": 1
+      },
+      "unanswerable": {
+       "admitted": 16,
+       "llm_fallback": 10,
+       "refused": 2
+      },
+      "retrieval_miss": {
+       "admitted": 1,
+       "llm_fallback": 1,
+       "refused": 0
+      },
+      "excluded": {
+       "admitted": 1,
+       "llm_fallback": 0,
+       "refused": 0
+      },
+      "noise": {
+       "admitted": 0,
+       "llm_fallback": 0,
+       "refused": 24
+      }
+     },
+     "agrees_with_reference": 69,
+     "n": 82,
+     "disagreements": [
+      "dev_u01 admitted->refused (ref max 0.3211, max 0.3008)",
+      "dev_u04 llm_fallback->admitted (ref max 0.239, max 0.3658)",
+      "dev_u09 admitted->llm_fallback (ref max 0.5101, max 0.2933)",
+      "dev_u12 refused->llm_fallback (ref max 0.3143, max 0.2778)",
+      "dev_u19 admitted->llm_fallback (ref max 0.5068, max 0.2369)",
+      "dev_a25 admitted->llm_fallback (ref max 0.7526, max 0.0758)",
+      "dev_u26 admitted->llm_fallback (ref max 0.504, max 0.1406)",
+      "dev_u27 llm_fallback->admitted (ref max 0.2531, max 0.3001)",
+      "dev_a34 admitted->llm_fallback (ref max 0.74, max 0.0244)",
+      "dev_a36 admitted->llm_fallback (ref max 0.9337, max 0.1604)",
+      "dev_a37 admitted->llm_fallback (ref max 0.347, max 0.0562)",
+      "dev_a39 admitted->llm_fallback (ref max 0.5996, max 0.0357)",
+      "dev_a41 llm_fallback->refused (ref max 0.0561, max 0.0063)"
+     ]
+    },
+    "target_probability_matched": {
+     "counts": {
+      "answerable": {
+       "admitted": 21,
+       "llm_fallback": 5,
+       "refused": 1
+      },
+      "unanswerable": {
+       "admitted": 16,
+       "llm_fallback": 11,
+       "refused": 1
+      },
+      "retrieval_miss": {
+       "admitted": 1,
+       "llm_fallback": 1,
+       "refused": 0
+      },
+      "excluded": {
+       "admitted": 0,
+       "llm_fallback": 1,
+       "refused": 0
+      },
+      "noise": {
+       "admitted": 0,
+       "llm_fallback": 0,
+       "refused": 24
+      }
+     },
+     "agrees_with_reference": 70,
+     "n": 82,
+     "disagreements": [
+      "dev_u01 admitted->llm_fallback (ref max 0.3211, max 0.2964)",
+      "dev_u04 llm_fallback->admitted (ref max 0.239, max 0.3151)",
+      "dev_u09 admitted->llm_fallback (ref max 0.5101, max 0.2921)",
+      "dev_u12 refused->llm_fallback (ref max 0.3143, max 0.284)",
+      "dev_u19 admitted->llm_fallback (ref max 0.5068, max 0.2726)",
+      "dev_a25 admitted->llm_fallback (ref max 0.7526, max 0.2173)",
+      "dev_u26 admitted->llm_fallback (ref max 0.504, max 0.2377)",
+      "dev_a34 admitted->llm_fallback (ref max 0.74, max 0.0969)",
+      "dev_a36 admitted->llm_fallback (ref max 0.9337, max 0.2452)",
+      "dev_a37 admitted->llm_fallback (ref max 0.347, max 0.2127)",
+      "dev_a39 admitted->llm_fallback (ref max 0.5996, max 0.1506)",
+      "dev_a41 llm_fallback->refused (ref max 0.0561, max 0.0388)"
+     ]
+    }
+   },
+   "questions": [
+    {
+     "id": "dev_u01",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.3211
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.4845
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.3008
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.3008
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.2964
+     }
+    },
+    {
+     "id": "dev_a01",
+     "label": "retrieval_miss",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.4207
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.8302
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.7101
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.7101
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.7827
+     }
+    },
+    {
+     "id": "dev_u02",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9903
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9119
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.8286
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.8286
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.8837
+     }
+    },
+    {
+     "id": "dev_u03",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.301
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.986
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9608
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9608
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9753
+     }
+    },
+    {
+     "id": "dev_a03",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9909
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9961
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9878
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9878
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9926
+     }
+    },
+    {
+     "id": "dev_u04",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "llm_fallback",
+      "max": 0.239
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.5827
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.3658
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.3658
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.3151
+     }
+    },
+    {
+     "id": "dev_u05",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.8882
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9987
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9971
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9971
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9976
+     }
+    },
+    {
+     "id": "dev_a05",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.995
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9995
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9982
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9982
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.999
+     }
+    },
+    {
+     "id": "dev_u06",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "llm_fallback",
+      "max": 0.1071
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.3223
+     },
+     "target_quantile": {
+      "decision": "llm_fallback",
+      "max": 0.2137
+     },
+     "target_quantile_ceiling": {
+      "decision": "llm_fallback",
+      "max": 0.2137
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.2655
+     }
+    },
+    {
+     "id": "dev_a06",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.8804
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.8291
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.709
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.709
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.7815
+     }
+    },
+    {
+     "id": "dev_u07",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "llm_fallback",
+      "max": 0.0674
+     },
+     "target_raw": {
+      "decision": "llm_fallback",
+      "max": 0.1742
+     },
+     "target_quantile": {
+      "decision": "llm_fallback",
+      "max": 0.1393
+     },
+     "target_quantile_ceiling": {
+      "decision": "llm_fallback",
+      "max": 0.1393
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.2373
+     }
+    },
+    {
+     "id": "dev_a07",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.6067
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.6107
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.3953
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.3953
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.361
+     }
+    },
+    {
+     "id": "dev_u08",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "llm_fallback",
+      "max": 0.0736
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0431
+     },
+     "target_quantile": {
+      "decision": "llm_fallback",
+      "max": 0.0542
+     },
+     "target_quantile_ceiling": {
+      "decision": "llm_fallback",
+      "max": 0.0542
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.2123
+     }
+    },
+    {
+     "id": "dev_u09",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.5101
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.4621
+     },
+     "target_quantile": {
+      "decision": "llm_fallback",
+      "max": 0.2933
+     },
+     "target_quantile_ceiling": {
+      "decision": "llm_fallback",
+      "max": 0.2933
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.2921
+     }
+    },
+    {
+     "id": "dev_a09",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9987
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9894
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9696
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9696
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9797
+     }
+    },
+    {
+     "id": "dev_u10",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.681
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9627
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9209
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9209
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9464
+     }
+    },
+    {
+     "id": "dev_a10",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.7162
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.8064
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.6837
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.6837
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.7534
+     }
+    },
+    {
+     "id": "dev_u11",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0058
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0031
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0127
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0127
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0491
+     }
+    },
+    {
+     "id": "dev_u12",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "refused",
+      "max": 0.3143
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.4192
+     },
+     "target_quantile": {
+      "decision": "llm_fallback",
+      "max": 0.2778
+     },
+     "target_quantile_ceiling": {
+      "decision": "llm_fallback",
+      "max": 0.2778
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.284
+     }
+    },
+    {
+     "id": "dev_u13",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9603
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9857
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.96
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.96
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9749
+     }
+    },
+    {
+     "id": "dev_a13",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9352
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.8891
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.7851
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.7851
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.8555
+     }
+    },
+    {
+     "id": "dev_u14",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9766
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9871
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9635
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9635
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9766
+     }
+    },
+    {
+     "id": "dev_u15",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.7803
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.7124
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.4982
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.4982
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.579
+     }
+    },
+    {
+     "id": "dev_a15",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9789
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9821
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9534
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9534
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9704
+     }
+    },
+    {
+     "id": "dev_u16",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "llm_fallback",
+      "max": 0.1555
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.397
+     },
+     "target_quantile": {
+      "decision": "llm_fallback",
+      "max": 0.2626
+     },
+     "target_quantile_ceiling": {
+      "decision": "llm_fallback",
+      "max": 0.2626
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.2797
+     }
+    },
+    {
+     "id": "dev_a16",
+     "label": "answerable",
+     "reference": {
+      "decision": "llm_fallback",
+      "max": 0.2117
+     },
+     "target_raw": {
+      "decision": "llm_fallback",
+      "max": 0.0772
+     },
+     "target_quantile": {
+      "decision": "llm_fallback",
+      "max": 0.0811
+     },
+     "target_quantile_ceiling": {
+      "decision": "llm_fallback",
+      "max": 0.0811
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.2188
+     }
+    },
+    {
+     "id": "dev_u17",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9636
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9929
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9791
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9791
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9865
+     }
+    },
+    {
+     "id": "dev_a17",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9964
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9054
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.8162
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.8162
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.8757
+     }
+    },
+    {
+     "id": "dev_u18",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.5189
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.8719
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.7565
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.7565
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.8343
+     }
+    },
+    {
+     "id": "dev_a18",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9961
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9966
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9899
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9899
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9936
+     }
+    },
+    {
+     "id": "dev_u19",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.5068
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.3595
+     },
+     "target_quantile": {
+      "decision": "llm_fallback",
+      "max": 0.2369
+     },
+     "target_quantile_ceiling": {
+      "decision": "llm_fallback",
+      "max": 0.2369
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.2726
+     }
+    },
+    {
+     "id": "dev_u20",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.8993
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9587
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9141
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9141
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9415
+     }
+    },
+    {
+     "id": "dev_a20",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9874
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9959
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9869
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9869
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9922
+     }
+    },
+    {
+     "id": "dev_u21",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "llm_fallback",
+      "max": 0.2513
+     },
+     "target_raw": {
+      "decision": "llm_fallback",
+      "max": 0.1256
+     },
+     "target_quantile": {
+      "decision": "llm_fallback",
+      "max": 0.1115
+     },
+     "target_quantile_ceiling": {
+      "decision": "llm_fallback",
+      "max": 0.1115
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.228
+     }
+    },
+    {
+     "id": "dev_u22",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9702
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9992
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9978
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9978
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9985
+     }
+    },
+    {
+     "id": "dev_a22",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9961
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9987
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9971
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9971
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9976
+     }
+    },
+    {
+     "id": "dev_u23",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9633
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9923
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9774
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9774
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9854
+     }
+    },
+    {
+     "id": "dev_u24",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.4789
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9771
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.945
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.945
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9642
+     }
+    },
+    {
+     "id": "dev_u25",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.4969
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.8364
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.7171
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.7171
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.7905
+     }
+    },
+    {
+     "id": "dev_a25",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.7526
+     },
+     "target_raw": {
+      "decision": "llm_fallback",
+      "max": 0.0696
+     },
+     "target_quantile": {
+      "decision": "llm_fallback",
+      "max": 0.0758
+     },
+     "target_quantile_ceiling": {
+      "decision": "llm_fallback",
+      "max": 0.0758
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.2173
+     }
+    },
+    {
+     "id": "dev_u26",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.504
+     },
+     "target_raw": {
+      "decision": "llm_fallback",
+      "max": 0.1765
+     },
+     "target_quantile": {
+      "decision": "llm_fallback",
+      "max": 0.1406
+     },
+     "target_quantile_ceiling": {
+      "decision": "llm_fallback",
+      "max": 0.1406
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.2377
+     }
+    },
+    {
+     "id": "dev_u27",
+     "label": "excluded",
+     "reference": {
+      "decision": "llm_fallback",
+      "max": 0.2531
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.4826
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.3001
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.3001
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.296
+     }
+    },
+    {
+     "id": "dev_a27",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9988
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9999
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9988
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9988
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9998
+     }
+    },
+    {
+     "id": "dev_u28",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "llm_fallback",
+      "max": 0.146
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0167
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0265
+     },
+     "target_quantile_ceiling": {
+      "decision": "llm_fallback",
+      "max": 0.0265
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.1087
+     }
+    },
+    {
+     "id": "dev_u29",
+     "label": "unanswerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.566
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.8331
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.7133
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.7133
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.7863
+     }
+    },
+    {
+     "id": "dev_a29",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9333
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.7378
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.522
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.522
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.6336
+     }
+    },
+    {
+     "id": "dev_a30",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9484
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.7683
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.5806
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.5806
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.699
+     }
+    },
+    {
+     "id": "dev_a31",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.7008
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9026
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.8109
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.8109
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.8722
+     }
+    },
+    {
+     "id": "dev_a32",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9979
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.998
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9961
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9961
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9962
+     }
+    },
+    {
+     "id": "dev_a33",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9907
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9964
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9888
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9888
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9931
+     }
+    },
+    {
+     "id": "dev_a34",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.74
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.014
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0244
+     },
+     "target_quantile_ceiling": {
+      "decision": "llm_fallback",
+      "max": 0.0244
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.0969
+     }
+    },
+    {
+     "id": "dev_a35",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9976
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9968
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9908
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9908
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.9939
+     }
+    },
+    {
+     "id": "dev_a36",
+     "label": "retrieval_miss",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9337
+     },
+     "target_raw": {
+      "decision": "llm_fallback",
+      "max": 0.2156
+     },
+     "target_quantile": {
+      "decision": "llm_fallback",
+      "max": 0.1604
+     },
+     "target_quantile_ceiling": {
+      "decision": "llm_fallback",
+      "max": 0.1604
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.2452
+     }
+    },
+    {
+     "id": "dev_a37",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.347
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0452
+     },
+     "target_quantile": {
+      "decision": "llm_fallback",
+      "max": 0.0562
+     },
+     "target_quantile_ceiling": {
+      "decision": "llm_fallback",
+      "max": 0.0562
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.2127
+     }
+    },
+    {
+     "id": "dev_a38",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.9871
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9942
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.9825
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.9825
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.989
+     }
+    },
+    {
+     "id": "dev_a39",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.5996
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0262
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0357
+     },
+     "target_quantile_ceiling": {
+      "decision": "llm_fallback",
+      "max": 0.0357
+     },
+     "target_probability_matched": {
+      "decision": "llm_fallback",
+      "max": 0.1506
+     }
+    },
+    {
+     "id": "dev_a40",
+     "label": "answerable",
+     "reference": {
+      "decision": "admitted",
+      "max": 0.8401
+     },
+     "target_raw": {
+      "decision": "admitted",
+      "max": 0.9224
+     },
+     "target_quantile": {
+      "decision": "admitted",
+      "max": 0.8486
+     },
+     "target_quantile_ceiling": {
+      "decision": "admitted",
+      "max": 0.8486
+     },
+     "target_probability_matched": {
+      "decision": "admitted",
+      "max": 0.8966
+     }
+    },
+    {
+     "id": "dev_a41",
+     "label": "answerable",
+     "reference": {
+      "decision": "llm_fallback",
+      "max": 0.0561
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0008
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0063
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0063
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0388
+     }
+    },
+    {
+     "id": "noise_00",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.01
+     }
+    },
+    {
+     "id": "noise_01",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0047
+     }
+    },
+    {
+     "id": "noise_02",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0005
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0103
+     }
+    },
+    {
+     "id": "noise_03",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0097
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0271
+     }
+    },
+    {
+     "id": "noise_04",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0034
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0001
+     }
+    },
+    {
+     "id": "noise_05",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0149
+     }
+    },
+    {
+     "id": "noise_06",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0032
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0184
+     }
+    },
+    {
+     "id": "noise_07",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0
+     }
+    },
+    {
+     "id": "noise_08",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0023
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0014
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0014
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0357
+     }
+    },
+    {
+     "id": "noise_09",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0159
+     }
+    },
+    {
+     "id": "noise_10",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0017
+     }
+    },
+    {
+     "id": "noise_11",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0184
+     }
+    },
+    {
+     "id": "noise_12",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0004
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0137
+     }
+    },
+    {
+     "id": "noise_13",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0009
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0039
+     }
+    },
+    {
+     "id": "noise_14",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0204
+     }
+    },
+    {
+     "id": "noise_15",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0003
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0066
+     }
+    },
+    {
+     "id": "noise_16",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0114
+     }
+    },
+    {
+     "id": "noise_17",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0004
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0004
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0004
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0354
+     }
+    },
+    {
+     "id": "noise_18",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0036
+     }
+    },
+    {
+     "id": "noise_19",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0009
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0048
+     }
+    },
+    {
+     "id": "noise_20",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0
+     }
+    },
+    {
+     "id": "noise_21",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0005
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0
+     }
+    },
+    {
+     "id": "noise_22",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0004
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0007
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0007
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0355
+     }
+    },
+    {
+     "id": "noise_23",
+     "label": "noise",
+     "reference": {
+      "decision": "refused",
+      "max": 0.0002
+     },
+     "target_raw": {
+      "decision": "refused",
+      "max": 0.0
+     },
+     "target_quantile": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_quantile_ceiling": {
+      "decision": "refused",
+      "max": 0.0001
+     },
+     "target_probability_matched": {
+      "decision": "refused",
+      "max": 0.0037
+     }
+    }
+   ]
+  }
+ }
+}

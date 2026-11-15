@@ -1,4 +1,4 @@
-# Answerability gate — dev set, 2026-11-14
+# Answerability gate — dev set, 2026-11-15
 
 eval\answerability_dev.json: 27 answerable (evidence in context), 28 unanswerable, 2 answerable-but-retrieval-missed, 1 excluded (debatable label). Adopted: `Does `passage` state the information needed to answer `question`?` over the top 3 reranked chunks, veto below 0.35. LLM calls: 0.
 
@@ -24,6 +24,6 @@ eval\answerability_dev.json: 27 answerable (evidence in context), 28 unanswerabl
 | 0.425 | 1/27 | 13/28 | 8/19 | 4 | 1 |
 | 0.45 | 2/27 | 15/28 | 10/19 | 4 | 1 |
 
-Laya latency per assessment (cuda): p50 50 ms, p95 63 ms (n=57).
+Laya latency per assessment (cuda): p50 51 ms, p95 63 ms (n=57).
 
 Lowest-scoring answerable questions: dev_a38 0.4087, dev_a40 0.4328, dev_a22 0.4656

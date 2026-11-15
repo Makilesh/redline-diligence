@@ -1,4 +1,4 @@
-# Retrieval eval — 2026-11-14
+# Retrieval eval — 2026-11-15
 
 Golden set: 35 answerable + 6 control questions · corpus: 9 documents, 111 chunks (111 retrievable) · device: cuda (NVIDIA GeForce RTX 5070 Ti Laptop GPU) · LLM calls: 0 · fact-coverage ceiling (facts present in any retrievable chunk): 99.0%
 
@@ -6,11 +6,11 @@ Percentages. fact_cov = share of expected facts present in the top-k chunk texts
 
 | ablation | fact_cov@5 | fact_cov@10 | fact_cov@context | recall@5 | recall@10 | mrr@10 | ndcg@10 | source_hit@5 | source_hit@10 | p50 ms | p95 ms |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| dense-only | 77.5 | 88.8 | — | 52.8 | 69.8 | 60.1 | 59.8 | 94.3 | 98.6 | 20 | 25 |
-| sparse-only (BM25) | 91.0 | 95.2 | — | 65.4 | 78.0 | 68.7 | 68.9 | 97.1 | 97.1 | 20 | 25 |
-| hybrid RRF (no rerank) | 89.8 | 97.1 | — | 68.6 | 80.1 | 69.0 | 69.6 | 98.6 | 98.6 | 21 | 26 |
-| production (hybrid + rerank) | 93.3 | 94.3 | 97.1 | 72.4 | 78.7 | 77.2 | 73.8 | 97.1 | 98.6 | 144 | 182 |
-| production + decomposition | 94.3 | 95.2 | 98.1 | 75.1 | 81.2 | 77.7 | 75.7 | 98.6 | 98.6 | 153 | 512 |
+| dense-only | 77.5 | 88.8 | — | 52.8 | 69.8 | 60.1 | 59.8 | 94.3 | 98.6 | 22 | 31 |
+| sparse-only (BM25) | 91.0 | 95.2 | — | 65.4 | 78.0 | 68.7 | 68.9 | 97.1 | 97.1 | 22 | 31 |
+| hybrid RRF (no rerank) | 89.8 | 97.1 | — | 68.6 | 80.1 | 69.0 | 69.6 | 98.6 | 98.6 | 24 | 33 |
+| production (hybrid + rerank) | 93.3 | 94.3 | 97.1 | 72.4 | 78.7 | 77.2 | 73.8 | 97.1 | 98.6 | 158 | 216 |
+| production + decomposition | 94.3 | 95.2 | 98.1 | 75.1 | 81.2 | 77.7 | 75.7 | 98.6 | 98.6 | 186 | 575 |
 | *whole corpus in the prompt (reference)* | 99.0 | 99.0 | 99.0 | — | — | — | — | — | — | — | — |
 
 Reference row: the retrievable corpus is 12,643 tokens (58,432 characters in 111 chunks) and fits in one prompt, so handing over everything scores the fact-coverage ceiling. On a corpus this small, fact coverage cannot separate a retrieval design from context stuffing; ranking quality (recall/MRR/nDCG at a fixed depth) and the refusal gate can.
@@ -45,45 +45,43 @@ Paired per-question effect of each stage (same questions, so each is its own con
 | production (hybrid + rerank) → production + decomposition | mrr@10 | +0.5 | [-7.6, +8.6] | 2 | 2 | no — within noise |
 | production (hybrid + rerank) → production + decomposition | ndcg@10 | +1.9 | [-3.1, +7.1] | 5 | 3 | no — within noise |
 
-## Against the previous run (2026-11-14T11:34:44+00:00)
+## Against the previous run (2026-11-14T18:55:23+00:00)
 
 Paired per-question deltas, this run minus the previous one.
 
 | comparison | metric | Δ points | 95% CI | improved | regressed | clears zero |
 |---|---|---|---|---|---|---|
-| dense-only | fact_cov@10 | +3.2 | [+0.0, +8.8] | 2 | 0 | no — within noise |
-| dense-only | recall@10 | +1.3 | [-1.1, +4.8] | 2 | 1 | no — within noise |
-| dense-only | mrr@10 | +1.9 | [+0.0, +5.7] | 1 | 0 | no — within noise |
-| dense-only | ndcg@10 | +3.2 | [-0.1, +7.7] | 4 | 2 | no — within noise |
-| sparse-only (BM25) | fact_cov@10 | +22.1 | [+11.1, +34.5] | 11 | 0 | yes |
-| sparse-only (BM25) | recall@10 | +31.4 | [+19.6, +43.9] | 19 | 0 | yes |
-| sparse-only (BM25) | mrr@10 | +16.7 | [+2.5, +31.7] | 14 | 7 | yes |
-| sparse-only (BM25) | ndcg@10 | +23.4 | [+12.2, +35.8] | 22 | 7 | yes |
-| hybrid RRF (no rerank) | fact_cov@10 | +11.9 | [+3.7, +22.0] | 7 | 0 | yes |
-| hybrid RRF (no rerank) | recall@10 | +18.6 | [+9.7, +28.7] | 14 | 0 | yes |
-| hybrid RRF (no rerank) | mrr@10 | +8.7 | [-3.1, +21.0] | 12 | 6 | no — within noise |
-| hybrid RRF (no rerank) | ndcg@10 | +15.2 | [+6.5, +24.2] | 22 | 7 | yes |
-| production (hybrid + rerank) | fact_cov@10 | +3.6 | [-3.4, +11.8] | 3 | 1 | no — within noise |
-| production (hybrid + rerank) | fact_cov@context | +5.5 | [+0.0, +12.4] | 3 | 0 | no — within noise |
-| production (hybrid + rerank) | recall@10 | +2.2 | [-5.5, +11.1] | 4 | 5 | no — within noise |
-| production (hybrid + rerank) | mrr@10 | -1.4 | [-8.1, +6.7] | 1 | 4 | no — within noise |
-| production (hybrid + rerank) | ndcg@10 | +2.5 | [-4.9, +11.3] | 5 | 9 | no — within noise |
-| production + decomposition | fact_cov@10 | +3.6 | [-3.4, +11.8] | 3 | 1 | no — within noise |
-| production + decomposition | fact_cov@context | +5.5 | [+0.0, +12.4] | 3 | 0 | no — within noise |
-| production + decomposition | recall@10 | +4.0 | [-2.9, +12.4] | 4 | 3 | no — within noise |
-| production + decomposition | mrr@10 | +0.5 | [-5.7, +8.1] | 1 | 2 | no — within noise |
-| production + decomposition | ndcg@10 | +3.4 | [-3.0, +11.4] | 7 | 6 | no — within noise |
+| dense-only | fact_cov@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| dense-only | recall@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| dense-only | mrr@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| dense-only | ndcg@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| sparse-only (BM25) | fact_cov@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| sparse-only (BM25) | recall@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| sparse-only (BM25) | mrr@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| sparse-only (BM25) | ndcg@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| hybrid RRF (no rerank) | fact_cov@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| hybrid RRF (no rerank) | recall@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| hybrid RRF (no rerank) | mrr@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| hybrid RRF (no rerank) | ndcg@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| production (hybrid + rerank) | fact_cov@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| production (hybrid + rerank) | fact_cov@context | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| production (hybrid + rerank) | recall@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| production (hybrid + rerank) | mrr@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| production (hybrid + rerank) | ndcg@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| production + decomposition | fact_cov@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| production + decomposition | fact_cov@context | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| production + decomposition | recall@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| production + decomposition | mrr@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
+| production + decomposition | ndcg@10 | +0.0 | [+0.0, +0.0] | 0 | 0 | no — within noise |
 
 | ablation | p50 ms before → after | p95 ms before → after |
 |---|---|---|
-| dense-only | 33 → 20 | 46 → 25 |
-| sparse-only (BM25) | 33 → 20 | 46 → 25 |
-| hybrid RRF (no rerank) | 35 → 21 | 47 → 26 |
-| production (hybrid + rerank) | 943 → 144 | 1249 → 182 |
-| production + decomposition | 1044 → 153 | 4572 → 512 |
+| dense-only | 20 → 22 | 25 → 31 |
+| sparse-only (BM25) | 20 → 22 | 25 → 31 |
+| hybrid RRF (no rerank) | 21 → 24 | 26 → 33 |
+| production (hybrid + rerank) | 144 → 158 | 182 → 216 |
+| production + decomposition | 153 → 186 | 512 → 575 |
 
-Changed on fact_cov@context (production (hybrid + rerank)): fin_03 20.0→100.0, comp_05 20.0→100.0, mh_06 66.7→100.0
-Changed on fact_cov@context (production + decomposition): fin_03 20.0→100.0, comp_05 20.0→100.0, mh_06 66.7→100.0
 
 ## production (hybrid + rerank) — by query type
 
@@ -139,10 +137,12 @@ Laya can only take admission away (veto an admitted context, or refuse in the am
 | production + decomposition | answerable | heuristic | 33 | 1 | 1 |
 | production + decomposition | answerable | + Laya | 33 | 1 | 1 |
 
-Laya latency (production (hybrid + rerank), device cuda): p50 47 ms, p95 63 ms over 38 assessments.
-Laya latency (production + decomposition, device cuda): p50 66 ms, p95 227 ms over 39 assessments.
+Laya latency (production (hybrid + rerank), device cuda): p50 47 ms, p95 71 ms over 38 assessments.
+Laya latency (production + decomposition, device cuda): p50 67 ms, p95 249 ms over 39 assessments.
 
 Changed by Laya: ctrl_02 (production) admitted→refused P=0.2941, ctrl_02 (production_decomp) admitted→refused P=0.2941, ctrl_03 (production) llm_fallback→refused P=0.1803, ctrl_03 (production_decomp) llm_fallback→refused P=0.1803
 
 Controls, Laya answerability (production): ctrl_01 P=None, ctrl_02 P=0.2941, ctrl_03 P=0.1803, ctrl_04 P=0.5206, ctrl_05 P=0.4181, ctrl_06 P=None
+
+Baseline check (eval/baseline.json, tolerance 2.0pp): **PASS**
 

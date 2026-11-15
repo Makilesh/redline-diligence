@@ -1,12 +1,13 @@
 {
- "generated_at": "2026-11-14T19:01:02+00:00",
+ "generated_at": "2026-11-15T09:33:21+00:00",
  "command": "python -m eval.run_answerability_eval ",
  "dev_set": "eval\\answerability_dev.json",
  "config": {
   "instruction": "Does `passage` state the information needed to answer `question`?",
   "top_k_passages": 3,
   "veto_threshold": 0.35,
-  "threads": null
+  "threads": null,
+  "early_exit": false
  },
  "environment": {
   "laya_device": "cuda"
@@ -160,8 +161,8 @@
   }
  },
  "laya_latency_ms": {
-  "p50": 50.2,
-  "p95": 63.160000000000004,
+  "p50": 50.9,
+  "p95": 63.18000000000001,
   "n": 57
  },
  "questions": [
@@ -173,7 +174,7 @@
    "max_reranker_score": 0.3211,
    "laya": "admitted",
    "answerability": 0.4752,
-   "laya_ms": 51.6
+   "laya_ms": 49.6
   },
   {
    "id": "dev_a01",
@@ -183,7 +184,7 @@
    "max_reranker_score": 0.4207,
    "laya": "admitted",
    "answerability": 0.5318,
-   "laya_ms": 59.4
+   "laya_ms": 57.4
   },
   {
    "id": "dev_u02",
@@ -193,7 +194,7 @@
    "max_reranker_score": 0.9903,
    "laya": "refused",
    "answerability": 0.23,
-   "laya_ms": 42.7
+   "laya_ms": 41.8
   },
   {
    "id": "dev_u03",
@@ -203,7 +204,7 @@
    "max_reranker_score": 0.301,
    "laya": "refused",
    "answerability": 0.2184,
-   "laya_ms": 37.3
+   "laya_ms": 35.5
   },
   {
    "id": "dev_a03",
@@ -213,7 +214,7 @@
    "max_reranker_score": 0.9909,
    "laya": "admitted",
    "answerability": 0.6022,
-   "laya_ms": 34.4
+   "laya_ms": 34.2
   },
   {
    "id": "dev_u04",
@@ -223,7 +224,7 @@
    "max_reranker_score": 0.239,
    "laya": "refused",
    "answerability": 0.2844,
-   "laya_ms": 49.5
+   "laya_ms": 50.1
   },
   {
    "id": "dev_u05",
@@ -233,7 +234,7 @@
    "max_reranker_score": 0.8882,
    "laya": "refused",
    "answerability": 0.3166,
-   "laya_ms": 50.2
+   "laya_ms": 50.4
   },
   {
    "id": "dev_a05",
@@ -243,7 +244,7 @@
    "max_reranker_score": 0.995,
    "laya": "admitted",
    "answerability": 0.5109,
-   "laya_ms": 49.8
+   "laya_ms": 50.0
   },
   {
    "id": "dev_u06",
@@ -253,7 +254,7 @@
    "max_reranker_score": 0.1071,
    "laya": "llm_fallback",
    "answerability": 0.4677,
-   "laya_ms": 35.7
+   "laya_ms": 36.6
   },
   {
    "id": "dev_a06",
@@ -263,7 +264,7 @@
    "max_reranker_score": 0.8804,
    "laya": "admitted",
    "answerability": 0.4868,
-   "laya_ms": 32.3
+   "laya_ms": 33.1
   },
   {
    "id": "dev_u07",
@@ -273,7 +274,7 @@
    "max_reranker_score": 0.0674,
    "laya": "llm_fallback",
    "answerability": 0.4755,
-   "laya_ms": 47.5
+   "laya_ms": 47.9
   },
   {
    "id": "dev_a07",
@@ -283,7 +284,7 @@
    "max_reranker_score": 0.6067,
    "laya": "admitted",
    "answerability": 0.6171,
-   "laya_ms": 54.8
+   "laya_ms": 55.1
   },
   {
    "id": "dev_u08",
@@ -293,7 +294,7 @@
    "max_reranker_score": 0.0736,
    "laya": "refused",
    "answerability": 0.1993,
-   "laya_ms": 52.1
+   "laya_ms": 51.4
   },
   {
    "id": "dev_u09",
@@ -303,7 +304,7 @@
    "max_reranker_score": 0.5101,
    "laya": "admitted",
    "answerability": 0.7422,
-   "laya_ms": 56.1
+   "laya_ms": 56.9
   },
   {
    "id": "dev_a09",
@@ -313,7 +314,7 @@
    "max_reranker_score": 0.9987,
    "laya": "admitted",
    "answerability": 0.6787,
-   "laya_ms": 56.5
+   "laya_ms": 56.7
   },
   {
    "id": "dev_u10",
@@ -323,7 +324,7 @@
    "max_reranker_score": 0.681,
    "laya": "admitted",
    "answerability": 0.5411,
-   "laya_ms": 31.7
+   "laya_ms": 31.9
   },
   {
    "id": "dev_a10",
@@ -333,7 +334,7 @@
    "max_reranker_score": 0.7162,
    "laya": "admitted",
    "answerability": 0.5248,
-   "laya_ms": 54.4
+   "laya_ms": 55.3
   },
   {
    "id": "dev_u11",
@@ -353,7 +354,7 @@
    "max_reranker_score": 0.3143,
    "laya": "refused",
    "answerability": 0.3031,
-   "laya_ms": 57.5
+   "laya_ms": 59.7
   },
   {
    "id": "dev_u13",
@@ -363,7 +364,7 @@
    "max_reranker_score": 0.9603,
    "laya": "admitted",
    "answerability": 0.4353,
-   "laya_ms": 49.5
+   "laya_ms": 54.6
   },
   {
    "id": "dev_a13",
@@ -373,7 +374,7 @@
    "max_reranker_score": 0.9352,
    "laya": "admitted",
    "answerability": 0.5074,
-   "laya_ms": 49.7
+   "laya_ms": 49.3
   },
   {
    "id": "dev_u14",
@@ -383,7 +384,7 @@
    "max_reranker_score": 0.9766,
    "laya": "refused",
    "answerability": 0.3199,
-   "laya_ms": 62.9
+   "laya_ms": 60.2
   },
   {
    "id": "dev_u15",
@@ -393,7 +394,7 @@
    "max_reranker_score": 0.7803,
    "laya": "admitted",
    "answerability": 0.3767,
-   "laya_ms": 64.2
+   "laya_ms": 62.6
   },
   {
    "id": "dev_a15",
@@ -403,7 +404,7 @@
    "max_reranker_score": 0.9789,
    "laya": "admitted",
    "answerability": 0.6825,
-   "laya_ms": 39.9
+   "laya_ms": 38.2
   },
   {
    "id": "dev_u16",
@@ -423,7 +424,7 @@
    "max_reranker_score": 0.2117,
    "laya": "llm_fallback",
    "answerability": 0.6518,
-   "laya_ms": 51.8
+   "laya_ms": 50.5
   },
   {
    "id": "dev_u17",
@@ -433,7 +434,7 @@
    "max_reranker_score": 0.9636,
    "laya": "admitted",
    "answerability": 0.5784,
-   "laya_ms": 59.4
+   "laya_ms": 60.0
   },
   {
    "id": "dev_a17",
@@ -443,7 +444,7 @@
    "max_reranker_score": 0.9964,
    "laya": "admitted",
    "answerability": 0.7299,
-   "laya_ms": 59.7
+   "laya_ms": 60.9
   },
   {
    "id": "dev_u18",
@@ -453,7 +454,7 @@
    "max_reranker_score": 0.5189,
    "laya": "refused",
    "answerability": 0.3205,
-   "laya_ms": 37.0
+   "laya_ms": 37.6
   },
   {
    "id": "dev_a18",
@@ -473,7 +474,7 @@
    "max_reranker_score": 0.5068,
    "laya": "refused",
    "answerability": 0.2522,
-   "laya_ms": 57.9
+   "laya_ms": 59.4
   },
   {
    "id": "dev_u20",
@@ -483,7 +484,7 @@
    "max_reranker_score": 0.8993,
    "laya": "admitted",
    "answerability": 0.4665,
-   "laya_ms": 71.6
+   "laya_ms": 73.6
   },
   {
    "id": "dev_a20",
@@ -493,7 +494,7 @@
    "max_reranker_score": 0.9874,
    "laya": "admitted",
    "answerability": 0.5792,
-   "laya_ms": 44.9
+   "laya_ms": 28.8
   },
   {
    "id": "dev_u21",
@@ -503,7 +504,7 @@
    "max_reranker_score": 0.2513,
    "laya": "llm_fallback",
    "answerability": 0.4175,
-   "laya_ms": 56.1
+   "laya_ms": 56.6
   },
   {
    "id": "dev_u22",
@@ -513,7 +514,7 @@
    "max_reranker_score": 0.9702,
    "laya": "admitted",
    "answerability": 0.437,
-   "laya_ms": 52.7
+   "laya_ms": 56.7
   },
   {
    "id": "dev_a22",
@@ -523,7 +524,7 @@
    "max_reranker_score": 0.9961,
    "laya": "admitted",
    "answerability": 0.4656,
-   "laya_ms": 52.3
+   "laya_ms": 55.6
   },
   {
    "id": "dev_u23",
@@ -533,7 +534,7 @@
    "max_reranker_score": 0.9633,
    "laya": "admitted",
    "answerability": 0.5327,
-   "laya_ms": 53.3
+   "laya_ms": 55.3
   },
   {
    "id": "dev_u24",
@@ -543,7 +544,7 @@
    "max_reranker_score": 0.4789,
    "laya": "admitted",
    "answerability": 0.7021,
-   "laya_ms": 37.4
+   "laya_ms": 40.4
   },
   {
    "id": "dev_u25",
@@ -553,7 +554,7 @@
    "max_reranker_score": 0.4969,
    "laya": "admitted",
    "answerability": 0.5421,
-   "laya_ms": 36.7
+   "laya_ms": 40.5
   },
   {
    "id": "dev_a25",
@@ -563,7 +564,7 @@
    "max_reranker_score": 0.7526,
    "laya": "admitted",
    "answerability": 0.5748,
-   "laya_ms": 48.8
+   "laya_ms": 54.5
   },
   {
    "id": "dev_u26",
@@ -573,7 +574,7 @@
    "max_reranker_score": 0.504,
    "laya": "refused",
    "answerability": 0.344,
-   "laya_ms": 61.2
+   "laya_ms": 65.5
   },
   {
    "id": "dev_u27",
@@ -583,7 +584,7 @@
    "max_reranker_score": 0.2531,
    "laya": "llm_fallback",
    "answerability": 0.4823,
-   "laya_ms": 59.1
+   "laya_ms": 62.2
   },
   {
    "id": "dev_a27",
@@ -593,7 +594,7 @@
    "max_reranker_score": 0.9988,
    "laya": "admitted",
    "answerability": 0.6112,
-   "laya_ms": 37.4
+   "laya_ms": 40.3
   },
   {
    "id": "dev_u28",
@@ -603,7 +604,7 @@
    "max_reranker_score": 0.146,
    "laya": "llm_fallback",
    "answerability": 0.4991,
-   "laya_ms": 51.2
+   "laya_ms": 50.9
   },
   {
    "id": "dev_u29",
@@ -613,7 +614,7 @@
    "max_reranker_score": 0.566,
    "laya": "admitted",
    "answerability": 0.5461,
-   "laya_ms": 56.9
+   "laya_ms": 58.5
   },
   {
    "id": "dev_a29",
@@ -623,7 +624,7 @@
    "max_reranker_score": 0.9333,
    "laya": "admitted",
    "answerability": 0.5594,
-   "laya_ms": 38.2
+   "laya_ms": 39.2
   },
   {
    "id": "dev_a30",
@@ -633,7 +634,7 @@
    "max_reranker_score": 0.9484,
    "laya": "admitted",
    "answerability": 0.6357,
-   "laya_ms": 40.5
+   "laya_ms": 42.3
   },
   {
    "id": "dev_a31",
@@ -643,7 +644,7 @@
    "max_reranker_score": 0.7008,
    "laya": "admitted",
    "answerability": 0.4711,
-   "laya_ms": 56.7
+   "laya_ms": 57.0
   },
   {
    "id": "dev_a32",
@@ -653,7 +654,7 @@
    "max_reranker_score": 0.9979,
    "laya": "admitted",
    "answerability": 0.6316,
-   "laya_ms": 37.0
+   "laya_ms": 39.8
   },
   {
    "id": "dev_a33",
@@ -663,7 +664,7 @@
    "max_reranker_score": 0.9907,
    "laya": "admitted",
    "answerability": 0.6154,
-   "laya_ms": 42.0
+   "laya_ms": 43.4
   },
   {
    "id": "dev_a34",
@@ -673,7 +674,7 @@
    "max_reranker_score": 0.74,
    "laya": "admitted",
    "answerability": 0.4846,
-   "laya_ms": 43.5
+   "laya_ms": 44.5
   },
   {
    "id": "dev_a35",
@@ -683,7 +684,7 @@
    "max_reranker_score": 0.9976,
    "laya": "admitted",
    "answerability": 0.4742,
-   "laya_ms": 76.0
+   "laya_ms": 77.3
   },
   {
    "id": "dev_a36",
@@ -693,7 +694,7 @@
    "max_reranker_score": 0.9337,
    "laya": "refused",
    "answerability": 0.226,
-   "laya_ms": 52.5
+   "laya_ms": 55.0
   },
   {
    "id": "dev_a37",
@@ -703,7 +704,7 @@
    "max_reranker_score": 0.347,
    "laya": "admitted",
    "answerability": 0.4799,
-   "laya_ms": 35.5
+   "laya_ms": 37.1
   },
   {
    "id": "dev_a38",
@@ -713,7 +714,7 @@
    "max_reranker_score": 0.9871,
    "laya": "admitted",
    "answerability": 0.4087,
-   "laya_ms": 48.5
+   "laya_ms": 50.4
   },
   {
    "id": "dev_a39",
@@ -723,7 +724,7 @@
    "max_reranker_score": 0.5996,
    "laya": "admitted",
    "answerability": 0.5237,
-   "laya_ms": 42.6
+   "laya_ms": 43.5
   },
   {
    "id": "dev_a40",
@@ -733,7 +734,7 @@
    "max_reranker_score": 0.8401,
    "laya": "admitted",
    "answerability": 0.4328,
-   "laya_ms": 35.2
+   "laya_ms": 38.6
   },
   {
    "id": "dev_a41",
@@ -743,8 +744,8 @@
    "max_reranker_score": 0.0561,
    "laya": "llm_fallback",
    "answerability": 0.5896,
-   "laya_ms": 49.2
+   "laya_ms": 53.2
   }
  ],
- "total_seconds": 39.8
+ "total_seconds": 43.2
 }

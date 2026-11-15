@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-14T18:59:59+00:00",
+ "generated_at": "2026-11-15T09:31:05+00:00",
  "command": "python -m eval.run_verification_eval ",
  "splits": {
   "dev": {
@@ -7,15 +7,15 @@
     "items": 276,
     "supported": 109,
     "negative": 167,
-    "false_pass_rate": 0.0838,
-    "false_passes": 14,
-    "negative_caught_locally": 0.3293,
-    "negative_to_judge": 0.5868,
+    "false_pass_rate": 0.0419,
+    "false_passes": 7,
+    "negative_caught_locally": 0.6108,
+    "negative_to_judge": 0.3473,
     "false_alarm_rate": 0.0275,
     "false_alarms": 3,
     "supported_pass_rate": 0.6697,
     "supported_to_judge": 0.3028,
-    "judge_load": 0.4746
+    "judge_load": 0.3297
    },
    "by_label": {
     "supported": {
@@ -28,17 +28,17 @@
     },
     "unsupported": {
      "n": 20,
-     "pass": 0,
-     "judge": 4,
+     "pass": 1,
+     "judge": 3,
      "warn": 10,
      "fail": 6,
      "skipped": 0
     },
     "contradicted": {
      "n": 147,
-     "pass": 14,
-     "judge": 94,
-     "warn": 8,
+     "pass": 6,
+     "judge": 55,
+     "warn": 55,
      "fail": 31,
      "skipped": 0
     }
@@ -78,25 +78,25 @@
     },
     "contradicted/negation": {
      "n": 46,
-     "pass": 4,
-     "judge": 39,
-     "warn": 3,
+     "pass": 1,
+     "judge": 10,
+     "warn": 35,
      "fail": 0,
      "skipped": 0
     },
     "contradicted/party": {
      "n": 20,
-     "pass": 6,
-     "judge": 11,
-     "warn": 3,
+     "pass": 3,
+     "judge": 5,
+     "warn": 12,
      "fail": 0,
      "skipped": 0
     },
     "contradicted/period": {
      "n": 8,
-     "pass": 2,
-     "judge": 6,
-     "warn": 0,
+     "pass": 0,
+     "judge": 2,
+     "warn": 6,
      "fail": 0,
      "skipped": 0
     },
@@ -142,8 +142,8 @@
     },
     "unsupported/absent": {
      "n": 11,
-     "pass": 0,
-     "judge": 1,
+     "pass": 1,
+     "judge": 0,
      "warn": 10,
      "fail": 0,
      "skipped": 0
@@ -163,38 +163,38 @@
     "items": 266,
     "supported": 101,
     "negative": 165,
-    "false_pass_rate": 0.097,
-    "false_passes": 16,
-    "negative_caught_locally": 0.3212,
-    "negative_to_judge": 0.5818,
-    "false_alarm_rate": 0.0495,
-    "false_alarms": 5,
+    "false_pass_rate": 0.0667,
+    "false_passes": 11,
+    "negative_caught_locally": 0.5636,
+    "negative_to_judge": 0.3697,
+    "false_alarm_rate": 0.0297,
+    "false_alarms": 3,
     "supported_pass_rate": 0.6436,
-    "supported_to_judge": 0.3069,
-    "judge_load": 0.4774
+    "supported_to_judge": 0.3267,
+    "judge_load": 0.3534
    },
    "by_label": {
     "supported": {
      "n": 101,
      "pass": 65,
-     "judge": 31,
-     "warn": 5,
+     "judge": 33,
+     "warn": 3,
      "fail": 0,
      "skipped": 0
     },
     "unsupported": {
      "n": 20,
      "pass": 0,
-     "judge": 5,
-     "warn": 10,
+     "judge": 2,
+     "warn": 13,
      "fail": 5,
      "skipped": 0
     },
     "contradicted": {
      "n": 145,
-     "pass": 16,
-     "judge": 91,
-     "warn": 9,
+     "pass": 11,
+     "judge": 59,
+     "warn": 46,
      "fail": 29,
      "skipped": 0
     }
@@ -226,33 +226,33 @@
     },
     "contradicted/misattributed": {
      "n": 40,
-     "pass": 6,
-     "judge": 34,
-     "warn": 0,
+     "pass": 4,
+     "judge": 35,
+     "warn": 1,
      "fail": 0,
      "skipped": 0
     },
     "contradicted/negation": {
      "n": 40,
-     "pass": 5,
-     "judge": 29,
-     "warn": 6,
+     "pass": 3,
+     "judge": 7,
+     "warn": 30,
      "fail": 0,
      "skipped": 0
     },
     "contradicted/party": {
      "n": 15,
-     "pass": 4,
-     "judge": 10,
-     "warn": 1,
+     "pass": 3,
+     "judge": 2,
+     "warn": 10,
      "fail": 0,
      "skipped": 0
     },
     "contradicted/period": {
      "n": 4,
      "pass": 0,
-     "judge": 4,
-     "warn": 0,
+     "judge": 1,
+     "warn": 3,
      "fail": 0,
      "skipped": 0
     },
@@ -283,8 +283,8 @@
     "supported/paraphrase": {
      "n": 59,
      "pass": 35,
-     "judge": 19,
-     "warn": 5,
+     "judge": 21,
+     "warn": 3,
      "fail": 0,
      "skipped": 0
     },
@@ -299,8 +299,8 @@
     "unsupported/absent": {
      "n": 13,
      "pass": 0,
-     "judge": 3,
-     "warn": 10,
+     "judge": 0,
+     "warn": 13,
      "fail": 0,
      "skipped": 0
     },
@@ -345,7 +345,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f001.2",
@@ -358,7 +358,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.002,
+     "score": 0.175,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $452.8M, $387.1M",
      "numbers": [
       {
@@ -376,7 +376,7 @@
      ]
     }
    ],
-   "elapsed_ms": 5437.0
+   "elapsed_ms": 5235.0
   },
   {
    "id": "f001.3",
@@ -412,7 +412,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f001.4",
@@ -448,7 +448,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f001.5",
@@ -471,7 +471,7 @@
      ]
     }
    ],
-   "elapsed_ms": 93.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f001.6",
@@ -484,7 +484,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.441,
+     "score": 0.093,
      "reason": "$387.1 million is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -497,7 +497,7 @@
      ]
     }
    ],
-   "elapsed_ms": 313.0
+   "elapsed_ms": 141.0
   },
   {
    "id": "f001.7",
@@ -510,7 +510,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.007,
+     "score": 0.097,
      "reason": "$452.8 million is in the documents, but the documents give this figure for 2023, not 2022",
      "numbers": [
       {
@@ -523,7 +523,7 @@
      ]
     }
    ],
-   "elapsed_ms": 94.0
+   "elapsed_ms": 109.0
   },
   {
    "id": "f001.8",
@@ -559,7 +559,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.0,
+     "score": 0.228,
      "reason": "",
      "numbers": [
       {
@@ -581,7 +581,7 @@
      ]
     }
    ],
-   "elapsed_ms": 218.0
+   "elapsed_ms": 250.0
   },
   {
    "id": "f003.1",
@@ -663,7 +663,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.004,
+     "score": 0.226,
      "reason": "$66.6 million is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -683,7 +683,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f003.4",
@@ -696,7 +696,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.003,
+     "score": 0.036,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $72.4 million",
      "numbers": [
       {
@@ -708,7 +708,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f005.1",
@@ -787,7 +787,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f005.3",
@@ -800,7 +800,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.065,
+     "score": 0.024,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $61.9 million",
      "numbers": [
       {
@@ -812,7 +812,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f005.4",
@@ -823,9 +823,9 @@
    "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.16,
+     "status": "supported",
+     "method": "nli",
+     "score": 0.689,
      "reason": "",
      "numbers": [
       {
@@ -847,7 +847,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f005.5",
@@ -860,7 +860,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.006,
+     "score": 0.103,
      "reason": "15.0% is in the documents, but the documents give this figure for 2023, not 2022",
      "numbers": [
       {
@@ -880,7 +880,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f007.1",
@@ -911,7 +911,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f007.2",
@@ -942,7 +942,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f007.3",
@@ -1044,7 +1044,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f009.3",
@@ -1057,7 +1057,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.001,
+     "score": 0.208,
      "reason": "$78.2 million is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -1077,7 +1077,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f009.4",
@@ -1090,7 +1090,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.009,
+     "score": 0.024,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $67.8 million",
      "numbers": [
       {
@@ -1102,7 +1102,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f011.1",
@@ -1139,7 +1139,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f011.2",
@@ -1170,7 +1170,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f011.3",
@@ -1183,7 +1183,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.001,
+     "score": 0.1,
      "reason": "$122.0 million is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -1202,7 +1202,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f011.4",
@@ -1215,7 +1215,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.016,
+     "score": 0.051,
      "reason": "$110.0 million is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -1228,7 +1228,7 @@
      ]
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f013.1",
@@ -1241,7 +1241,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.0,
+     "score": 0.036,
      "reason": "$97.3 million is in the documents, but the statement names another item (adjusted ebitda restructuring) whose figure is different",
      "numbers": [
       {
@@ -1254,7 +1254,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f013.2",
@@ -1315,7 +1315,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f013.4",
@@ -1365,7 +1365,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.212,
+     "score": 0.045,
      "reason": "20.5% is in the documents, but the statement names another item (adjusted ebitda margin) whose figure is different",
      "numbers": [
       {
@@ -1378,7 +1378,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f015.1",
@@ -1478,7 +1478,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f015.4",
@@ -1491,7 +1491,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.04,
+     "score": 0.193,
      "reason": "0.7x is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -1504,7 +1504,7 @@
      ]
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f015.5",
@@ -1527,7 +1527,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f015.6",
@@ -1540,8 +1540,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.997,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.046,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: 2.0x",
      "numbers": [
       {
        "raw": "2.0x",
@@ -1552,7 +1552,7 @@
      ]
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f017.1",
@@ -1608,7 +1608,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f017.3",
@@ -1631,7 +1631,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f017.4",
@@ -1644,7 +1644,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.944,
+     "score": 0.096,
      "reason": "2,412 is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -1657,7 +1657,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f017.5",
@@ -1665,17 +1665,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Enterprise customers fell from 284 in FY2022 to 231 in FY2023.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.997,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.132,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f019.1",
@@ -1688,12 +1688,12 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.445,
+     "score": 0.336,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f019.2",
@@ -1706,12 +1706,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.993,
+     "score": 0.84,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f019.3",
@@ -1719,17 +1719,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "The Company has retained JPMorgan Chase as financial advisor.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.055,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f019.4",
@@ -1737,17 +1737,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The Board of Directors rejected the exploration of strategic alternatives on February 15, 2024.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.03,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 62.0
   },
   {
    "id": "f019.5",
@@ -1755,17 +1755,17 @@
    "label": "contradicted",
    "kind": "period",
    "claim": "The Board approved the exploration of strategic alternatives on February 15, 2023.",
-   "outcome": "pass",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "supported",
+     "status": "unsupported",
      "method": "nli",
-     "score": 0.785,
-     "reason": "",
+     "score": 0.07,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f021.1",
@@ -1778,7 +1778,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.005,
+     "score": 0.126,
      "reason": "$99.0 million is in the documents, but the statement names another item (earning quality report) whose figure is different",
      "numbers": [
       {
@@ -1798,7 +1798,7 @@
      ]
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f021.2",
@@ -1860,7 +1860,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f021.4",
@@ -1873,7 +1873,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.0,
+     "score": 0.105,
      "reason": "34.1% is in the documents, but the documents give this figure for 2023, not 2022",
      "numbers": [
       {
@@ -1886,7 +1886,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f021.5",
@@ -1899,7 +1899,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.995,
+     "score": 0.204,
      "reason": "21.9% is in the documents, but the documents give this figure for 2023, not 2022",
      "numbers": [
       {
@@ -1912,7 +1912,7 @@
      ]
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f021.6",
@@ -1935,7 +1935,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f021.7",
@@ -1948,7 +1948,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.007,
+     "score": 0.132,
      "reason": "$6.2 million is in the documents, but the documents give this figure for 2023, not 2022",
      "numbers": [
       {
@@ -1961,7 +1961,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f021.8",
@@ -1996,7 +1996,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f023.1",
@@ -2034,7 +2034,7 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.998,
+     "score": 0.822,
      "reason": "",
      "numbers": []
     }
@@ -2047,17 +2047,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Management expects further restructuring charges in future periods.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.003,
-     "reason": "",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.086,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f023.4",
@@ -2065,17 +2065,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "The restructuring charge relates to the closure of the San Jose development center.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.031,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f023.5",
@@ -2083,17 +2083,17 @@
    "label": "contradicted",
    "kind": "period",
    "claim": "The Austin development center was closed in Q1 FY2023.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.997,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.071,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 63.0
   },
   {
    "id": "f023.6",
@@ -2106,12 +2106,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.0,
+     "score": 0.018,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f025.1",
@@ -2119,17 +2119,17 @@
    "label": "supported",
    "kind": "paraphrase",
    "claim": "The FY2023 SOC 2 Type II examination came back clean, with no exceptions.",
-   "outcome": "warn",
+   "outcome": "judge",
    "checks": [
     {
-     "status": "unsupported",
-     "method": "nli",
-     "score": 0.003,
-     "reason": "no retrieved passage entails this statement",
+     "status": "unverified",
+     "method": "none",
+     "score": 0.395,
+     "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f025.2",
@@ -2162,17 +2162,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The FY2023 SOC 2 Type II examination was issued with several exceptions.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.052,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f025.4",
@@ -2180,17 +2180,17 @@
    "label": "contradicted",
    "kind": "period",
    "claim": "The control gaps were identified in the FY2023 SOC 2 Type II examination.",
-   "outcome": "pass",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "supported",
+     "status": "unsupported",
      "method": "nli",
-     "score": 0.99,
-     "reason": "",
+     "score": 0.182,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f025.5",
@@ -2203,8 +2203,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.058,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: $2.8 million",
      "numbers": [
       {
        "raw": "$2.8 million",
@@ -2215,7 +2215,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f027.1",
@@ -2223,17 +2223,17 @@
    "label": "supported",
    "kind": "paraphrase",
    "claim": "Because peers mostly expense software development, the report reduces EBITDA by the amount Aurora capitalized.",
-   "outcome": "judge",
+   "outcome": "pass",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.047,
+     "status": "supported",
+     "method": "nli",
+     "score": 0.433,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f027.2",
@@ -2258,7 +2258,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f027.3",
@@ -2271,12 +2271,12 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.228,
+     "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f027.4",
@@ -2289,7 +2289,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.281,
+     "score": 0.09,
      "reason": "$2.7 million is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -2310,17 +2310,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Peer practice in this segment is predominantly to capitalize internally developed software.",
-   "outcome": "pass",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "supported",
+     "status": "unsupported",
      "method": "nli",
-     "score": 0.96,
-     "reason": "",
+     "score": 0.12,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f029.1",
@@ -2351,7 +2351,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f029.2",
@@ -2389,7 +2389,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.916,
+     "score": 0.101,
      "reason": "118% is in the documents, but the statement names another item (gross retention revenue) whose figure is different",
      "numbers": [
       {
@@ -2402,7 +2402,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f029.4",
@@ -2415,7 +2415,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.973,
+     "score": 0.124,
      "reason": "114% is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -2428,7 +2428,7 @@
      ]
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f029.5",
@@ -2476,7 +2476,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f031.2",
@@ -2489,7 +2489,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.001,
+     "score": 0.022,
      "reason": "$50.2 is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -2508,7 +2508,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f031.3",
@@ -2521,7 +2521,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.001,
+     "score": 0.024,
      "reason": "$61.3 is in the documents, but the statement names another item (capital peg working) whose figure is different",
      "numbers": [
       {
@@ -2534,7 +2534,7 @@
      ]
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f031.4",
@@ -2570,12 +2570,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.984,
+     "score": 0.657,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f031.6",
@@ -2583,17 +2583,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The report identified a material deterioration in collections.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.034,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f033.1",
@@ -2606,12 +2606,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.969,
+     "score": 0.504,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f033.2",
@@ -2624,12 +2624,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.998,
+     "score": 0.521,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f033.3",
@@ -2642,12 +2642,12 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.213,
+     "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f033.4",
@@ -2660,8 +2660,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.216,
+     "reason": "",
      "numbers": []
     }
    ],
@@ -2690,7 +2690,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f035.1",
@@ -2698,17 +2698,17 @@
    "label": "supported",
    "kind": "paraphrase",
    "claim": "Aurora survives the merger as a wholly owned subsidiary of Vertex Capital Partners.",
-   "outcome": "judge",
+   "outcome": "pass",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.94,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "supported",
+     "method": "nli",
+     "score": 0.565,
+     "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f035.2",
@@ -2721,12 +2721,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.995,
+     "score": 0.812,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f035.3",
@@ -2739,12 +2739,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.0,
+     "score": 0.085,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f035.4",
@@ -2757,12 +2757,12 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.189,
+     "score": 0.303,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f035.5",
@@ -2770,17 +2770,17 @@
    "label": "contradicted",
    "kind": "period",
    "claim": "The merger agreement was entered into as of March 15, 2023.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.992,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.071,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f037.1",
@@ -2805,7 +2805,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f037.2",
@@ -2818,7 +2818,7 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.991,
+     "score": 0.825,
      "reason": "",
      "numbers": []
     }
@@ -2846,7 +2846,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f037.4",
@@ -2854,17 +2854,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The Company is in default under several Material Contracts.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.026,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f039.1",
@@ -2877,7 +2877,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.004,
+     "score": 0.028,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $10.0 million",
      "numbers": [
       {
@@ -2895,7 +2895,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f039.2",
@@ -2939,7 +2939,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.006,
+     "score": 0.024,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $10.0 million",
      "numbers": [
       {
@@ -2951,7 +2951,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f039.4",
@@ -2959,17 +2959,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The Company may declare and pay dividends before closing without the Buyer's consent.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.031,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 63.0
   },
   {
    "id": "f039.5",
@@ -2992,7 +2992,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f041.1",
@@ -3023,7 +3023,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f041.2",
@@ -3036,7 +3036,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.0,
+     "score": 0.208,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $20.88 million, 3.0%",
      "numbers": [
       {
@@ -3054,7 +3054,7 @@
      ]
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f041.3",
@@ -3085,7 +3085,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f041.4",
@@ -3110,7 +3110,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f041.5",
@@ -3123,7 +3123,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.981,
+     "score": 0.175,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $13.92 million",
      "numbers": [
       {
@@ -3135,7 +3135,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f041.6",
@@ -3158,7 +3158,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f041.7",
@@ -3189,7 +3189,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f043.1",
@@ -3202,7 +3202,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.975,
+     "score": 0.792,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $69.6 million, $174.0 million",
      "numbers": [
       {
@@ -3220,7 +3220,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f043.2",
@@ -3251,7 +3251,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f043.3",
@@ -3264,7 +3264,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.954,
+     "score": 0.119,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $174.0 million",
      "numbers": [
       {
@@ -3276,7 +3276,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f043.4",
@@ -3299,7 +3299,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f043.5",
@@ -3335,7 +3335,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f043.6",
@@ -3348,7 +3348,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.748,
+     "score": 0.239,
      "reason": "10% is in the documents, but the statement names another item (aggregate cap consideration fundamental merger representation) whose figure is different",
      "numbers": [
       {
@@ -3361,7 +3361,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f045.1",
@@ -3392,7 +3392,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f045.2",
@@ -3423,7 +3423,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f045.3",
@@ -3431,12 +3431,12 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "The Amazon Web Services agreement gives the counterparty a right to terminate within 90 days of a Change of Control.",
-   "outcome": "pass",
+   "outcome": "judge",
    "checks": [
     {
-     "status": "supported",
-     "method": "nli",
-     "score": 0.981,
+     "status": "unverified",
+     "method": "none",
+     "score": 0.348,
      "reason": "",
      "numbers": [
       {
@@ -3448,7 +3448,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f045.4",
@@ -3456,17 +3456,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The Cloud Infrastructure Agreement with Amazon Web Services contains a change of control provision requiring consent.",
-   "outcome": "pass",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "supported",
+     "status": "unsupported",
      "method": "nli",
-     "score": 0.504,
-     "reason": "",
+     "score": 0.137,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f045.5",
@@ -3479,7 +3479,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.978,
+     "score": 0.215,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $12.4M",
      "numbers": [
       {
@@ -3491,7 +3491,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f047.1",
@@ -3522,7 +3522,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f047.2",
@@ -3547,7 +3547,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f047.3",
@@ -3560,7 +3560,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.985,
+     "score": 0.214,
      "reason": "8.2x is in the documents, but the statement names another item (ebitda median multiple profitable saas) whose figure is different",
      "numbers": [
       {
@@ -3573,7 +3573,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f047.4",
@@ -3586,8 +3586,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.998,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.722,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: 8.2x",
      "numbers": [
       {
        "raw": "8.2x",
@@ -3605,7 +3605,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f047.5",
@@ -3628,7 +3628,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f047.6",
@@ -3651,7 +3651,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f047.7",
@@ -3676,7 +3676,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f049.1",
@@ -3707,7 +3707,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f049.2",
@@ -3775,7 +3775,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f049.4",
@@ -3806,7 +3806,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f049.5",
@@ -3814,13 +3814,13 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Meridian Software Corp's offer was all cash.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.023,
-     "reason": "",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.034,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
@@ -3837,8 +3837,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.97,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.127,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: $50, $54",
      "numbers": [
       {
        "raw": "$50",
@@ -3855,7 +3855,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f049.7",
@@ -3880,7 +3880,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f049.8",
@@ -3893,12 +3893,12 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.261,
+     "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f049.9",
@@ -3911,12 +3911,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.002,
+     "score": 0.082,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f051.1",
@@ -3929,7 +3929,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.956,
+     "score": 0.141,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $58.00, $41.20",
      "numbers": [
       {
@@ -3952,7 +3952,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f051.2",
@@ -4000,7 +4000,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.001,
+     "score": 0.015,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $55.00",
      "numbers": [
       {
@@ -4031,8 +4031,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.927,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.128,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: $50.00",
      "numbers": [
       {
        "raw": "$50.00",
@@ -4043,7 +4043,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f053.3",
@@ -4056,12 +4056,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.0,
+     "score": 0.079,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f053.4",
@@ -4074,8 +4074,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.038,
+     "reason": "",
      "numbers": [
       {
        "raw": "60 day",
@@ -4086,7 +4086,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f055.1",
@@ -4099,7 +4099,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.075,
+     "score": 0.328,
      "reason": "$91.4 million is in the documents, but the statement names another item (credit debt december drawn facility revolving) whose figure is different",
      "numbers": [
       {
@@ -4119,7 +4119,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f055.2",
@@ -4157,7 +4157,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f055.3",
@@ -4195,7 +4195,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f055.4",
@@ -4208,7 +4208,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.971,
+     "score": 0.058,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $85.0 million",
      "numbers": [
       {
@@ -4220,7 +4220,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f055.5",
@@ -4256,7 +4256,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.002,
+     "score": 0.325,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $25.0 million",
      "numbers": [
       {
@@ -4268,7 +4268,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f055.7",
@@ -4281,7 +4281,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.001,
+     "score": 0.051,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $25.0 million",
      "numbers": [
       {
@@ -4293,7 +4293,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f055.8",
@@ -4301,17 +4301,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The Company increased its leverage materially during FY2023.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.129,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f057.1",
@@ -4324,7 +4324,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.013,
+     "score": 0.208,
      "reason": "figure(s) present in the documents but not in a passage this statement names: 225 basis points, 175 basis points, $425,000",
      "numbers": [
       {
@@ -4348,7 +4348,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f057.2",
@@ -4361,7 +4361,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.001,
+     "score": 0.173,
      "reason": "figure(s) present in the documents but not in a passage this statement names: 225, 175 basis points",
      "numbers": [
       {
@@ -4384,7 +4384,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f057.3",
@@ -4392,17 +4392,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Management has requested a re-grid following the FY2023 deleveraging.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.241,
-     "reason": "",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.075,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f057.4",
@@ -4425,7 +4425,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f057.5",
@@ -4460,7 +4460,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f057.6",
@@ -4473,8 +4473,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.996,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.042,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: 175 basis points",
      "numbers": [
       {
        "raw": "175 basis points",
@@ -4485,7 +4485,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f059.1",
@@ -4498,7 +4498,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.001,
+     "score": 0.073,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $85 million",
      "numbers": [
       {
@@ -4510,7 +4510,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f059.2",
@@ -4535,7 +4535,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f059.3",
@@ -4543,17 +4543,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "A prepayment penalty applies when the facility is repaid at closing.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.997,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.044,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f059.4",
@@ -4561,17 +4561,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The Company has obtained a waiver from the lending syndicate for the change of control.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.994,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.032,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f059.5",
@@ -4594,7 +4594,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f059.6",
@@ -4644,7 +4644,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f061.2",
@@ -4657,12 +4657,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.96,
+     "score": 0.899,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f061.3",
@@ -4675,7 +4675,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.936,
+     "score": 0.12,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $34.7 million",
      "numbers": [
       {
@@ -4687,7 +4687,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f061.4",
@@ -4695,17 +4695,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Operating lease commitments are included in total debt.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.998,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.054,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f061.5",
@@ -4713,17 +4713,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The lessor has refused to consent to the change of control.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.001,
-     "reason": "",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.034,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f063.1",
@@ -4736,7 +4736,7 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.995,
+     "score": 0.495,
      "reason": "",
      "numbers": [
       {
@@ -4748,7 +4748,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f063.2",
@@ -4761,12 +4761,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.924,
+     "score": 0.533,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f063.3",
@@ -4779,7 +4779,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.308,
+     "score": 0.329,
      "reason": "$38.5M is in the documents, but the statement names another item (consent contract data northstar pacific) whose figure is different",
      "numbers": [
       {
@@ -4804,7 +4804,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f063.4",
@@ -4817,7 +4817,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.249,
+     "score": 0.13,
      "reason": "",
      "numbers": [
       {
@@ -4829,7 +4829,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f063.5",
@@ -4837,13 +4837,13 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Northstar Financial Group's consent has already been obtained.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.065,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
@@ -4855,17 +4855,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "Northstar Financial Group has an absolute right to withhold consent in its sole discretion.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.997,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.088,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f063.7",
@@ -4873,17 +4873,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Vertex Capital Partners is a competitor of Ironbridge Manufacturing, so Ironbridge's consent is required.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.997,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.036,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f063.8",
@@ -4919,7 +4919,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f063.9",
@@ -4932,7 +4932,7 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.001,
+     "score": 0.049,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
@@ -4987,8 +4987,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.982,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.03,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: $21.7M, $18.1M",
      "numbers": [
       {
        "raw": "$90.5M",
@@ -5023,7 +5023,7 @@
      ]
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f065.3",
@@ -5048,7 +5048,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f065.4",
@@ -5056,17 +5056,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Delta Ridge Energy has given written notice of non-renewal.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.03,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f065.5",
@@ -5102,8 +5102,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.997,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.603,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: $92.8M",
      "numbers": [
       {
        "raw": "$92.8M",
@@ -5114,7 +5114,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f065.7",
@@ -5127,12 +5127,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.999,
+     "score": 0.67,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f067.1",
@@ -5145,7 +5145,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.993,
+     "score": 0.046,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $625,000, $437,500",
      "numbers": [
       {
@@ -5163,7 +5163,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f067.2",
@@ -5176,7 +5176,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.001,
+     "score": 0.034,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $58.00",
      "numbers": [
       {
@@ -5194,7 +5194,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f067.3",
@@ -5207,7 +5207,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.808,
+     "score": 0.226,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $625,000, $437,500",
      "numbers": [
       {
@@ -5230,7 +5230,7 @@
      ]
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f067.4",
@@ -5243,7 +5243,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.0,
+     "score": 0.044,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $625,000",
      "numbers": [
       {
@@ -5255,7 +5255,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f067.5",
@@ -5263,17 +5263,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "Robert Chen is the Chief Executive Officer.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.997,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.022,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f067.6",
@@ -5296,7 +5296,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f067.7",
@@ -5309,8 +5309,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.997,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.036,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: $324,000",
      "numbers": [
       {
        "raw": "$324,000",
@@ -5321,7 +5321,7 @@
      ]
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f069.1",
@@ -5346,7 +5346,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f069.2",
@@ -5359,12 +5359,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.989,
+     "score": 0.782,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f069.3",
@@ -5372,17 +5372,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The Company has obtained a shareholder cleansing vote under Section 280G.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.033,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f069.4",
@@ -5390,17 +5390,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "The merger agreement allocates the excise tax cost to the Buyer.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.026,
-     "reason": "",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.128,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f069.5",
@@ -5423,7 +5423,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f069.6",
@@ -5431,17 +5431,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "Raghavan and Delgado are expected to exceed the Section 280G safe harbour.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.998,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.019,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f071.1",
@@ -5454,12 +5454,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.999,
+     "score": 0.538,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 63.0
   },
   {
    "id": "f071.2",
@@ -5472,12 +5472,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.998,
+     "score": 0.78,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f071.3",
@@ -5490,7 +5490,7 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.995,
+     "score": 0.681,
      "reason": "",
      "numbers": [
       {
@@ -5502,7 +5502,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f071.4",
@@ -5510,17 +5510,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Dr. Wu has executed a post-closing employment agreement with Vertex Capital Partners.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.111,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f071.5",
@@ -5528,17 +5528,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "Dr. James Wu has indicated he intends to depart at closing.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.015,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f071.6",
@@ -5546,13 +5546,13 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Dr. Wu's non-competition covenant is clearly enforceable in California.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.033,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
@@ -5569,7 +5569,7 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.995,
+     "score": 0.863,
      "reason": "",
      "numbers": [
       {
@@ -5587,7 +5587,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f073.1",
@@ -5618,7 +5618,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f073.2",
@@ -5662,12 +5662,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.001,
+     "score": 0.107,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f073.4",
@@ -5675,13 +5675,13 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Further headcount reductions are planned.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.074,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
@@ -5698,12 +5698,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.011,
+     "score": 0.157,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f075.1",
@@ -5716,12 +5716,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.0,
+     "score": 0.021,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f075.2",
@@ -5752,7 +5752,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f075.3",
@@ -5760,17 +5760,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Aurora's motion to dismiss was granted in full on January 8, 2024.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.016,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f075.4",
@@ -5778,17 +5778,17 @@
    "label": "contradicted",
    "kind": "period",
    "claim": "The claim construction (Markman) hearing is scheduled for August 2025.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.91,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.093,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f075.5",
@@ -5796,17 +5796,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "A trial date has been set for Q3 2025.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.99,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.061,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f075.6",
@@ -5814,17 +5814,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Counsel assesses the probability of an injunction as high.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.024,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f075.7",
@@ -5837,7 +5837,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.651,
+     "score": 0.319,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $3.5 million, $8.0 million",
      "numbers": [
       {
@@ -5855,7 +5855,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f075.8",
@@ -5922,7 +5922,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.001,
+     "score": 0.06,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $340,000",
      "numbers": [
       {
@@ -5934,7 +5934,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f077.3",
@@ -5942,17 +5942,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The GPL-licensed database driver is distributed to customers.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.021,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f077.4",
@@ -5960,17 +5960,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "The AGPL-licensed component is used only in an internal build tool.",
-   "outcome": "pass",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "supported",
+     "status": "unsupported",
      "method": "nli",
-     "score": 0.99,
-     "reason": "",
+     "score": 0.085,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f077.5",
@@ -6006,7 +6006,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.998,
+     "score": 0.479,
      "reason": "figure(s) present in the documents but not in a passage this statement names: 1,847",
      "numbers": [
       {
@@ -6018,7 +6018,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f079.1",
@@ -6056,12 +6056,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.981,
+     "score": 0.464,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f079.3",
@@ -6074,12 +6074,12 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.299,
+     "score": 0.3,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f079.4",
@@ -6087,17 +6087,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The transaction is not reportable under the Hart-Scott-Rodino Act.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.047,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f079.5",
@@ -6110,7 +6110,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.083,
+     "score": 0.174,
      "reason": "figure(s) present in the documents but not in a passage this statement names: 100%",
      "numbers": [
       {
@@ -6122,7 +6122,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f079.6",
@@ -6153,17 +6153,17 @@
    "label": "contradicted",
    "kind": "period",
    "claim": "The HSR filing was submitted on March 20, 2023.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.044,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f079.8",
@@ -6171,17 +6171,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Counsel assesses the probability of a Second Request as high.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.028,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f081.1",
@@ -6189,17 +6189,17 @@
    "label": "supported",
    "kind": "paraphrase",
    "claim": "Aurora relies on Standard Contractual Clauses rather than Data Privacy Framework self-certification.",
-   "outcome": "pass",
+   "outcome": "judge",
    "checks": [
     {
-     "status": "supported",
-     "method": "nli",
-     "score": 0.921,
+     "status": "unverified",
+     "method": "none",
+     "score": 0.284,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f081.2",
@@ -6207,12 +6207,12 @@
    "label": "supported",
    "kind": "paraphrase",
    "claim": "There have been no reportable personal data breaches in the last 3 years.",
-   "outcome": "pass",
+   "outcome": "judge",
    "checks": [
     {
-     "status": "supported",
-     "method": "nli",
-     "score": 0.998,
+     "status": "unverified",
+     "method": "none",
+     "score": 0.389,
      "reason": "",
      "numbers": [
       {
@@ -6224,7 +6224,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f081.3",
@@ -6232,13 +6232,13 @@
    "label": "supported",
    "kind": "paraphrase",
    "claim": "The Business Associate Agreement with Meridian Health Networks has no assignment restriction and survives a change of control.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.992,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.027,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
@@ -6250,17 +6250,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Aurora is self-certified under the EU-US Data Privacy Framework.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.035,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f081.5",
@@ -6268,17 +6268,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "Aurora acts as a controller for the personal data it processes on behalf of customers.",
-   "outcome": "pass",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "supported",
+     "status": "unsupported",
      "method": "nli",
-     "score": 0.992,
-     "reason": "",
+     "score": 0.125,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f081.6",
@@ -6286,17 +6286,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Aurora sells personal information as that term is defined under the CCPA.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.043,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f081.7",
@@ -6304,13 +6304,13 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The Business Associate Agreement terminates automatically on a change of control.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.993,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.132,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
@@ -6327,12 +6327,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.991,
+     "score": 0.69,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f083.2",
@@ -6340,17 +6340,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Obtaining the Northstar and Pacific Data consents is a condition to closing.",
-   "outcome": "pass",
+   "outcome": "judge",
    "checks": [
     {
-     "status": "supported",
-     "method": "nli",
-     "score": 0.992,
+     "status": "unverified",
+     "method": "none",
+     "score": 0.431,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f083.3",
@@ -6363,12 +6363,12 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.002,
+     "score": 0.388,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f083.4",
@@ -6381,12 +6381,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.954,
+     "score": 0.708,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f085.1",
@@ -6417,17 +6417,17 @@
    "label": "unsupported",
    "kind": "absent",
    "claim": "The merger agreement is governed by the laws of the State of Delaware.",
-   "outcome": "warn",
+   "outcome": "pass",
    "checks": [
     {
-     "status": "unsupported",
+     "status": "supported",
      "method": "nli",
-     "score": 0.008,
-     "reason": "no retrieved passage entails this statement",
+     "score": 0.441,
+     "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f089.1",
@@ -6440,7 +6440,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.0,
+     "score": 0.039,
      "reason": "figure(s) present in the documents but not in a passage this statement names: 15%",
      "numbers": [
       {
@@ -6452,7 +6452,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f091.1",
@@ -6465,12 +6465,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.001,
+     "score": 0.021,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f093.1",
@@ -6493,7 +6493,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f095.1",
@@ -6506,12 +6506,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.0,
+     "score": 0.038,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f097.1",
@@ -6547,7 +6547,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.002,
+     "score": 0.019,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $0.25",
      "numbers": [
       {
@@ -6559,7 +6559,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f101.1",
@@ -6572,12 +6572,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.0,
+     "score": 0.018,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f103.1",
@@ -6613,12 +6613,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.001,
+     "score": 0.059,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f107.1",
@@ -6631,12 +6631,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.003,
+     "score": 0.039,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f109.1",
@@ -6649,12 +6649,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.001,
+     "score": 0.024,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f111.1",
@@ -6662,17 +6662,17 @@
    "label": "unsupported",
    "kind": "absent",
    "claim": "Aurora's EBITDA margin compares favourably with Palantir's.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.089,
-     "reason": "",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.085,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f113.1",
@@ -6685,12 +6685,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.001,
+     "score": 0.044,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f115.1",
@@ -6703,7 +6703,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.0,
+     "score": 0.027,
      "reason": "figure(s) present in the documents but not in a passage this statement names: 20%",
      "numbers": [
       {
@@ -6715,7 +6715,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f117.1",
@@ -6757,12 +6757,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.0,
+     "score": 0.034,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 63.0
   },
   {
    "id": "f121.1",
@@ -6775,12 +6775,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.002,
+     "score": 0.017,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f123.1",
@@ -6803,7 +6803,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f125.1",
@@ -6857,7 +6857,7 @@
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f131.1",
@@ -6875,7 +6875,7 @@
      "numbers": []
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f133.1",
@@ -6893,7 +6893,7 @@
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f135.1",
@@ -6911,7 +6911,7 @@
      "numbers": []
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f137.1",
@@ -6929,7 +6929,7 @@
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f139.1",
@@ -6947,7 +6947,7 @@
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f141.1",
@@ -6965,7 +6965,7 @@
      "numbers": []
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f143.1",
@@ -6983,7 +6983,7 @@
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f145.1",
@@ -7001,7 +7001,7 @@
      "numbers": []
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f147.1",
@@ -7019,7 +7019,7 @@
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f002.1",
@@ -7130,7 +7130,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.005,
+     "score": 0.049,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $189.6 million",
      "numbers": [
       {
@@ -7142,7 +7142,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f002.5",
@@ -7165,7 +7165,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f002.6",
@@ -7178,7 +7178,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.003,
+     "score": 0.134,
      "reason": "$189.6 million is in the documents, but the documents give this figure for 2023, not 2022",
      "numbers": [
       {
@@ -7198,7 +7198,7 @@
      ]
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f004.1",
@@ -7242,7 +7242,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.008,
+     "score": 0.064,
      "reason": "figure(s) present in the documents but not in a passage this statement names: 60.0%",
      "numbers": [
       {
@@ -7260,7 +7260,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f004.3",
@@ -7273,7 +7273,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.007,
+     "score": 0.07,
      "reason": "59.1% is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -7286,7 +7286,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f004.4",
@@ -7322,7 +7322,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.005,
+     "score": 0.065,
      "reason": "$228.8 million is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -7335,7 +7335,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f006.1",
@@ -7379,7 +7379,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.003,
+     "score": 0.069,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $46.4M",
      "numbers": [
       {
@@ -7397,7 +7397,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f006.3",
@@ -7410,7 +7410,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.003,
+     "score": 0.052,
      "reason": "$2.86 is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -7423,7 +7423,7 @@
      ]
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f006.4",
@@ -7469,7 +7469,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f006.6",
@@ -7482,7 +7482,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.129,
+     "score": 0.068,
      "reason": "$34.3 million is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -7495,7 +7495,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f008.1",
@@ -7520,7 +7520,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f008.2",
@@ -7533,7 +7533,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.001,
+     "score": 0.017,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $89.4M, $72.1M",
      "numbers": [
       {
@@ -7551,7 +7551,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f008.3",
@@ -7564,7 +7564,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.012,
+     "score": 0.044,
      "reason": "$72.1 million is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -7577,7 +7577,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f008.4",
@@ -7600,7 +7600,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f010.1",
@@ -7631,7 +7631,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f010.2",
@@ -7668,7 +7668,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f010.3",
@@ -7681,7 +7681,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.006,
+     "score": 0.081,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $272.4 million",
      "numbers": [
       {
@@ -7693,7 +7693,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f010.4",
@@ -7716,7 +7716,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f010.5",
@@ -7770,7 +7770,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f012.2",
@@ -7807,7 +7807,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f012.3",
@@ -7845,7 +7845,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f012.4",
@@ -7881,8 +7881,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.996,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.07,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: $74.0 million",
      "numbers": [
       {
        "raw": "$74.0 million",
@@ -7894,7 +7894,7 @@
      ]
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f012.6",
@@ -7907,7 +7907,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.021,
+     "score": 0.022,
      "reason": "figure(s) present in the documents but not in a passage this statement names: 25.0%",
      "numbers": [
       {
@@ -7931,7 +7931,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f012.7",
@@ -7944,7 +7944,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.964,
+     "score": 0.098,
      "reason": "19.1% is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -7957,7 +7957,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f014.1",
@@ -8038,7 +8038,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.001,
+     "score": 0.078,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $14.2 million",
      "numbers": [
       {
@@ -8051,7 +8051,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f014.4",
@@ -8064,7 +8064,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.007,
+     "score": 0.057,
      "reason": "$92.8 million is in the documents, but the statement names another item (cash flow) whose figure is different",
      "numbers": [
       {
@@ -8101,7 +8101,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.001,
+     "score": 0.05,
      "reason": "$12.8 million is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -8114,7 +8114,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f014.6",
@@ -8150,7 +8150,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f014.7",
@@ -8163,7 +8163,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.003,
+     "score": 0.135,
      "reason": "$64.2 million is in the documents, but the documents give this figure for 2023, not 2022",
      "numbers": [
       {
@@ -8227,7 +8227,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.992,
+     "score": 0.874,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $210.5 million, 27.9%",
      "numbers": [
       {
@@ -8245,7 +8245,7 @@
      ]
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f016.3",
@@ -8258,7 +8258,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.995,
+     "score": 0.245,
      "reason": "figure(s) present in the documents but not in a passage this statement names: 27.9%",
      "numbers": [
       {
@@ -8270,7 +8270,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f016.4",
@@ -8293,7 +8293,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f016.5",
@@ -8306,7 +8306,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.996,
+     "score": 0.077,
      "reason": "figure(s) present in the documents but not in a passage this statement names: 17.0%",
      "numbers": [
       {
@@ -8318,7 +8318,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f018.1",
@@ -8349,7 +8349,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f018.2",
@@ -8405,7 +8405,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f018.4",
@@ -8418,12 +8418,12 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.034,
+     "score": 0.344,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f018.5",
@@ -8462,12 +8462,12 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.265,
+     "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f018.7",
@@ -8505,7 +8505,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.962,
+     "score": 0.134,
      "reason": "figure(s) present in the documents but not in a passage this statement names: 225%",
      "numbers": [
       {
@@ -8517,7 +8517,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f018.9",
@@ -8525,17 +8525,17 @@
    "label": "contradicted",
    "kind": "period",
    "claim": "The facility matures on June 30, 2027.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.983,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.156,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f018.10",
@@ -8560,7 +8560,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f020.1",
@@ -8573,12 +8573,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.998,
+     "score": 0.742,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f020.2",
@@ -8586,17 +8586,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "The consolidated financial statements were audited by Grant Thornton LLP.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.017,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f020.3",
@@ -8604,17 +8604,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The consolidated financial statements for FY2023 are unaudited.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.998,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.187,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f022.1",
@@ -8645,7 +8645,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f022.2",
@@ -8658,7 +8658,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.002,
+     "score": 0.08,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $13.4 million, $24.8 million",
      "numbers": [
       {
@@ -8683,7 +8683,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f022.3",
@@ -8696,7 +8696,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.003,
+     "score": 0.029,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $13.4 million",
      "numbers": [
       {
@@ -8708,7 +8708,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f022.4",
@@ -8721,7 +8721,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.039,
+     "score": 0.041,
      "reason": "$74.2 million is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -8734,7 +8734,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f024.1",
@@ -8767,17 +8767,17 @@
    "label": "supported",
    "kind": "paraphrase",
    "claim": "Grant Thornton cautions that the legal fee add-back is non-recurring only if the litigation concludes.",
-   "outcome": "warn",
+   "outcome": "judge",
    "checks": [
     {
-     "status": "unsupported",
-     "method": "nli",
-     "score": 0.001,
-     "reason": "no retrieved passage entails this statement",
+     "status": "unverified",
+     "method": "none",
+     "score": 0.275,
+     "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f024.3",
@@ -8785,17 +8785,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The DataFlow litigation has been resolved, so the legal fee add-back is clearly non-recurring.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.997,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.031,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f024.4",
@@ -8808,8 +8808,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.996,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.057,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: $1.6 million",
      "numbers": [
       {
        "raw": "$1.6 million",
@@ -8820,7 +8820,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f024.5",
@@ -8843,7 +8843,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f026.1",
@@ -8856,7 +8856,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.998,
+     "score": 0.728,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $1.9 million",
      "numbers": [
       {
@@ -8868,7 +8868,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f026.2",
@@ -8893,7 +8893,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f026.3",
@@ -8906,8 +8906,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.086,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: $2.9 million",
      "numbers": [
       {
        "raw": "$2.9 million",
@@ -8918,7 +8918,7 @@
      ]
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f026.4",
@@ -8926,17 +8926,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Founder compensation is below the 75th percentile of the peer benchmark set.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.046,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f028.1",
@@ -8967,7 +8967,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f028.2",
@@ -9004,7 +9004,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f028.3",
@@ -9042,8 +9042,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.989,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.059,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: 31.4%",
      "numbers": [
       {
        "raw": "31.4%",
@@ -9054,7 +9054,7 @@
      ]
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f028.5",
@@ -9077,7 +9077,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f028.6",
@@ -9102,7 +9102,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f028.7",
@@ -9115,7 +9115,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.636,
+     "score": 0.108,
      "reason": "$56.3 million is in the documents, but the statement names another item (license software term) whose figure is different",
      "numbers": [
       {
@@ -9128,7 +9128,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f030.1",
@@ -9159,7 +9159,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f030.2",
@@ -9203,17 +9203,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The report advises the Buyer to model perpetual license revenue as sustainable.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.038,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f030.4",
@@ -9226,7 +9226,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.008,
+     "score": 0.077,
      "reason": "$61.2 million is in the documents, but the documents give this figure for 2022, not 2023",
      "numbers": [
       {
@@ -9245,7 +9245,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f030.5",
@@ -9258,8 +9258,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.98,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.284,
+     "reason": "",
      "numbers": [
       {
        "raw": "$9.4 million",
@@ -9293,12 +9293,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.0,
+     "score": 0.096,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f032.2",
@@ -9311,12 +9311,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.997,
+     "score": 0.742,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f032.3",
@@ -9329,12 +9329,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.001,
+     "score": 0.049,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f032.4",
@@ -9347,12 +9347,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.006,
+     "score": 0.054,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f032.5",
@@ -9360,17 +9360,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "The quality of earnings report was prepared by Deloitte & Touche for Vertex Capital Partners.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.013,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f034.1",
@@ -9408,7 +9408,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.027,
+     "score": 0.402,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $58.00, 42%, $40.85",
      "numbers": [
       {
@@ -9438,7 +9438,7 @@
      ]
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f034.3",
@@ -9476,8 +9476,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.111,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: $85.00",
      "numbers": [
       {
        "raw": "$85.00",
@@ -9488,7 +9488,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f034.5",
@@ -9501,7 +9501,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.929,
+     "score": 0.069,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $40.85",
      "numbers": [
       {
@@ -9513,7 +9513,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f034.6",
@@ -9567,17 +9567,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The merger consideration is payable in a mix of cash and Buyer stock.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.138,
-     "reason": "",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.047,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f034.9",
@@ -9606,7 +9606,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f036.1",
@@ -9614,17 +9614,17 @@
    "label": "supported",
    "kind": "paraphrase",
    "claim": "Unvested options and RSUs accelerate in full and are cashed out at the Effective Time.",
-   "outcome": "judge",
+   "outcome": "pass",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.216,
+     "status": "supported",
+     "method": "nli",
+     "score": 0.645,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f036.2",
@@ -9637,12 +9637,12 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.994,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.323,
+     "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f036.3",
@@ -9655,7 +9655,7 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.0,
+     "score": 0.071,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
@@ -9691,7 +9691,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f038.2",
@@ -9704,12 +9704,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.002,
+     "score": 0.054,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f038.3",
@@ -9717,17 +9717,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "Aurora is the plaintiff in a patent infringement suit against DataFlow Systems.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.319,
-     "reason": "",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.103,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f038.4",
@@ -9756,7 +9756,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f038.5",
@@ -9764,17 +9764,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The Company believes the DataFlow claims have merit and intends to settle.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.012,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f038.6",
@@ -9787,8 +9787,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.995,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.018,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: $2.0 million",
      "numbers": [
       {
        "raw": "$2.0 million",
@@ -9799,7 +9799,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f038.7",
@@ -9812,12 +9812,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.991,
+     "score": 0.609,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f038.8",
@@ -9825,17 +9825,17 @@
    "label": "contradicted",
    "kind": "misattributed",
    "claim": "The Company holds 23 issued U.S. patents and 47 pending patent applications.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.086,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f040.1",
@@ -9843,17 +9843,17 @@
    "label": "supported",
    "kind": "paraphrase",
    "claim": "Under the no-shop, Aurora may not solicit or knowingly facilitate competing acquisition proposals.",
-   "outcome": "warn",
+   "outcome": "pass",
    "checks": [
     {
-     "status": "unsupported",
+     "status": "supported",
      "method": "nli",
-     "score": 0.007,
-     "reason": "no retrieved passage entails this statement",
+     "score": 0.467,
+     "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f040.2",
@@ -9866,7 +9866,7 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.982,
+     "score": 0.95,
      "reason": "",
      "numbers": []
     }
@@ -9884,12 +9884,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.0,
+     "score": 0.036,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f040.4",
@@ -9897,17 +9897,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The Company may not engage with any third party, even one making an unsolicited proposal that could lead to a Superior Proposal.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.106,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 63.0
   },
   {
    "id": "f042.1",
@@ -9915,12 +9915,12 @@
    "label": "supported",
    "kind": "paraphrase",
    "claim": "General representations survive closing for 18 months; Fundamental Representations survive for 36 months.",
-   "outcome": "pass",
+   "outcome": "judge",
    "checks": [
     {
-     "status": "supported",
-     "method": "nli",
-     "score": 0.992,
+     "status": "unverified",
+     "method": "none",
+     "score": 0.32,
      "reason": "",
      "numbers": [
       {
@@ -9938,7 +9938,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f042.2",
@@ -9946,12 +9946,12 @@
    "label": "contradicted",
    "kind": "misattributed",
    "claim": "Fundamental Representations survive for 18 months after Closing.",
-   "outcome": "pass",
+   "outcome": "judge",
    "checks": [
     {
-     "status": "supported",
-     "method": "nli",
-     "score": 0.967,
+     "status": "unverified",
+     "method": "none",
+     "score": 0.131,
      "reason": "",
      "numbers": [
       {
@@ -9971,12 +9971,12 @@
    "label": "contradicted",
    "kind": "misattributed",
    "claim": "General representations and warranties survive the Closing for thirty-six (36) months.",
-   "outcome": "pass",
+   "outcome": "judge",
    "checks": [
     {
-     "status": "supported",
-     "method": "nli",
-     "score": 0.977,
+     "status": "unverified",
+     "method": "none",
+     "score": 0.172,
      "reason": "",
      "numbers": [
       {
@@ -9988,7 +9988,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f042.4",
@@ -10001,8 +10001,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.911,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.144,
+     "reason": "",
      "numbers": [
       {
        "raw": "24 months",
@@ -10013,7 +10013,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f044.1",
@@ -10109,7 +10109,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f046.1",
@@ -10122,12 +10122,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.998,
+     "score": 0.867,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f046.2",
@@ -10135,17 +10135,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The Company may terminate to accept a Superior Proposal without paying any fee.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.059,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f046.3",
@@ -10158,12 +10158,12 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.991,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.24,
+     "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f048.1",
@@ -10176,8 +10176,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.988,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.918,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: 8.2%, 18.4%, 12.1%",
      "numbers": [
       {
        "raw": "8.2%",
@@ -10200,7 +10200,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f048.2",
@@ -10213,7 +10213,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.994,
+     "score": 0.799,
      "reason": "figure(s) present in the documents but not in a passage this statement names: 38.3%, 41.9%",
      "numbers": [
       {
@@ -10236,7 +10236,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f048.3",
@@ -10267,7 +10267,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f048.4",
@@ -10280,7 +10280,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.98,
+     "score": 0.131,
      "reason": "figure(s) present in the documents but not in a passage this statement names: 12.1%",
      "numbers": [
       {
@@ -10292,7 +10292,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f048.5",
@@ -10305,7 +10305,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.982,
+     "score": 0.682,
      "reason": "figure(s) present in the documents but not in a passage this statement names: 38.3%, 41.9%",
      "numbers": [
       {
@@ -10327,7 +10327,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f050.1",
@@ -10407,7 +10407,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f050.3",
@@ -10420,7 +10420,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.121,
+     "score": 0.373,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $56.00",
      "numbers": [
       {
@@ -10432,7 +10432,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f050.4",
@@ -10468,7 +10468,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.153,
+     "score": 0.104,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $41.20",
      "numbers": [
       {
@@ -10486,7 +10486,7 @@
      ]
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f050.6",
@@ -10499,7 +10499,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.039,
+     "score": 0.289,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $41.20",
      "numbers": [
       {
@@ -10523,7 +10523,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f052.1",
@@ -10536,7 +10536,7 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.0,
+     "score": 0.052,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
@@ -10554,12 +10554,12 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.989,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.334,
+     "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f052.3",
@@ -10572,12 +10572,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.004,
+     "score": 0.036,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f052.4",
@@ -10585,17 +10585,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Management recommended continuing negotiations with Atlas Data Holdings.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.004,
-     "reason": "",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.078,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f054.1",
@@ -10608,7 +10608,7 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.85,
+     "score": 0.921,
      "reason": "",
      "numbers": [
       {
@@ -10620,7 +10620,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f054.2",
@@ -10628,17 +10628,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "CFO Sarah Chen raised concerns about customer concentration risk and requested a sensitivity analysis.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.119,
-     "reason": "",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.055,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f054.3",
@@ -10663,7 +10663,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f054.4",
@@ -10686,7 +10686,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f056.1",
@@ -10723,7 +10723,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f056.2",
@@ -10748,7 +10748,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f056.3",
@@ -10787,7 +10787,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.997,
+     "score": 0.051,
      "reason": "figure(s) present in the documents but not in a passage this statement names: 35%",
      "numbers": [
       {
@@ -10799,7 +10799,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f056.5",
@@ -10812,8 +10812,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.043,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: 225 basis points",
      "numbers": [
       {
        "raw": "225 basis points",
@@ -10824,7 +10824,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f056.6",
@@ -10832,17 +10832,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "Wells Fargo Bank, N.A. is the Administrative Agent and Lead Arranger.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.998,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.025,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f056.7",
@@ -10855,12 +10855,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.983,
+     "score": 0.466,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f056.8",
@@ -10868,17 +10868,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The revolving credit facility is unsecured.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.066,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f056.9",
@@ -10891,8 +10891,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.988,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.416,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: $65 million",
      "numbers": [
       {
        "raw": "$65 million",
@@ -10903,7 +10903,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f058.1",
@@ -10916,7 +10916,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.023,
+     "score": 0.643,
      "reason": "3.28x is in the documents, but the statement names another item (leverage net) whose figure is different",
      "numbers": [
       {
@@ -10941,7 +10941,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f058.2",
@@ -10954,7 +10954,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.995,
+     "score": 0.378,
      "reason": "figure(s) present in the documents but not in a passage this statement names: 3.50x, 0.22x",
      "numbers": [
       {
@@ -10978,7 +10978,7 @@
      ]
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f058.3",
@@ -10991,7 +10991,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.004,
+     "score": 0.617,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $135.8 million",
      "numbers": [
       {
@@ -11009,7 +11009,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f058.4",
@@ -11034,7 +11034,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f058.5",
@@ -11042,17 +11042,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The Company breached the minimum fixed charge coverage covenant at December 31, 2023.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.995,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.114,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f058.6",
@@ -11088,12 +11088,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.99,
+     "score": 0.801,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f058.8",
@@ -11101,17 +11101,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "A covenant waiver was granted to the Company during FY2023.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.033,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f058.9",
@@ -11124,8 +11124,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.046,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: 6.84x",
      "numbers": [
       {
        "raw": "6.84x",
@@ -11136,7 +11136,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f060.1",
@@ -11149,7 +11149,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.992,
+     "score": 0.93,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $15 million, $10 million",
      "numbers": [
       {
@@ -11167,7 +11167,7 @@
      ]
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f060.2",
@@ -11180,7 +11180,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.074,
+     "score": 0.445,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $20 million",
      "numbers": [
       {
@@ -11192,7 +11192,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f060.3",
@@ -11205,12 +11205,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.004,
+     "score": 0.101,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f060.4",
@@ -11223,12 +11223,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.672,
+     "score": 0.808,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f062.1",
@@ -11266,7 +11266,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.004,
+     "score": 0.11,
      "reason": "$54.3M is in the documents, but the documents give this figure for 2026, not 2023",
      "numbers": [
       {
@@ -11286,7 +11286,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f062.3",
@@ -11324,7 +11324,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.004,
+     "score": 0.028,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $54.3M",
      "numbers": [
       {
@@ -11336,7 +11336,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f062.5",
@@ -11349,8 +11349,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.997,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.111,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: 12.0%",
      "numbers": [
       {
        "raw": "12.0%",
@@ -11361,7 +11361,7 @@
      ]
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f062.6",
@@ -11422,12 +11422,12 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.405,
+     "score": 0.281,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f064.1",
@@ -11440,12 +11440,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.997,
+     "score": 0.851,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f064.2",
@@ -11470,7 +11470,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f064.3",
@@ -11478,17 +11478,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Management acknowledges that the MFN clause has been triggered.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.03,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f064.4",
@@ -11496,17 +11496,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "Pacific Data Systems holds the most favored nation pricing clause.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.998,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.026,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f064.5",
@@ -11519,8 +11519,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.996,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.087,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: 5%",
      "numbers": [
       {
        "raw": "5%",
@@ -11531,7 +11531,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f064.6",
@@ -11544,8 +11544,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.979,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.164,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: 3%",
      "numbers": [
       {
        "raw": "3%",
@@ -11556,7 +11556,7 @@
      ]
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f064.7",
@@ -11564,17 +11564,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Counsel's position on the MFN clause has been tested with and accepted by the customer.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.03,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f066.1",
@@ -11661,17 +11661,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "A customer exercised its termination right as a result of the August 2023 incident.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 1.0,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.044,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f066.5",
@@ -11679,17 +11679,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "The August 2023 incident affected the Northstar Financial Group environment.",
-   "outcome": "pass",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "supported",
+     "status": "unsupported",
      "method": "nli",
-     "score": 0.807,
-     "reason": "",
+     "score": 0.102,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f066.6",
@@ -11702,8 +11702,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.023,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: $6.0 million",
      "numbers": [
       {
        "raw": "$6.0 million",
@@ -11714,7 +11714,7 @@
      ]
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f068.1",
@@ -11727,7 +11727,7 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.988,
+     "score": 0.949,
      "reason": "",
      "numbers": [
       {
@@ -11739,7 +11739,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f068.2",
@@ -11809,13 +11809,13 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The severance agreements are single trigger, payable automatically upon the change of control.",
-   "outcome": "pass",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "supported",
+     "status": "unsupported",
      "method": "nli",
-     "score": 0.907,
-     "reason": "",
+     "score": 0.036,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
@@ -11832,8 +11832,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.033,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: 3.0x",
      "numbers": [
       {
        "raw": "3.0x",
@@ -11844,7 +11844,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f068.6",
@@ -11867,7 +11867,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f068.7",
@@ -11915,7 +11915,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.005,
+     "score": 0.042,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $11,545,000",
      "numbers": [
       {
@@ -11927,7 +11927,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f070.1",
@@ -11965,7 +11965,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.99,
+     "score": 0.566,
      "reason": "$3,900,000 is in the documents, but the statement names another item (employee pool retention) whose figure is different",
      "numbers": [
       {
@@ -11985,7 +11985,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f070.3",
@@ -12023,7 +12023,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f070.4",
@@ -12036,7 +12036,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.947,
+     "score": 0.034,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $3,900,000",
      "numbers": [
       {
@@ -12048,7 +12048,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f070.5",
@@ -12056,17 +12056,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The retention pool is deducted from the merger consideration.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.997,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.037,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f070.6",
@@ -12074,17 +12074,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Retention payments vest in full at closing.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.128,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f070.7",
@@ -12092,17 +12092,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "The retention pool is funded by the Buyer.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.998,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.099,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f070.8",
@@ -12140,7 +12140,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f072.1",
@@ -12153,7 +12153,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.702,
+     "score": 0.125,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $15,725,000, $11,545,000",
      "numbers": [
       {
@@ -12177,7 +12177,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f072.2",
@@ -12227,7 +12227,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f072.4",
@@ -12263,7 +12263,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.997,
+     "score": 0.379,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $840,000",
      "numbers": [
       {
@@ -12275,7 +12275,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f074.2",
@@ -12283,12 +12283,12 @@
    "label": "supported",
    "kind": "paraphrase",
    "claim": "All 12 patents naming Dr. Wu as sole or first inventor are in the real-time data reconciliation area.",
-   "outcome": "pass",
+   "outcome": "judge",
    "checks": [
     {
-     "status": "supported",
-     "method": "nli",
-     "score": 0.98,
+     "status": "unverified",
+     "method": "none",
+     "score": 0.398,
      "reason": "",
      "numbers": [
       {
@@ -12300,7 +12300,7 @@
      ]
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f074.3",
@@ -12331,17 +12331,17 @@
    "label": "contradicted",
    "kind": "party",
    "claim": "The patents naming Dr. Wu as inventor are all within the data visualization area.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.99,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.083,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f076.1",
@@ -12354,7 +12354,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.935,
+     "score": 0.02,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $450,000",
      "numbers": [
       {
@@ -12372,7 +12372,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f076.2",
@@ -12416,7 +12416,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.031,
+     "score": 0.021,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $450,000",
      "numbers": [
       {
@@ -12428,7 +12428,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f076.4",
@@ -12484,13 +12484,13 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Proceedings have been commenced by the former reseller.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.026,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
@@ -12502,17 +12502,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The Company has received a civil investigative demand.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.969,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.039,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f076.8",
@@ -12520,17 +12520,17 @@
    "label": "contradicted",
    "kind": "period",
    "claim": "Mediation in the Hartley matter is scheduled for May 2025.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.0,
-     "reason": "",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.024,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f078.1",
@@ -12543,12 +12543,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.998,
+     "score": 0.846,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f078.2",
@@ -12561,12 +12561,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.993,
+     "score": 0.87,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f078.3",
@@ -12574,17 +12574,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "The former contractors' work related to patented technology.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.997,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.063,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f078.4",
@@ -12597,12 +12597,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.019,
+     "score": 0.037,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 46.0
   },
   {
    "id": "f078.5",
@@ -12615,12 +12615,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.997,
+     "score": 0.437,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f080.1",
@@ -12633,7 +12633,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.997,
+     "score": 0.749,
      "reason": "figure(s) present in the documents but not in a passage this statement names: EUR 17.5 million",
      "numbers": [
       {
@@ -12651,7 +12651,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f080.2",
@@ -12664,12 +12664,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.989,
+     "score": 0.581,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f080.3",
@@ -12677,17 +12677,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "A merger control filing is required in Germany.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.014,
-     "reason": "",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.072,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f080.4",
@@ -12700,8 +12700,8 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.988,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "score": 0.04,
+     "reason": "figure(s) present in the documents but not in a passage this statement names: EUR 17.5 million",
      "numbers": [
       {
        "raw": "EUR 17.5 million",
@@ -12712,7 +12712,7 @@
      ]
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f080.5",
@@ -12743,17 +12743,17 @@
    "label": "contradicted",
    "kind": "negation",
    "claim": "Aurora holds government contracts requiring a facility security clearance.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.997,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.044,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f082.1",
@@ -12766,12 +12766,12 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.996,
+     "score": 0.674,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f082.2",
@@ -12784,7 +12784,7 @@
     {
      "status": "supported",
      "method": "nli",
-     "score": 0.997,
+     "score": 0.603,
      "reason": "",
      "numbers": [
       {
@@ -12796,7 +12796,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f082.3",
@@ -12809,25 +12809,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.021,
-     "reason": "",
-     "numbers": []
-    }
-   ],
-   "elapsed_ms": 16.0
-  },
-  {
-   "id": "f082.4",
-   "split": "test",
-   "label": "contradicted",
-   "kind": "negation",
-   "claim": "The FY2023 penetration test identified critical findings.",
-   "outcome": "pass",
-   "checks": [
-    {
-     "status": "supported",
-     "method": "nli",
-     "score": 0.649,
+     "score": 0.215,
      "reason": "",
      "numbers": []
     }
@@ -12835,22 +12817,40 @@
    "elapsed_ms": 31.0
   },
   {
+   "id": "f082.4",
+   "split": "test",
+   "label": "contradicted",
+   "kind": "negation",
+   "claim": "The FY2023 penetration test identified critical findings.",
+   "outcome": "warn",
+   "checks": [
+    {
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.032,
+     "reason": "no retrieved passage entails this statement",
+     "numbers": []
+    }
+   ],
+   "elapsed_ms": 47.0
+  },
+  {
    "id": "f082.5",
    "split": "test",
    "label": "contradicted",
    "kind": "period",
    "claim": "The ISO 27001 certification is valid through October 2026.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.967,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.066,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 32.0
   },
   {
    "id": "f082.6",
@@ -12863,12 +12863,12 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.022,
+     "score": 0.337,
      "reason": "",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f084.1",
@@ -12891,7 +12891,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f086.1",
@@ -12904,7 +12904,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.001,
+     "score": 0.052,
      "reason": "figure(s) present in the documents but not in a passage this statement names: 22%",
      "numbers": [
       {
@@ -12916,7 +12916,7 @@
      ]
     }
    ],
-   "elapsed_ms": 31.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f088.1",
@@ -12929,12 +12929,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.0,
+     "score": 0.022,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f090.1",
@@ -12957,7 +12957,7 @@
      ]
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f092.1",
@@ -12970,12 +12970,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.0,
+     "score": 0.026,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f094.1",
@@ -12988,12 +12988,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.001,
+     "score": 0.142,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f096.1",
@@ -13006,12 +13006,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.001,
+     "score": 0.068,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f098.1",
@@ -13024,12 +13024,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.0,
+     "score": 0.039,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f100.1",
@@ -13042,12 +13042,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.001,
+     "score": 0.029,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f102.1",
@@ -13060,12 +13060,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.001,
+     "score": 0.116,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 63.0
   },
   {
    "id": "f104.1",
@@ -13078,12 +13078,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.0,
+     "score": 0.022,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f106.1",
@@ -13091,17 +13091,17 @@
    "label": "unsupported",
    "kind": "absent",
    "claim": "Pacific Data Systems has informed Aurora that it will withhold its consent.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.99,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.019,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 32.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f108.1",
@@ -13114,7 +13114,7 @@
     {
      "status": "unverified",
      "method": "none",
-     "score": 0.016,
+     "score": 0.011,
      "reason": "figure(s) present in the documents but not in a passage this statement names: $6.0 million",
      "numbers": [
       {
@@ -13126,7 +13126,7 @@
      ]
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 62.0
   },
   {
    "id": "f110.1",
@@ -13149,7 +13149,7 @@
      ]
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f112.1",
@@ -13162,12 +13162,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.001,
+     "score": 0.025,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f114.1",
@@ -13198,17 +13198,17 @@
    "label": "unsupported",
    "kind": "absent",
    "claim": "The Buyer has purchased a representations and warranties insurance policy.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.001,
-     "reason": "",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.019,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 47.0
   },
   {
    "id": "f118.1",
@@ -13221,12 +13221,12 @@
     {
      "status": "unsupported",
      "method": "nli",
-     "score": 0.0,
+     "score": 0.011,
      "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f120.1",
@@ -13234,17 +13234,17 @@
    "label": "unsupported",
    "kind": "absent",
    "claim": "Aurora's Data Protection Officer is based in Frankfurt.",
-   "outcome": "judge",
+   "outcome": "warn",
    "checks": [
     {
-     "status": "unverified",
-     "method": "none",
-     "score": 0.999,
-     "reason": "NLI suggests a contradiction; not confirmed",
+     "status": "unsupported",
+     "method": "nli",
+     "score": 0.016,
+     "reason": "no retrieved passage entails this statement",
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 31.0
   },
   {
    "id": "f122.1",
@@ -13339,7 +13339,7 @@
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f132.1",
@@ -13357,7 +13357,7 @@
      "numbers": []
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f134.1",
@@ -13375,7 +13375,7 @@
      "numbers": []
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f136.1",
@@ -13393,7 +13393,7 @@
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 0.0
   },
   {
    "id": "f138.1",
@@ -13429,7 +13429,7 @@
      "numbers": []
     }
    ],
-   "elapsed_ms": 16.0
+   "elapsed_ms": 15.0
   },
   {
    "id": "f142.1",
@@ -13447,7 +13447,7 @@
      "numbers": []
     }
    ],
-   "elapsed_ms": 0.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f144.1",
@@ -13465,7 +13465,7 @@
      "numbers": []
     }
    ],
-   "elapsed_ms": 15.0
+   "elapsed_ms": 16.0
   },
   {
    "id": "f146.1",
@@ -13523,7 +13523,7 @@
    "floor": 0.034
   }
  },
- "nli": "cross-encoder/nli-deberta-v3-small",
+ "nli": "yaxili96/FactCG-DeBERTa-v3-Large",
  "device": "cuda",
- "total_seconds": 23.4
+ "total_seconds": 31.3
 }
