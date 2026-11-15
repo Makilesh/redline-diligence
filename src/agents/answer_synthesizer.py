@@ -4,12 +4,15 @@ Agent 7 — Answer Synthesis Agent.
 Model: chosen at call time from BudgetTracker's SYNTHESIS_LADDER — best
 available reasoning model, degrading through the ladder as daily quota is
 spent and finally to the local model. See src/llm/model_registry.py.
-Temp: 0.1 | Tokens: 3000 | JSON mode: OFF (prose answer)
+Temp: 0.1 | Tokens: SYNTHESIS_MAX_TOKENS (8192, thinking included) | JSON mode: OFF (prose answer)
 """
 
+import os
 import re
 
+from src.llm.failures import CompletionTruncated
 from src.llm.litellm_wrapper import (
+    ProseOutcome,
     StreamInterrupted,
     call_prose_agent,
     is_quota_error,
@@ -46,6 +49,49 @@ MAX_LADDER_FALLBACKS = 6
 # in pinned mode there is no other rung to move to, so without this cap one
 # stubborn draft was regenerated until the hops ran out.
 MAX_CONTENT_RETRIES = 2
+
+# Output budget for one synthesis request — thinking AND answer, because
+# Gemini 3.x counts its thoughts against max_tokens.
+#
+# It was 3,000. In the 2026-11-15 evening run 29 of 54 synthesis calls stopped at
+# 2,996 of them (24 of 46 on gemini-3.6-flash), and every one that shipped was
+# cut mid-sentence; the earlier run of the same day, mostly on
+# gemini-3-flash-preview, had a median of 2,241 and 6 of 47 at the cap. The
+# capped calls hide how much was actually needed, so three of the worst
+# questions were re-asked live with room to spare (gemini-3.6-flash, 16,384):
+# mh_05 used 5,810 (3,992 thinking + 1,818 answer), mh_06 4,810 and mh_04
+# 4,104. The answers themselves ran to 1,500-1,800 tokens at ~3 characters per
+# token (tables and citation markers tokenise densely).
+#
+# 8,192 is 1.4x the largest measured need. A reply that still runs into it is
+# retried once with twice the room on /query, and flagged on /query/stream (see
+# litellm_wrapper's "Replies cut off at max_tokens"). The first-token deadline
+# follows the budget: 2 + 8192/150 = 56.6s — see litellm_wrapper.first_token_deadline
+# for why it is keyed to the whole budget rather than to a thinking cap.
+DEFAULT_SYNTHESIS_MAX_TOKENS = 8192
+# The models' own output ceiling (LiteLLM's model map: 65,536 for every rung).
+_SYNTHESIS_MAX_TOKENS_CEILING = 65_536
+_SYNTHESIS_MAX_TOKENS_FLOOR = 1_000
+
+
+def synthesis_max_tokens() -> int:
+    """
+    The synthesis output budget: SYNTHESIS_MAX_TOKENS, else 8,192.
+
+    Returns:
+        The budget, clamped to [1,000, 65,536]; an unreadable value falls back
+        to the default with a warning rather than failing the query.
+    """
+    raw = os.getenv("SYNTHESIS_MAX_TOKENS", "").strip()
+    if not raw:
+        return DEFAULT_SYNTHESIS_MAX_TOKENS
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Ignoring SYNTHESIS_MAX_TOKENS: not an integer", extra={"value": raw})
+        return DEFAULT_SYNTHESIS_MAX_TOKENS
+    return min(max(value, _SYNTHESIS_MAX_TOKENS_FLOOR), _SYNTHESIS_MAX_TOKENS_CEILING)
+
 
 # What the user sees when no rung produced a usable answer. Exported so the
 # validator can recognise it: an apology is not an answer and must never be
@@ -477,6 +523,7 @@ async def synthesize_answer(
                 "relevant content for your query. Please try rephrasing your "
                 "question or check that the relevant documents have been uploaded."
             ),
+            "answer_truncated": False,
             "citations": [],
             "numerical_claims": [],
             "confidence_score": 0.0,
@@ -526,10 +573,13 @@ async def synthesize_answer(
     last_error: Exception | None = None
     model = ""
     content_rejections = 0
+    budget = synthesis_max_tokens()
+    outcome = ProseOutcome(budget)
 
     for _ in range(_hop_bound(tracker)):
         choice = await tracker.get_model_for_synthesis()
         model = choice.model
+        outcome = ProseOutcome(budget)
         try:
             if sink is not None:
                 candidate = await stream_prose_agent(
@@ -538,9 +588,10 @@ async def synthesize_answer(
                     model=model,
                     on_token=emit_token,
                     temperature=0.1,
-                    max_tokens=3000,
+                    max_tokens=budget,
                     api_key=choice.api_key,
                     agent="answer_synthesizer",
+                    outcome=outcome,
                 )
             else:
                 # Streamed internally even though nobody watches the tokens:
@@ -553,10 +604,11 @@ async def synthesize_answer(
                     user_prompt=user_prompt,
                     model=model,
                     temperature=0.1,
-                    max_tokens=3000,
+                    max_tokens=budget,
                     api_key=choice.api_key,
                     agent="answer_synthesizer",
                     stream_with_deadline=True,
+                    outcome=outcome,
                 )
             if not _is_usable_answer(candidate, chunks):
                 # A response that violates the prompt's citation contract is a
@@ -596,6 +648,16 @@ async def synthesize_answer(
             logger.warning(
                 "Synthesis stream interrupted, trying another model",
                 extra={"model": model, "emitted_chars": e.emitted_chars},
+            )
+            continue
+        except CompletionTruncated as e:
+            # Cut off at max_tokens even with twice the room. The model is
+            # healthy, so it is only kept off this request — nothing is cooled.
+            last_error = e
+            tracker.skip_model_for_request(model)
+            logger.warning(
+                "Synthesis reply cut off twice at the output limit, trying another model",
+                extra={"model": model, "max_tokens": outcome.max_tokens},
             )
             continue
         except Exception as e:
@@ -649,6 +711,7 @@ async def synthesize_answer(
         )
         return {
             "generated_answer": SYNTHESIS_FAILED_ANSWER,
+            "answer_truncated": False,
             "citations": [],
             "numerical_claims": [],
             "confidence_score": 0.0,
@@ -689,6 +752,11 @@ async def synthesize_answer(
     # is a different thing entirely.
     numerical_claims = ground_answer_numbers(answer, chunks)
 
+    # Only the streamed route can get here with a cut-off answer: its tokens
+    # were already on the client's screen, so it was returned rather than
+    # retried. Marked so that verification cannot call it "passed".
+    truncated = outcome.truncated
+
     logger.info(
         "Agent 7: Answer Synthesizer complete",
         extra={
@@ -697,11 +765,14 @@ async def synthesize_answer(
             "citations_count": len(citations),
             "numerical_claims": len(numerical_claims),
             "streamed": sink is not None,
+            "finish_reason": outcome.finish_reason,
+            "answer_truncated": truncated,
         },
     )
 
     return {
         "generated_answer": answer,
+        "answer_truncated": truncated,
         "citations": citations,
         "numerical_claims": numerical_claims,
         "agent_trace": [
@@ -712,6 +783,10 @@ async def synthesize_answer(
                 "revision": bool(revision_feedback),
                 "revision_items": len(revision_feedback or []),
                 "streamed": sink is not None,
+                "max_tokens": outcome.max_tokens,
+                "finish_reason": outcome.finish_reason,
+                "length_retries": outcome.length_retries,
+                "answer_truncated": truncated,
             }
         ],
     }

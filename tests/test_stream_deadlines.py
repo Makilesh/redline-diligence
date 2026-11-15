@@ -128,6 +128,7 @@ def tracker(monkeypatch):
     monkeypatch.setattr(wrapper, "RETRY_BACKOFF_SECONDS", 0.0)
     monkeypatch.delenv("PROSE_FIRST_TOKEN_TIMEOUT_SECONDS", raising=False)
     monkeypatch.delenv("SYNTHESIS_MODEL_PIN", raising=False)
+    monkeypatch.delenv("SYNTHESIS_MAX_TOKENS", raising=False)
     return t
 
 
@@ -323,8 +324,11 @@ def test_first_affected_question_costs_seconds_not_minutes(tracker, monkeypatch,
     assert result["agent_trace"][0]["model"] == PREVIEW
     assert result["generated_answer"] == ANSWER
     assert [c[0] for c in provider.calls] == [M38, M36, PREVIEW]
-    assert wall == pytest.approx(wrapper.first_token_deadline(3000) + 8.0 + 6.0 + 49 * 0.05, abs=0.5)
-    assert wall < 45.0
+    deadline = wrapper.first_token_deadline(synth.synthesis_max_tokens())
+    assert wall == pytest.approx(deadline + 8.0 + 6.0 + 49 * 0.05, abs=0.5)
+    # 56.6s of it is the first-token deadline at the 8,192-token budget (22s at
+    # the old 3,000 — Decision 66 says why the deadline follows the budget).
+    assert wall < 75.0
     assert _units(tracker) == {(M38, 0): 1, (PREVIEW, 0): 1}
 
 

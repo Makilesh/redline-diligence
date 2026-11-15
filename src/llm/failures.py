@@ -178,6 +178,19 @@ class ProseAgentFailed(RuntimeError):
     """
 
 
+class CompletionTruncated(ProseAgentFailed):
+    """
+    A prose reply stopped at max_tokens (finish_reason "length") and the one
+    same-model retry with twice the room was cut off too, or could not be paid
+    for.
+
+    A ProseAgentFailed, so it is MODEL_FAILED: the caller's ladder tries another
+    model for this request only. It is deliberately not a health failure — the
+    model answered promptly and at length, so nothing is cooled, and the
+    request keeps its unit because the provider served it.
+    """
+
+
 _QUOTA_ID_DAY = re.compile(r"per\s*_?day", re.IGNORECASE)
 _QUOTA_ID_MINUTE = re.compile(r"per\s*_?minute", re.IGNORECASE)
 _RETRY_DELAY = re.compile(
