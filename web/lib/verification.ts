@@ -67,13 +67,17 @@ export interface AnswerVerdict {
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+/** Ends a verdict sentence for an answer cut off at the model's output limit. */
+const CUT_OFF = "the answer was cut off before it finished.";
+
 /**
  * The verdict badge for an answer.
  *
  * "Verified" is only shown when the server said `passed` AND every claim it
- * returned is supported AND there was at least one claim. Each of those can
- * fail independently: `passed` is also the server's default for a missing
- * status, and an answer with no checkable statement passes vacuously.
+ * returned is supported AND there was at least one claim AND the answer was
+ * not cut off. Each of those can fail independently: `passed` is also the
+ * server's default for a missing status, and an answer with no checkable
+ * statement passes vacuously.
  */
 export function answerVerdict(result: QueryResponse): AnswerVerdict {
   const counts = countClaims(result.claim_checks);
@@ -85,23 +89,35 @@ export function answerVerdict(result: QueryResponse): AnswerVerdict {
       key: "failed",
       label: "Failed verification",
       detail:
-        problems > 0
+        (problems > 0
           ? `${plural(problems, "statement")} could not be matched to the documents, even after a revision. Treat the marked statements as wrong until checked.`
-          : "The answer did not pass verification, even after a revision. Treat it as unconfirmed.",
+          : "The answer did not pass verification, even after a revision. Treat it as unconfirmed.") +
+        (result.answer_truncated ? ` Also, ${CUT_OFF}` : ""),
       tone: "bad",
     };
   }
 
-  if (result.validation_status === "warning" || (result.validation_status === "passed" && notConfirmed > 0)) {
-    return {
-      key: "partial",
-      label: "Partially verified",
-      detail:
+  // The server turns "passed" into "warning" for an answer cut off at the
+  // output limit, so its claims can all be supported. Saying "0 could not be
+  // confirmed" would leave the reader looking for a problem that is not there.
+  if (
+    result.validation_status === "warning" ||
+    (result.validation_status === "passed" && (notConfirmed > 0 || result.answer_truncated))
+  ) {
+    let detail: string;
+    if (result.answer_truncated && notConfirmed === 0) {
+      detail =
         counts.total > 0
+          ? `All ${plural(counts.total, "statement")} matched to the documents, but ${CUT_OFF}`
+          : `Nothing in it could be checked, and ${CUT_OFF}`;
+    } else {
+      detail =
+        (counts.total > 0
           ? `${counts.supported} of ${plural(counts.total, "statement")} matched to the documents; ${notConfirmed} could not be confirmed.`
-          : "Some statements could not be matched to a source.",
-      tone: "warn",
-    };
+          : "Some statements could not be matched to a source.") +
+        (result.answer_truncated ? ` Also, ${CUT_OFF}` : "");
+    }
+    return { key: "partial", label: "Partially verified", detail, tone: "warn" };
   }
 
   if (result.validation_status === "passed") {
@@ -203,6 +219,29 @@ export function claimView(c: ClaimCheck): ClaimView {
           : "No check could confirm or refute it.",
       };
   }
+}
+
+export interface ClaimMarker {
+  label: string;
+  /** Longer explanation, for a title attribute. */
+  title: string;
+}
+
+/**
+ * A note shown beside a claim's verdict when the local checker doubted the
+ * statement's wording although every figure in it checked out. The verdict
+ * itself is the judge's (it may still be "Supported"); the marker only says
+ * the statement was doubted on the way, so a reader can look twice.
+ */
+export function claimMarker(c: ClaimCheck): ClaimMarker | null {
+  if (!c.suspected_misstatement) return null;
+  return {
+    label: "Wording doubted",
+    title:
+      "Every figure in it is in the documents, but the passages holding them did not " +
+      "clearly support the statement as worded (another party, a reversed condition), " +
+      "so it was not confirmed on its figures alone and was left to the LLM judge.",
+  };
 }
 
 /** Problems first, so the statements that need a reader's attention lead. */

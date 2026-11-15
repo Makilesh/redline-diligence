@@ -11,6 +11,7 @@ import {
   Gauge,
   Loader2,
   RefreshCw,
+  Scissors,
   ShieldAlert,
   ShieldQuestion,
   ShieldX,
@@ -239,6 +240,19 @@ export default function AnswerPanel({
           {markdown}
         </ReactMarkdown>
       </div>
+
+      {/* Directly under the text, where it stops: the model hit its output
+          limit, so the last sentence may be unfinished and later points
+          missing. Outside .answer-body so the prose styles do not apply. */}
+      {result?.answer_truncated && (
+        <p
+          role="note"
+          className="-mt-2 flex items-center gap-2 px-6 pb-4 text-[0.78rem] leading-snug text-warn"
+        >
+          <Scissors size={12} className="shrink-0" aria-hidden />
+          Cut off here: the model reached its output limit, so the answer is incomplete.
+        </p>
+      )}
 
       {result && <ClaimChecks checks={result.claim_checks} />}
 
