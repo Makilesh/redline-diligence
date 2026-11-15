@@ -52,6 +52,10 @@ _PERIOD = re.compile(
     r"|H[12]\s?'?\d{2,4}|LTM|TTM|YTD)$",
     re.IGNORECASE,
 )
+# Consecutive section-label rows a statement may carry between figures.
+_MAX_LABEL_ROWS = 3
+# A word in a table cell: what a row label has and a strip of amounts does not.
+_LABEL = re.compile(r"[A-Za-z]{3,}")
 _FOOTNOTE = re.compile(r"^(?:\(\d{1,2}\)|\d{1,2}\)|\*{1,3}|†|‡)\s+\S")
 _CAPTION = re.compile(
     r"^\(.*\)$|\bin\s+(?:thousands|millions|billions)\b|\b(?:USD|EUR|GBP|\$)\s*(?:000|m|mm|bn)\b",
@@ -440,7 +444,17 @@ class PDFProcessor:
         """A label followed by at least two value cells and nothing else."""
         if len(row.cells) < 3 or not re.search(r"[A-Za-z]", row.cells[0].text):
             return False
+        # "(Dollars in millions)  2019  2018" is the header of most statements,
+        # not their first line: bare years parse as amounts, and taking the
+        # header for a value row left the table with "Column 2" / "Column 3".
+        if self._period_row(row):
+            return False
         return all(self._is_value(c.text) for c in row.cells[1:])
+
+    @staticmethod
+    def _label_row(row: _Row) -> bool:
+        """A section label inside a statement ("Operating expenses:"): one short cell."""
+        return len(row.cells) == 1 and len(row.text) < 80
 
     @staticmethod
     def _period_row(row: _Row) -> bool:
@@ -467,9 +481,14 @@ class PDFProcessor:
                 continue
 
             header_index = None
-            for j in (i - 1, i - 2):
-                if j >= 0 and self._period_row(rows[j]):
+            for j in range(i - 1, max(i - 2 - _MAX_LABEL_ROWS, -1), -1):
+                if self._period_row(rows[j]):
                     header_index = j
+                    break
+                # Past the row just above, only section labels ("ASSETS",
+                # "Current assets:") may sit between a header and its figures —
+                # the layout of every balance sheet.
+                if j < i - 1 and not self._label_row(rows[j]):
                     break
             if header_index is not None:
                 header_cells = [c for c in rows[header_index].cells if _PERIOD.match(c.text)]
@@ -479,7 +498,12 @@ class PDFProcessor:
             names = [c.text for c in header_cells] if header_index is not None else [
                 f"Column {n + 2}" for n in range(len(anchors))]
 
-            data: list[list[str]] = []
+            # Rows between the header and the first figures are section labels;
+            # they belong to the table (they used to be skipped with it, and lost).
+            data: list[list[str]] = [
+                [rows[k].text] + [""] * len(anchors)
+                for k in range(header_index + 1 if header_index is not None else i, i)
+            ]
             j = i
             while j < len(rows):
                 row = rows[j]
@@ -490,11 +514,15 @@ class PDFProcessor:
                     data.append([row.cells[0].text] + placed)
                     j += 1
                     continue
-                # A label-only row inside the statement ("Operating expenses:").
-                if (len(row.cells) == 1 and j + 1 < len(rows) and self._value_row(rows[j + 1])
-                        and len(row.text) < 80):
-                    data.append([row.text] + [""] * len(anchors))
-                    j += 1
+                # Label-only rows inside the statement ("Operating expenses:",
+                # "LIABILITIES AND EQUITY" / "Current liabilities:").
+                labels = 0
+                while (j + labels < len(rows) and labels < _MAX_LABEL_ROWS
+                       and self._label_row(rows[j + labels])):
+                    labels += 1
+                if labels and j + labels < len(rows) and self._value_row(rows[j + labels]):
+                    data.extend([rows[k].text] + [""] * len(anchors) for k in range(j, j + labels))
+                    j += labels
                     continue
                 break
             value_rows = sum(1 for r in data if any(r[1:]))
@@ -587,7 +615,7 @@ class PDFProcessor:
         tables, not the document, and is reported as a warning.
         """
         try:
-            return self._table_stitcher.stitch_document_tables(pdf_path)
+            tables = self._table_stitcher.stitch_document_tables(pdf_path)
         except Exception as e:
             logger.warning(
                 "Table extraction failed, continuing without tables",
@@ -595,3 +623,30 @@ class PDFProcessor:
             )
             self.warnings.append("Tables could not be extracted from this PDF; its text was indexed")
             return []
+        kept = [t for t in tables if self._has_row_labels(t)]
+        if len(kept) < len(tables):
+            logger.info(
+                "Ruled tables without row labels left to the text path",
+                extra={"dropped": len(tables) - len(kept), "kept": len(kept)},
+            )
+        return kept
+
+    @staticmethod
+    def _has_row_labels(table: dict) -> bool:
+        """
+        Whether a ruled table carries the labels of its rows.
+
+        Filings rendered from EDGAR HTML often rule only the amount columns (a
+        rule under each figure), so pdfplumber's "table" is a strip of numbers
+        — "$ | 39,117", "21,643", ... — with every line item outside it. Taken
+        as a table, its region was removed from the page text, labels and all:
+        on NIKE's FY2019 10-K, 32 of 34 ruled tables were such strips and the
+        balance sheet reached the index as 100 unlabelled figures. A table where
+        fewer than a quarter of the rows have a word in them is left to the
+        text path, which keeps each row's label next to its figures.
+        """
+        rows = [r for r in table.get("rows") or [] if any(str(c or "").strip() for c in r)]
+        if not rows:
+            return True
+        labelled = sum(1 for r in rows if any(_LABEL.search(str(c or "")) for c in r))
+        return labelled >= 0.25 * len(rows)
