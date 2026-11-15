@@ -543,6 +543,11 @@ async def synthesize_answer(
                     agent="answer_synthesizer",
                 )
             else:
+                # Streamed internally even though nobody watches the tokens:
+                # a blocking request cannot tell a thinking model from a hung
+                # one until its 120s timeout, a streamed one can within the
+                # first-token deadline (~22s). In the 2026-11-15 run each of
+                # four hung calls cost 120s on this path.
                 candidate = await call_prose_agent(
                     system_prompt=ANSWER_SYNTHESIZER_SYSTEM_PROMPT,
                     user_prompt=user_prompt,
@@ -551,6 +556,7 @@ async def synthesize_answer(
                     max_tokens=3000,
                     api_key=choice.api_key,
                     agent="answer_synthesizer",
+                    stream_with_deadline=True,
                 )
             if not _is_usable_answer(candidate, chunks):
                 # A response that violates the prompt's citation contract is a

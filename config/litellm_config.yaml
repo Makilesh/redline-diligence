@@ -20,11 +20,13 @@
 # ==============================================================================
 #
 #   model                    RPM     TPM      RPD    role
-#   gemini-3.7-flash           5    250K       20    synthesis (newest)
+#   gemini-3.8-flash           5    250K       20    synthesis (newest; limits assumed)
+#   gemini-3.7-flash           5    250K       20    synthesis (served BY 3.8-flash)
 #   gemini-3.6-flash           5    250K       20    synthesis
-#   gemini-3.5-flash           5    250K       20    synthesis
+#   gemini-3.5-flash           5    250K       20    synthesis (served BY 3.6-flash)
 #   gemini-3-flash-preview     5    250K       20    synthesis
-#   gemini-2.5-flash           5    250K       20    synthesis (grandfathered)
+#   gemini-2.5-flash           5    250K       20    synthesis (grandfathered;
+#                                                    becomes 3.5-flash-lite 2026-12-01)
 #   gemini-3.5-flash-lite     15    250K      500    agents (volume tier)
 #   gemini-3.1-flash-lite     15    250K      500    agents (volume tier)
 #   gemini-2.5-flash-lite     10    250K       20    agents (grandfathered)
@@ -49,7 +51,14 @@ routing:
   # the answer. Gets the good models; each rung is worth ~20 requests/day per
   # API key, then it falls through. Lite is last so synthesis degrades rather
   # than fails.
+  #
+  # Provider announcements are data in the registry, not reminders:
+  # RETIREMENTS drops gemini-2.5-flash from selection on 2026-12-01 (and a test
+  # fails until the rung is removed), and SERVED_BY makes an outage of
+  # 3.8-flash cool 3.7-flash with it (and 3.6 with 3.5), since each pair is one
+  # model behind two ids.
   synthesis_ladder:
+    - gemini/gemini-3.8-flash
     - gemini/gemini-3.7-flash
     - gemini/gemini-3.6-flash
     - gemini/gemini-3.5-flash
@@ -89,6 +98,18 @@ routing:
 # syntheses before any downgrade, then ~1,900 lite calls, then local.
 #
 # Daily counters reset when the provider's do: midnight Pacific time, not UTC.
+
+deadlines:
+  # Per request, enforced in src/llm/litellm_wrapper.py.
+  structured_timeout_seconds: 20    # cloud; 118 live calls took <= 2.5s
+  local_structured_timeout_seconds: 60
+  prose_total_seconds: 120
+  # Synthesis is streamed (also on the blocking /query path) so a model that
+  # has not STARTED answering is abandoned early: 2 + max_tokens / 150 = 22s at
+  # 3000. Gemini 3.x sends no bytes while thinking, so this is a bound on
+  # thinking time; PROSE_FIRST_TOKEN_TIMEOUT_SECONDS overrides it.
+  prose_first_token_seconds: 22
+  stream_stall_seconds: 20
 
 sampling:
   synthesis:

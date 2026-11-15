@@ -25,6 +25,7 @@ from src.llm.failures import (
     Failure,
     FailureKind,
     ProseAgentFailed,
+    ResponseDeadlineExceeded,
     StructuredOutputError,
     TokenWindowFull,
     classify_failure,
@@ -196,13 +197,85 @@ REPAIR_ECHO_CHARS = 4000
 # ladder could not descend until it did. Three of those in a row is a query that
 # looks hung to the user while a perfectly good fallback model sits unused.
 #
-# The values are generous against observed behaviour rather than tight: healthy
-# structured calls finish in 1-3s and healthy synthesis in 10-30s, so these only
-# fire when something is actually wrong. Exceeding them raises, which the retry
-# loop already treats as a transport error — so the effect is to reach the next
-# rung sooner, never to lose a call that would have succeeded.
-STRUCTURED_TIMEOUT_SECONDS = 60.0
+# Exceeding them raises a timeout, which every ladder treats as the model being
+# unavailable — so the effect is to reach the next rung sooner, never to lose a
+# call that would have succeeded.
+#
+# Structured calls: 118 of them in the 2026-11-15 live run (Lite rungs, agents
+# and the judge alike) took 0.8-2.5s, none longer. 20s is eight times the
+# slowest, and still above the worst a healthy Lite model can take when a
+# repair request doubles max_tokens to 3,000 and it spends all of them thinking
+# (~14s at the slowest healthy rate measured, 214 tokens/s). It was 60s, which
+# a hung Lite model charged in full on each of the ~3 structured calls a query
+# makes. The local model is not held to it: it has no rung below it, and a 14B
+# model on a consumer GPU reading an 8K-token prompt is slower than any cloud
+# rung without being unhealthy.
+STRUCTURED_TIMEOUT_SECONDS = 20.0
+LOCAL_STRUCTURED_TIMEOUT_SECONDS = 60.0
+
+# Prose: the TOTAL budget for one synthesis request. Healthy synthesis takes
+# 5-14s (59 calls in the live run; one outlier at 34s). On its own this bound
+# is what made a hung model cost two minutes — see first_token_deadline() for
+# the deadline that now catches a hang long before it.
 PROSE_TIMEOUT_SECONDS = 120.0
+
+# ─── First-token deadline for streamed prose ─────────────────────────────────
+#
+# A hung or overloaded model is recognisable long before the total budget runs
+# out: it does not start answering. What "start" means for a thinking model was
+# measured, not assumed (live probe, 2026-11-15, gemini-3.8-flash via LiteLLM
+# 1.89.3, streamed, temperature 0.1, max_tokens 3000): the request opened at
+# once, and then NOTHING arrived — no SSE chunk, no keep-alive — until thinking
+# had finished. The first chunk came at 138.7s; all 148 answer tokens followed
+# within 0.8s. Gemini 3.x streams no bytes while it thinks.
+#
+# So time-to-first-token is thinking time, and thinking time is bounded by the
+# request's own max_tokens, because Gemini counts thoughts against it (12 of the
+# run's 59 synthesis calls ended at 2,995-2,996 of 3,000 completion tokens). The
+# slowest HEALTHY rate in the run was 214 tokens/s (gemini-2.5-flash; the
+# 3-flash-preview rung ran at 260-290), so a healthy model that spends its whole
+# budget thinking still starts answering within ~14s at max_tokens=3000. The
+# deadline is that bound at a rate 30% below the slowest healthy one, plus the
+# request overhead: 2 + 3000/150 = 22s. Streamed calls in the run actually
+# started answering 4.3-5.7s after the request.
+#
+# One of the 59 healthy calls would have been abandoned (34.0s total, 2,409
+# tokens — 71 tokens/s); it would have cost its unit and a fall to the next rung.
+# Each hung call it replaces cost 120s.
+FIRST_TOKEN_MIN_TOKENS_PER_SECOND = 150.0
+FIRST_TOKEN_OVERHEAD_SECONDS = 2.0
+FIRST_TOKEN_FLOOR_SECONDS = 10.0
+
+# After the first token a healthy stream delivers a chunk every ~0.1s. A gap
+# this long means the stream has died with the connection still open.
+STREAM_STALL_SECONDS = 20.0
+
+
+def first_token_deadline(max_tokens: int) -> float:
+    """
+    Seconds a streamed prose request may take to emit its first answer token.
+
+    Derived from max_tokens (see the measurements above) so that raising the
+    output budget cannot silently turn the deadline into a guillotine for
+    healthy long answers. PROSE_FIRST_TOKEN_TIMEOUT_SECONDS overrides it.
+
+    Args:
+        max_tokens: The request's output budget, thinking included.
+
+    Returns:
+        The deadline, never above PROSE_TIMEOUT_SECONDS.
+    """
+    override = os.getenv("PROSE_FIRST_TOKEN_TIMEOUT_SECONDS", "").strip()
+    if override:
+        try:
+            return min(max(float(override), 1.0), PROSE_TIMEOUT_SECONDS)
+        except ValueError:
+            logger.warning(
+                "Ignoring PROSE_FIRST_TOKEN_TIMEOUT_SECONDS: not a number",
+                extra={"value": override},
+            )
+    derived = FIRST_TOKEN_OVERHEAD_SECONDS + max_tokens / FIRST_TOKEN_MIN_TOKENS_PER_SECOND
+    return min(max(derived, FIRST_TOKEN_FLOOR_SECONDS), PROSE_TIMEOUT_SECONDS)
 
 
 def is_quota_error(exc: Exception) -> bool:
@@ -595,7 +668,9 @@ async def _structured_request(
         "temperature": temperature,
         "max_tokens": max_tokens,
         "response_format": {"type": "json_object"},  # Enforces JSON mode
-        "timeout": STRUCTURED_TIMEOUT_SECONDS,
+        "timeout": (
+            LOCAL_STRUCTURED_TIMEOUT_SECONDS if is_local(model) else STRUCTURED_TIMEOUT_SECONDS
+        ),
     }
     if is_local(model):
         kwargs["num_ctx"] = 8192  # Expand context window for local Ollama to prevent truncation
@@ -944,6 +1019,7 @@ async def call_prose_agent(
     max_tokens: int = 3000,
     api_key: str | None = None,
     agent: str | None = None,
+    stream_with_deadline: bool = False,
 ) -> str:
     """
     Wrapper for agents that return prose (not JSON).
@@ -958,6 +1034,12 @@ async def call_prose_agent(
         max_tokens: Maximum output tokens (default 3000 for long answers).
         api_key: Credential for this specific call.
         agent: Calling agent's name, for usage logs and optional tracing.
+        stream_with_deadline: Stream the request internally so the
+            first-token deadline applies (see first_token_deadline), and return
+            the whole text exactly as the blocking call does. A blocking
+            request cannot tell a model that is thinking from one that is hung
+            until the total timeout; a streamed one can. Ignored for the local
+            model, which has no rung below it to fall to.
 
     Returns:
         Raw string response from the agent. Never None.
@@ -965,8 +1047,11 @@ async def call_prose_agent(
     Raises:
         ProseAgentFailed: (a RuntimeError) every attempt failed or returned an
             empty completion. Classified so a ladder moves to another model.
+        StreamInterrupted: With stream_with_deadline, the stream failed after
+            answer text had started; the model is reported unhealthy.
         Exception: A provider refusal the caller's ladder classifies — 429,
-            503, timeout, rejected key, revoked model — raised on first sight.
+            503, timeout (including a missed first-token deadline), rejected
+            key, revoked model — raised on first sight.
 
     Retries exist because both failure modes were observed on the golden-set run:
     a transient upstream 503 ("model is currently experiencing high demand") and,
@@ -981,6 +1066,7 @@ async def call_prose_agent(
     """
     last_error: Exception | None = None
     attempts = 0
+    streamed = stream_with_deadline and not is_local(model)
 
     for attempt in range(1, MAX_RETRIES + 1):
         attempts = attempt
@@ -1010,10 +1096,17 @@ async def call_prose_agent(
             metadata = _call_metadata(agent)
             if metadata:
                 prose_kwargs["metadata"] = metadata
-            started = time.monotonic()
-            response = await _acompletion(prose_kwargs, model, api_key)
-            _log_usage(response, model, agent, started)
-            content = response.choices[0].message.content
+            if streamed:
+                content = await _streamed_text(
+                    prose_kwargs, model, api_key, agent,
+                    on_token=_discard_token,
+                    first_token_timeout=first_token_deadline(max_tokens),
+                )
+            else:
+                started = time.monotonic()
+                response = await _acompletion(prose_kwargs, model, api_key)
+                _log_usage(response, model, agent, started)
+                content = response.choices[0].message.content
 
             if content and content.strip():
                 logger.info(
@@ -1032,6 +1125,10 @@ async def call_prose_agent(
                 extra={"model": model, "attempt": attempt},
             )
 
+        except StreamInterrupted:
+            # The model stopped mid-answer and has already been reported; a
+            # same-slot retry would ask the failing model again.
+            raise
         except Exception as e:
             last_error = e
             logger.warning(
@@ -1223,11 +1320,188 @@ class StreamInterrupted(RuntimeError):
         self.cause = cause
 
 
+
 class _UsageHolder:
     """Response-shaped holder so _log_usage can read a streamed call's usage."""
 
     def __init__(self, usage):
         self.usage = usage
+
+
+def _discard_token(_text: str) -> None:
+    """on_token for a stream nobody is watching (the blocking /query path)."""
+
+
+async def _await_within(awaitable, seconds: float):
+    """
+    Awaits `awaitable` for at most `seconds`.
+
+    asyncio.wait rather than wait_for, so that a TimeoutError raised BY the
+    provider call (LiteLLM's own timeout derives from it) can never be mistaken
+    for our deadline expiring, or the other way round.
+
+    Returns:
+        (True, result) when it finished in time; (False, None) when the
+        deadline expired, in which case it has been cancelled.
+
+    Raises:
+        Whatever the awaitable raised (StopAsyncIteration included).
+    """
+    task = asyncio.ensure_future(awaitable)
+    try:
+        done, _ = await asyncio.wait({task}, timeout=max(0.0, seconds))
+    except asyncio.CancelledError:
+        task.cancel()
+        raise
+    if not done:
+        task.cancel()
+        await asyncio.wait({task})
+        return False, None
+    return True, task.result()
+
+
+async def _close_stream(stream) -> None:
+    """
+    Best-effort release of an abandoned stream's connection.
+
+    Without it an abandoned request keeps its socket until garbage collection,
+    and the provider keeps generating into it. Bounded, and never raises:
+    cleanup must not turn a fallback into a failure.
+    """
+    aclose = getattr(stream, "aclose", None)
+    if aclose is None:
+        return
+    try:
+        await asyncio.wait_for(aclose(), timeout=2.0)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("Closing an abandoned stream failed", extra={"error": str(e)})
+
+
+async def _streamed_text(
+    kwargs: dict,
+    model: str,
+    api_key: str | None,
+    agent: str | None,
+    on_token,
+    first_token_timeout: float | None,
+) -> str:
+    """
+    One streamed provider request under the wrapper's deadlines.
+
+    Three deadlines, each answering a different question:
+      first_token — has the model started answering? (see first_token_deadline)
+      stall       — once it has, is it still going? (STREAM_STALL_SECONDS)
+      total       — has the whole request run out of time? (PROSE_TIMEOUT_SECONDS)
+
+    The total one is enforced HERE because LiteLLM 1.89.3 does not enforce it on
+    this path: its Gemini streaming call ignores the `timeout` argument and
+    sends the request on litellm.module_level_aclient, whose read timeout is
+    litellm.request_timeout — 6000s unless REQUEST_TIMEOUT is set. The streamed
+    synthesis path was bounded only by the pipeline's own 900s deadline while
+    the blocking path had two minutes.
+
+    Accounts are settled like a blocking request: input tokens booked before,
+    corrected from the stream's usage after (requested with include_usage —
+    without it LiteLLM drops usage from the stream and the booking stays an
+    estimate; the live run logged prompt_tokens=null for every streamed call),
+    and a refusal is refunded. A missed deadline is a TIMEOUT and, like one,
+    keeps its unit: the provider admitted the request.
+
+    Args:
+        kwargs: litellm.acompletion arguments; `stream` is set here.
+        model: Upstream model.
+        api_key: Credential the request is sent with.
+        agent: Calling agent, for the usage log.
+        on_token: Receives each text delta.
+        first_token_timeout: Seconds to the first text delta, or None for no
+            first-token deadline (the total and stall deadlines still apply).
+
+    Returns:
+        The concatenated text (possibly empty — the caller decides).
+
+    Raises:
+        ResponseDeadlineExceeded: A deadline expired before any text.
+        StreamInterrupted: The stream failed or stalled after text was emitted;
+            the model has been reported unhealthy.
+        Exception: The provider's own failure before any text, accounts settled.
+    """
+    kwargs["stream"] = True
+    if not is_local(model):
+        kwargs["stream_options"] = {"include_usage": True}
+    total = float(kwargs.get("timeout") or PROSE_TIMEOUT_SECONDS)
+
+    loop = asyncio.get_running_loop()
+    opened_at = loop.time()
+    first_by = opened_at + min(first_token_timeout or total, total)
+    total_by = opened_at + total
+
+    parts: list[str] = []
+    emitted = 0
+    usage = None
+    stream = None
+    started = time.monotonic()
+    reservation = await _reserve_input_tokens(kwargs, model, api_key)
+    try:
+        ok, stream = await _await_within(litellm.acompletion(**kwargs), first_by - loop.time())
+        if not ok:
+            raise ResponseDeadlineExceeded(model, "first_token", first_by - opened_at)
+        iterator = stream.__aiter__()
+        last_chunk_at = opened_at
+        while True:
+            now = loop.time()
+            if not emitted:
+                phase, until = "first_token", first_by
+            else:
+                stall_by = last_chunk_at + STREAM_STALL_SECONDS
+                phase, until = ("stall", stall_by) if stall_by < total_by else ("total", total_by)
+            try:
+                ok, chunk = await _await_within(iterator.__anext__(), until - now)
+            except StopAsyncIteration:
+                break
+            if not ok:
+                limit = {"first_token": first_by - opened_at, "stall": STREAM_STALL_SECONDS,
+                         "total": total}[phase]
+                raise ResponseDeadlineExceeded(model, phase, limit)
+            last_chunk_at = loop.time()
+            usage = getattr(chunk, "usage", None) or usage
+            try:
+                delta = chunk.choices[0].delta.content
+            except (AttributeError, IndexError, TypeError):
+                delta = None
+            if delta:
+                parts.append(delta)
+                emitted += len(delta)
+                on_token(delta)
+    except asyncio.CancelledError:
+        # The caller gave up (a node or pipeline deadline): release the
+        # connection rather than leave the provider generating into it.
+        await _close_stream(stream)
+        raise
+    except Exception as e:
+        await _close_stream(stream)
+        if emitted:
+            # A stream that drops or stalls mid-answer is the provider failing,
+            # whatever the exception class says.
+            _report_unhealthy(model)
+            raise StreamInterrupted(
+                f"stream from {model} failed after {emitted} chars: {e}", emitted, e
+            ) from e
+        failure = classify_failure(e)
+        if reservation is not None and failure.refundable:
+            reservation.release()
+        await _settle_failure(model, api_key, failure)
+        if isinstance(e, ResponseDeadlineExceeded):
+            logger.warning(
+                "Streamed request abandoned: the model did not start answering in time",
+                extra={"model": model, "deadline_seconds": round(e.seconds, 1),
+                       "phase": e.phase},
+            )
+        raise
+
+    _log_usage(_UsageHolder(usage), model, agent, started)
+    if reservation is not None:
+        reservation.adjust(_prompt_tokens(usage))
+    return "".join(parts)
 
 
 async def stream_prose_agent(
@@ -1247,11 +1521,14 @@ async def stream_prose_agent(
     is unchanged:
 
     - fails BEFORE the first token: a 503 / timeout / quota / auth error is
-      re-raised for the ladder to classify; any other error falls back to the
+      re-raised for the ladder to classify — and so is a missed first-token
+      deadline (first_token_deadline(max_tokens), not applied to the local
+      model), which is a timeout; any other error falls back to the
       non-streamed call_prose_agent on the same model (which retries), and its
       whole answer is emitted as one token.
-    - fails AFTER tokens were emitted: raises StreamInterrupted, and the caller
-      emits an answer reset before trying elsewhere.
+    - fails AFTER tokens were emitted (including a stall): raises
+      StreamInterrupted, and the caller emits an answer reset before trying
+      elsewhere.
 
     Args:
         system_prompt: System-level instructions.
@@ -1280,7 +1557,6 @@ async def stream_prose_agent(
         "temperature": temperature,
         "max_tokens": max_tokens,
         "timeout": PROSE_TIMEOUT_SECONDS,
-        "stream": True,
     }
     if api_key:
         kwargs["api_key"] = api_key
@@ -1288,35 +1564,15 @@ async def stream_prose_agent(
     if metadata:
         kwargs["metadata"] = metadata
 
-    parts: list[str] = []
-    emitted = 0
-    started = time.monotonic()
-    usage = None
-    reservation = await _reserve_input_tokens(kwargs, model, api_key)
     try:
-        stream = await litellm.acompletion(**kwargs)
-        async for chunk in stream:
-            usage = getattr(chunk, "usage", None) or usage
-            try:
-                delta = chunk.choices[0].delta.content
-            except (AttributeError, IndexError):
-                delta = None
-            if delta:
-                parts.append(delta)
-                emitted += len(delta)
-                on_token(delta)
+        text = await _streamed_text(
+            kwargs, model, api_key, agent, on_token,
+            first_token_timeout=None if is_local(model) else first_token_deadline(max_tokens),
+        )
+    except StreamInterrupted:
+        raise
     except Exception as e:
-        if emitted:
-            # A stream that drops mid-answer is the provider failing, whatever
-            # the exception class says.
-            _report_unhealthy(model)
-            raise StreamInterrupted(
-                f"stream from {model} failed after {emitted} chars: {e}", emitted, e
-            ) from e
         failure = classify_failure(e)
-        if reservation is not None and failure.refundable:
-            reservation.release()
-        await _settle_failure(model, api_key, failure)
         if failure.kind in _PROSE_NO_RETRY_KINDS:
             if failure.kind in _HEALTH_KINDS:
                 _report_unhealthy(model)
@@ -1344,11 +1600,6 @@ async def stream_prose_agent(
         on_token(text)
         return text
 
-    _log_usage(_UsageHolder(usage), model, agent, started)
-    if reservation is not None:
-        reservation.adjust(_prompt_tokens(usage))
-
-    text = "".join(parts)
     if not text.strip():
         # Typed so the caller's ladder tries another model; as a bare
         # RuntimeError it matched no classifier and ended in a refusal.

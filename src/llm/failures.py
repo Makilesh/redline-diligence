@@ -143,6 +143,31 @@ class TokenWindowFull(Exception):
         self.retry_after = retry_after
 
 
+class ResponseDeadlineExceeded(TimeoutError):
+    """
+    A streamed completion missed one of the wrapper's own deadlines.
+
+    Raised locally, not by the provider: no text by the first-token deadline,
+    a silent gap after text had started, or the total budget spent. Classified
+    exactly like a provider timeout (TIMEOUT): the model is unresponsive, so the
+    next move is another model, and the request is not refunded — it reached
+    the provider and was admitted, just as a request that runs into the HTTP
+    timeout was.
+
+    Attributes:
+        phase: "first_token", "stall" or "total".
+        seconds: The deadline that expired.
+    """
+
+    def __init__(self, model: str, phase: str, seconds: float):
+        super().__init__(
+            f"{model}: no {'text' if phase == 'first_token' else 'progress'} within "
+            f"{seconds:.0f}s ({phase.replace('_', '-')} deadline)"
+        )
+        self.phase = phase
+        self.seconds = seconds
+
+
 class ProseAgentFailed(RuntimeError):
     """
     A prose call exhausted its same-model retries without a usable completion.
@@ -278,6 +303,8 @@ def classify_failure(exc: BaseException) -> Failure:
         return Failure(FailureKind.MODEL_FAILED)
     if isinstance(exc, TokenWindowFull):
         return Failure(FailureKind.QUOTA, quota_window="minute", retry_after=exc.retry_after)
+    if isinstance(exc, ResponseDeadlineExceeded):
+        return Failure(FailureKind.TIMEOUT)
     if not isinstance(exc, Exception):
         return Failure(FailureKind.UNKNOWN)
 
