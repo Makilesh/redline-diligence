@@ -59,6 +59,8 @@ class TestThresholds:
         ce = claim_checker.thresholds_for("cross-encoder/some-other-nli-model")
         assert ce == claim_checker.CROSS_ENCODER_THRESHOLDS
         assert ce.entail == claim_checker.ENTAIL_THRESHOLD == 0.5
+        assert claim_checker.thresholds_for("cross-encoder/nli-deberta-v3-xsmall").entail == 0.858
+        assert claim_checker.thresholds_for("cross-encoder/nli-deberta-v3-small").entail == 0.853
         fc = claim_checker.thresholds_for(nli.FACTCG)
         assert fc.entail == 0.432 and fc.clear_neutral_entail == 0.2
 

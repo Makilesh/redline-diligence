@@ -126,6 +126,21 @@ MODEL_THRESHOLDS = {
         entail=0.432, contradiction=CONTRADICTION_THRESHOLD,
         clear_neutral_entail=0.2, clear_neutral_contradiction=CLEAR_NEUTRAL_MAX_CONTRADICTION,
     ),
+    # The cross-encoders that still serve — -xsmall on CPU, -small when the
+    # checker cannot load — recalibrated by the same rule on the same dev
+    # half. On the test half, -xsmall passed 21/165 wrong claims at the old
+    # lines and 18/165 at these, with false alarms 3/101 -> 1/101, one fewer
+    # correct claim passed locally and 4.5% more claims sent to the judge;
+    # -small 16/165 -> 14/165, false alarms unchanged (5/101), two fewer
+    # correct claims passed locally.
+    "cross-encoder/nli-deberta-v3-xsmall": Thresholds(
+        entail=0.858, contradiction=CONTRADICTION_THRESHOLD,
+        clear_neutral_entail=0.002, clear_neutral_contradiction=CLEAR_NEUTRAL_MAX_CONTRADICTION,
+    ),
+    "cross-encoder/nli-deberta-v3-small": Thresholds(
+        entail=0.853, contradiction=CONTRADICTION_THRESHOLD,
+        clear_neutral_entail=0.03, clear_neutral_contradiction=CLEAR_NEUTRAL_MAX_CONTRADICTION,
+    ),
 }
 
 
