@@ -168,3 +168,40 @@ def reciprocal_rank_fusion(
         },
     )
     return fused
+
+
+def leading_document(
+    fused: list[tuple[str, float]],
+    doc_of: dict[str, str],
+) -> tuple[str | None, float]:
+    """
+    The document the fused candidates point at most, by summed RRF score.
+
+    A chunk's fused score is evidence for the chunk; summed over a document's
+    chunks it is evidence for the document. A question about one agreement
+    in a room of similar ones usually names it ("the merger agreement
+    between Parent X and Target Y"), and the two retrievers agree on that
+    document far more often than on the passage: on LegalBench-RAG's MAUD
+    queries the fused list's first chunk came from the right agreement 99%
+    of the time while a ground-truth passage reached its top 10 for 11%
+    (Decision 65's measurements; Decision 67 acts on them). Summing rather
+    than taking the best chunk means a document that keeps coming up beats
+    one that matched once.
+
+    Args:
+        fused: (chunk_id, rrf_score) from reciprocal_rank_fusion.
+        doc_of: chunk_id -> document identity (doc_id) for the fused ids.
+
+    Returns:
+        (document, share of the total fused score it holds), or (None, 0.0)
+        when no fused chunk has a document.
+    """
+    mass: dict[str, float] = {}
+    for chunk_id, score in fused:
+        doc = doc_of.get(chunk_id)
+        if doc:
+            mass[doc] = mass.get(doc, 0.0) + score
+    if not mass:
+        return None, 0.0
+    doc, top = max(mass.items(), key=lambda x: x[1])
+    return doc, top / sum(mass.values())
