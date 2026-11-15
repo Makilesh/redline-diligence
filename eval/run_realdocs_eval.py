@@ -7,6 +7,8 @@ FinanceBench (10-K/10-Q PDFs, evidence pages). Zero LLM calls.
     python -m eval.run_realdocs_eval financebench --max-documents 20
     python -m eval.run_realdocs_eval financebench --documents 3M_2018_10K PEPSICO_2022_10K
     python -m eval.run_realdocs_eval legalbench --compare eval/results/realdocs_legalbench_<date>.json
+    python -m eval.run_realdocs_eval legalbench --store <dir> --ingest-only        # index once
+    python -m eval.run_realdocs_eval legalbench --store <dir> --split dev          # tune on dev
 
 Why: every other quality number in this repository is measured on nine
 synthetic plain-text documents (~13K tokens) that fit in one prompt, so no
@@ -202,14 +204,21 @@ async def candidate_runs(query: str, config: dict, deal_id: str) -> dict:
     }
 
 
-async def node_run(query: str, query_type: str, deal_id: str) -> dict:
-    """One call of the real retrieval_executor_node, plus the heuristic refusal gate."""
+async def node_run(query: str, query_type: str, deal_id: str, config: dict | None = None) -> dict:
+    """
+    One call of the real retrieval_executor_node, plus the heuristic refusal gate.
+
+    `config` (from --retrieval-config) is placed in state as the rewriter's
+    would be, so a candidate setting is measured through the node unchanged.
+    """
     from eval.run_retrieval_eval import gate_decision
     from src.agents.retrieval_executor import retrieval_executor_node
 
     state = {"original_query": query, "current_query": query, "deal_id": deal_id,
              "query_type": query_type, "parsed_intent": {}, "extracted_filters": {},
              "sub_questions": [], "include_pii": False, "rewrite_iteration": 0}
+    if config:
+        state["retrieval_config"] = config
     start = time.perf_counter()
     out = await retrieval_executor_node(state)
     latency_ms = (time.perf_counter() - start) * 1000
@@ -378,6 +387,30 @@ def write_corpus(documents: dict[str, str], directory: Path) -> tuple[list[tuple
     return files, source_of
 
 
+def split_legalbench_documents(queries: list[data.SpanQuery], seed: int) -> dict[str, str]:
+    """
+    Corpus path -> "dev" or "test": half of each sub-corpus's documents (the odd
+    one to dev), drawn with a seeded shuffle of the sorted names.
+
+    Split by document, not by query: mini has ~10 queries per document, and
+    queries about one contract share its layout, so a query split would leak.
+    Stratified because the sub-corpora differ by an order of magnitude in
+    difficulty (MAUD context recall 15%, PrivacyQA 100%).
+    """
+    import random
+
+    by_subset: dict[str, set[str]] = defaultdict(set)
+    for q in queries:
+        by_subset[q.subset].add(q.document)
+    split = {}
+    for subset in sorted(by_subset):
+        docs = sorted(by_subset[subset])
+        random.Random(f"{seed}:{subset}").shuffle(docs)
+        n_dev = (len(docs) + 1) // 2
+        split.update({d: ("dev" if i < n_dev else "test") for i, d in enumerate(docs)})
+    return split
+
+
 async def run_legalbench(args) -> dict:
     from eval.corpus import use_client
     from src.agents.retrieval_strategy import get_retrieval_config
@@ -395,19 +428,38 @@ async def run_legalbench(args) -> dict:
                 kept.append(q)
                 per[q.subset] += 1
         queries = kept
+    # The whole corpus is indexed whatever --split asks: a held-out document's
+    # passages still compete for every rank, as they would in a data room.
     documents = {p: mini.documents[p] for p in sorted({s[0] for q in queries for s in q.snippets})}
+    split = None
+    if args.split:
+        split = split_legalbench_documents(queries, args.split_seed)
+        queries = [q for q in queries if split.get(q.document) == args.split]
 
     started = time.perf_counter()
-    client = await new_index()
     with tempfile.TemporaryDirectory(prefix="realdocs_") as tmp:
         files, source_of = write_corpus(documents, Path(tmp))
-        ingestion = await index_files(client, files, deal_id)
+        if args.store:
+            # Indexing takes ~4-5 minutes; a store built once is re-queried by
+            # every query-side experiment. An ingestion-side change needs its
+            # own store directory.
+            client, ingestion = await open_store(Path(args.store))
+            done = {d["filename"] for d in ingestion}
+            ingestion += await index_files(client, [f for f in files if f[1] not in done], deal_id)
+            (Path(args.store) / "ingestion.json").write_text(json.dumps(ingestion, indent=1), encoding="utf-8")
+            if args.ingest_only:
+                await client.close()
+                return {"benchmark": "legalbench", "ingest_only": True, "remaining": []}
+        else:
+            client = await new_index()
+            ingestion = await index_files(client, files, deal_id)
     index_s = time.perf_counter() - started
     chunks = await scroll_all(client, COLLECTION_NAME)
     parents = await scroll_all(client, PARENT_COLLECTION_NAME)
     span_index = SpanIndex(chunks, parents, source_of, documents)
     reachable = _file_spans([span_index.chunk_spans(c) for c in chunks if is_reachable(c, deal_id)])
-    config = get_retrieval_config(QUERY_TYPE["legalbench"], {})
+    override = json.loads(args.retrieval_config) if args.retrieval_config else {}
+    config = {**get_retrieval_config(QUERY_TYPE["legalbench"], {}), **override}
 
     report_queries = []
     with use_client(client):
@@ -418,7 +470,8 @@ async def run_legalbench(args) -> dict:
                 runs.update({a: r for a, r in (await candidate_runs(query.query, config, deal_id)).items()
                              if a in args.ablations})
             if "production" in args.ablations:
-                runs["production"] = await node_run(query.query, QUERY_TYPE["legalbench"], deal_id)
+                runs["production"] = await node_run(query.query, QUERY_TYPE["legalbench"], deal_id,
+                                                    config if override else None)
             scored = {}
             for ablation, run in runs.items():
                 items = [span_index.chunk_spans(c) for c in run["ranking"]]
@@ -462,6 +515,9 @@ async def run_legalbench(args) -> dict:
             "licences": data.LEGALBENCH_LICENCES, "subsets": list(args.subsets),
             "queries": len(queries), "documents": len(documents),
             "characters": sum(len(t) for t in documents.values()),
+            **({"split": args.split, "split_seed": args.split_seed,
+                "split_documents": sorted(d for d, s in split.items() if s == args.split)}
+               if split else {}),
         },
         "config": {"k": args.k, "rank_depth": RANK_DEPTH, "ablations": list(args.ablations),
                    "query_type": QUERY_TYPE["legalbench"], "retrieval_config": config},
@@ -470,6 +526,7 @@ async def run_legalbench(args) -> dict:
             "reachable_chunks": sum(1 for c in chunks if is_reachable(c, deal_id)),
             "pii_flagged_chunks": sum(1 for c in chunks if c.get("contains_pii")),
             "table_chunks": sum(1 for c in chunks if c.get("is_table")),
+            "context_header_chunks": sum(1 for c in chunks if c.get("context_header")),
             "index_seconds": round(index_s, 1),
             "alignment": {
                 "chunks_fully_aligned": sum(1 for c in coverage if c >= 1.0),
@@ -947,7 +1004,8 @@ async def run(args) -> dict:
     report["command"] = "python -m eval.run_realdocs_eval " + " ".join(sys.argv[1:])
     report["environment"] = {"device": _device(), "embedding_model": EMBEDDING_MODEL_NAME,
                              "reranker_model": RERANKER_MODEL_NAME, "python": sys.version.split()[0],
-                             "vector_store": "qdrant-client local mode (:memory:), exact search",
+                             "vector_store": "qdrant-client local mode ("
+                                             + ("on-disk store" if args.store else ":memory:") + "), exact search",
                              "laya_at_ingest": False}
     report["aggregates"] = aggregate(report, "subset" if args.benchmark == "legalbench" else "question_type")
     report["stage_deltas"] = stage_deltas(report, DELTA_METRICS[args.benchmark])
@@ -966,8 +1024,16 @@ def parse_args(argv=None):
     parser.add_argument("--max-documents", type=int, help="FinanceBench: seeded sample of N filings")
     parser.add_argument("--documents", nargs="+", metavar="DOC_NAME", help="FinanceBench: exactly these filings")
     parser.add_argument("--seed", type=int, default=20261115, help="FinanceBench sampling seed")
+    parser.add_argument("--split", choices=("dev", "test"),
+                        help="LegalBench-RAG: ask only the queries about this half of the documents "
+                             "(split_legalbench_documents); the whole corpus is still indexed")
+    parser.add_argument("--retrieval-config", metavar="JSON",
+                        help="LegalBench-RAG: overrides merged into the legal retrieval config, "
+                             '(JSON), e.g. {"dense_weight": 0.6, "sparse_weight": 0.4}')
+    parser.add_argument("--split-seed", type=int, default=20261115, help="LegalBench-RAG split seed")
     parser.add_argument("--store", metavar="DIR",
-                        help="FinanceBench: on-disk index (outside the repo) so ingestion can run in batches")
+                        help="on-disk index (outside the repo), reused across runs; FinanceBench "
+                             "ingests in batches into it")
     parser.add_argument("--max-new-documents", type=int, metavar="N",
                         help="with --store: index at most N filings not yet in the store")
     parser.add_argument("--ingest-only", action="store_true", help="with --store: stop after ingesting")

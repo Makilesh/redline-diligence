@@ -9,8 +9,8 @@ import asyncio
 import time
 
 from src.vector_db.reranker import embed_texts_async, get_embed_executor, rerank_pairs_async
-from src.vector_db.hybrid_search import hybrid_search, compute_sparse_bm25
-from src.vector_db.rrf_fusion import reciprocal_rank_fusion
+from src.vector_db.hybrid_search import compute_sparse_bm25, dense_search, hybrid_search
+from src.vector_db.rrf_fusion import leading_document, reciprocal_rank_fusion
 from src.vector_db.parent_child_retrieval import expand_context
 from src.agents.retrieval_strategy import clamp_retrieval_config, get_retrieval_config
 from src.workflow.state_definitions import AgentState
@@ -58,7 +58,9 @@ async def _candidates_for_query(
         metadata_filters: Filters, already relaxed/augmented by the caller.
 
     Returns:
-        Up to reranker_top_k chunk payloads in fused-rank order.
+        Up to reranker_top_k chunk payloads in fused-rank order, then (with
+        document_focus_k) up to document_focus_k more from the leading
+        document.
     """
     dense_results, sparse_results = await hybrid_search(
         query_text=query,
@@ -79,11 +81,40 @@ async def _candidates_for_query(
     )
 
     payloads = {p.payload["chunk_id"]: p.payload for p in (*dense_results, *sparse_results)}
-    return [
+    candidates = [
         payloads[cid]
         for cid, _ in fused[: config.get("reranker_top_k", 20)]
         if cid in payloads
     ]
+
+    # Document focus: search again inside the document the fused list points
+    # at, and let the cross-encoder choose among both sets.
+    #
+    # On a room of similar contracts the corpus-wide lists find the right
+    # agreement and the wrong passage: a deal-point question ("the closing
+    # condition on compliance with covenants") matches that clause in every
+    # merger agreement, and the party names only match the preamble. Inside
+    # the leading document the dense search has only one agreement's clauses
+    # to choose from (a BM25 search there added nothing on top of it).
+    # Candidates are added, never removed, so a question
+    # spanning several documents keeps everything it had; the reranker
+    # decides. Measured in Decision 67.
+    focus_k = int(config.get("document_focus_k", 0) or 0)
+    if focus_k > 0 and candidates:
+        doc_id, _share = leading_document(
+            fused, {cid: p.get("doc_id") for cid, p in payloads.items()}
+        )
+        if doc_id:
+            in_document = await dense_search(
+                query_vector=query_vector,
+                deal_id=deal_id,
+                metadata_filters=metadata_filters,
+                top_k=focus_k,
+                doc_id=doc_id,
+            )
+            seen = {c["chunk_id"] for c in candidates}
+            candidates += [p.payload for p in in_document if p.payload["chunk_id"] not in seen]
+    return candidates
 
 
 async def _retrieve_for_queries(

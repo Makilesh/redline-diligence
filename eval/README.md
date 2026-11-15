@@ -55,7 +55,12 @@ python -m eval.run_realdocs_eval financebench --max-documents 15
 python -m eval.run_realdocs_eval financebench --store ~/.cache/redline-eval/fb_store --ingest-only --max-new-documents 14   # repeat
 python -m eval.run_realdocs_eval financebench --store ~/.cache/redline-eval/fb_store                                     # questions
 python -m eval.run_realdocs_eval legalbench --compare eval/results/realdocs_legalbench_<date>.json                # paired before/after
+python -m eval.run_realdocs_eval legalbench --store <dir> --ingest-only     # index the 72 documents once (~6 min)
+python -m eval.run_realdocs_eval legalbench --store <dir> --split dev       # tune on dev; --split test once
+python -m eval.run_realdocs_eval legalbench --store <dir> --split dev --retrieval-config '{"document_focus_k": 0}'
 ```
+
+For tuning, `--split` divides each LegalBench-RAG sub-corpus's documents in half with a seed (`--split-seed`, default 20261115). That gives dev 37 documents / 420 queries and test 35 / 356. The whole corpus is always indexed; the split only chooses which queries are asked. Choose settings on `dev`, run `test` once. `--retrieval-config` merges JSON overrides into `RETRIEVAL_CONFIGS["legal"]`, so a query-side candidate is measured through the production node unchanged. An ingestion-side change, such as `CHUNK_CONTEXT_HEADERS`, needs its own `--store` directory.
 
 Each run writes `eval/results/realdocs_<benchmark>_<date>.{json,md}`.
 

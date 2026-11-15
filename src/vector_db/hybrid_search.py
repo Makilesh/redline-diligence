@@ -220,6 +220,7 @@ def _build_filter(
     deal_id: str,
     metadata_filters: dict,
     include_superseded: bool = False,
+    doc_id: str | None = None,
 ) -> Filter:
     """
     Builds a Qdrant Filter from deal_id (always applied) and optional metadata.
@@ -242,11 +243,15 @@ def _build_filter(
                           are dropped; see ALLOWED_FILTER_KEYS).
         include_superseded: Trusted, non-LLM override to search superseded
                             versions too (e.g. an explicit version-history view).
+        doc_id: Trusted scope to one document (the retrieval executor's
+                document-focus pass). Never read from metadata_filters.
 
     Returns:
         Qdrant Filter with all conditions applied.
     """
     conditions = [FieldCondition(key="deal_id", match=MatchValue(value=deal_id))]
+    if doc_id:
+        conditions.append(FieldCondition(key="doc_id", match=MatchValue(value=doc_id)))
 
     if not include_superseded:
         conditions.append(
@@ -370,6 +375,46 @@ async def hybrid_search(
     )
 
     return dense_results, sparse_results
+
+
+async def dense_search(
+    query_vector: list[float],
+    deal_id: str,
+    metadata_filters: dict,
+    top_k: int,
+    doc_id: str | None = None,
+    client: AsyncQdrantClient | None = None,
+) -> list[ScoredPoint]:
+    """
+    Dense search alone, under the same server-enforced filters as hybrid_search.
+
+    Used by the retrieval executor's document-focus pass, which searches one
+    document's chunks; measured on LegalBench-RAG, a BM25 search inside the
+    document added nothing on top of this one (Decision 67).
+
+    Args:
+        query_vector: Dense embedding of the query.
+        deal_id: Mandatory deal isolation filter.
+        metadata_filters: As for hybrid_search (untrusted keys dropped).
+        top_k: Number of results.
+        doc_id: Trusted scope to one document; never derived from LLM output.
+        client: AsyncQdrantClient instance.
+
+    Returns:
+        ScoredPoints, best first.
+    """
+    if client is None:
+        client = get_qdrant_client()
+    response = await client.query_points(
+        collection_name=COLLECTION_NAME,
+        query=query_vector,
+        using="dense",
+        query_filter=_build_filter(deal_id, metadata_filters, doc_id=doc_id),
+        limit=top_k,
+        search_params=QUANTIZED_SEARCH_PARAMS,
+        with_payload=True,
+    )
+    return response.points
 
 
 # ==============================================================================
