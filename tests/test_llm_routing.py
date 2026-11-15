@@ -16,11 +16,22 @@ import pytest
 import src.llm.budget_tracker as bt
 import src.llm.litellm_wrapper as wrapper
 from src.llm.failures import ProseAgentFailed, StructuredOutputError
-from src.llm.model_registry import AGENT_LADDER, LOCAL_MODEL, SYNTHESIS_LADDER, usable_rpd
+from src.llm.model_registry import (
+    AGENT_LADDER,
+    LOCAL_MODEL,
+    SYNTHESIS_LADDER,
+    serving_model,
+    usable_rpd,
+)
 
 K0, K1 = "A" * 40, "B" * 40
 TOP, SECOND, THIRD = AGENT_LADDER[0], AGENT_LADDER[1], AGENT_LADDER[2]
-SYN_TOP, SYN_SECOND = SYNTHESIS_LADDER[0], SYNTHESIS_LADDER[1]
+SYN_TOP = SYNTHESIS_LADDER[0]
+# The next rung served by a different model: a request-scoped skip also skips
+# the ids the provider serves with the skipped model (SERVED_BY, Decision 69),
+# so after the top rung a request lands here, not on the top rung's alias.
+SYN_MODELS = [m for m in SYNTHESIS_LADDER if serving_model(m) == m]
+SYN_SECOND = SYN_MODELS[1]
 
 PER_DAY = "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
 PER_MINUTE = "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"
@@ -680,7 +691,7 @@ class TestSkipIsRequestScoped:
             return tried
 
         tried = await asyncio.create_task(one_query())
-        assert tried == SYNTHESIS_LADDER[:6], "each model once, in order"
+        assert tried == SYN_MODELS[:6], "each model once, in order, aliases skipped with it"
         assert tracker._models_in_cooldown() == set()
 
         nxt = await asyncio.create_task(tracker.get_model_for_synthesis())

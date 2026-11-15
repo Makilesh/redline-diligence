@@ -23,6 +23,12 @@ RETRIEVAL_CONFIGS: dict[str, dict] = {
         "final_top_k": 10,
         "use_parent_expansion": True,
         "use_sibling_expansion": True,
+        # Dense candidates from inside the leading document, added to the
+        # rerank pool (retrieval_executor._candidates_for_query). Chosen on
+        # LegalBench-RAG's dev documents (10 / 20 / 30 simulated); on the
+        # held-out half final-context character recall 73.2 -> 85.3%,
+        # +12.1 points [+5.2, +21.2], MAUD 21 -> 61% — Decision 67.
+        "document_focus_k": 30,
     },
     "financial": {
         "dense_weight": 0.5,
@@ -77,6 +83,7 @@ RETRIEVAL_CONFIG_BOUNDS: dict[str, tuple[type, float, float]] = {
     "top_k_sparse": (int, 5, 100),
     "reranker_top_k": (int, 5, 50),
     "final_top_k": (int, 3, 20),
+    "document_focus_k": (int, 0, 30),
 }
 RETRIEVAL_CONFIG_FLAGS = frozenset({"use_parent_expansion", "use_sibling_expansion"})
 

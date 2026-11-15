@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, FileText, ListChecks } from "lucide-react";
+import { ChevronDown, FileText, ListChecks, TriangleAlert } from "lucide-react";
 
 import type { ClaimCheck } from "@/lib/types";
 import {
+  claimMarker,
   claimView,
   countClaims,
   evidenceLocation,
@@ -36,6 +37,7 @@ const TONE_RULE: Record<Tone, string> = {
 
 function ClaimRow({ check }: { check: ClaimCheck }) {
   const view = claimView(check);
+  const marker = claimMarker(check);
   const location = evidenceLocation(check);
 
   return (
@@ -48,6 +50,17 @@ function ClaimRow({ check }: { check: ClaimCheck }) {
         </span>
         {view.method && (
           <span className="text-[0.68rem] text-ash-500">via {view.method}</span>
+        )}
+        {/* Beside the verdict, not instead of it: the judge may still have
+            confirmed the statement. */}
+        {marker && (
+          <span
+            title={marker.title}
+            className="inline-flex items-center gap-1 text-[0.68rem] text-warn"
+          >
+            <TriangleAlert size={11} className="shrink-0" aria-hidden />
+            {marker.label}
+          </span>
         )}
       </div>
 

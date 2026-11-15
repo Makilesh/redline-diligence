@@ -22,7 +22,9 @@ Payload fields written per child chunk (see _child_payload):
     risk_decisions, pii_source, pii_confidence, supersedes_doc_id,
     superseded_by, is_redline, context_header, plus format extras (sheet_name,
     currency, scale_factor, scale_label, slide_number, page_range, metrics,
-    redline_base_doc_id).
+    redline_base_doc_id), plus, for a public filing only, filing_form,
+    filing_period_end / filing_date, filing_fiscal_years, filing_entity_keys
+    and filing_company (filing_metadata.py; read from the cover page).
 
 `text` is always the exact source text. `context_header` ("Document: ... /
 Section: ...", see chunk_context.py; written only when CHUNK_CONTEXT_HEADERS
@@ -65,6 +67,7 @@ from src.data_processing.errors import (  # noqa: F401  (re-exported)
     UnsupportedFileTypeError,
 )
 from src.data_processing.excel_normalizer import ExcelNormalizer
+from src.data_processing.filing_metadata import extract_filing_metadata
 from src.data_processing.financial_table_converter import (
     FinancialTableConverter,
     representation_content_type,
@@ -154,6 +157,8 @@ class ExtractedDocument:
     has_redline: bool = False
     category_source: str = "rules"  # "override" | "laya" | "rules"
     category_confidence: float | None = None
+    # filing_* fields of a public filing (filing_metadata.py); {} for anything else.
+    filing: dict = field(default_factory=dict)
 
 
 # ==============================================================================
@@ -650,6 +655,9 @@ def _child_payload(
     for key in _PASSTHROUGH_KEYS:
         if meta.get(key) is not None:
             payload[key] = meta[key]
+    # Document-level, optional: an index written before these fields existed
+    # simply has none, and filing_period.py then leaves its results alone.
+    payload.update(doc.filing)
     if context_headers_enabled():
         slide = meta.get("slide_number")
         locator = f"Slide {slide}" if slide else ""
@@ -802,6 +810,7 @@ def extract_and_chunk(
         has_redline=has_redline,
         category_source=category_source,
         category_confidence=category_confidence,
+        filing=extract_filing_metadata(sections),
     )
 
     if not sections:

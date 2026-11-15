@@ -333,6 +333,10 @@ async def create_payload_indexes(
         # Section-table lookup filters on it (sibling_retrieval.fetch_section_tables);
         # a server in strict mode rejects a filter on an unindexed field.
         ("section_heading",     PayloadSchemaType.KEYWORD),
+        # The same-registrant, named-period lookup filters on both
+        # (filing_period.prefer_named_period). Absent on non-filings.
+        ("filing_entity_keys",  PayloadSchemaType.KEYWORD),
+        ("filing_fiscal_years", PayloadSchemaType.INTEGER),
     ]
 
     for field_name, field_type in indexes:

@@ -5,8 +5,8 @@ The same rules as the web client (web/lib/verification.ts), so the two
 consoles cannot disagree about an answer: the view is chosen from `outcome`
 (not `is_refusal`, which is also true when no model answered), and "verified"
 is only claimed when the server passed the answer AND every claim it returned
-is supported AND there was at least one. Anything unrecognised reads as the
-less favourable verdict.
+is supported AND there was at least one AND the answer was not cut off.
+Anything unrecognised reads as the less favourable verdict.
 
 Every string that reaches `unsafe_allow_html` here is escaped: claim text,
 evidence and file names come from the model and from counterparty documents.
@@ -60,6 +60,14 @@ def claim_counts(checks: list[dict]) -> dict[str, int]:
     return counts
 
 
+# Ends a verdict sentence for an answer cut off at the model's output limit.
+_CUT_OFF = "the answer was cut off before it finished."
+
+# Beside a claim whose figures all checked out but whose wording the local
+# checker doubted (Decision 64). The verdict is still the judge's.
+DOUBTED_WORDING = "wording doubted (its figures match; the passages do not clearly say this)"
+
+
 def answer_verdict(result: dict) -> tuple[str, str, str]:
     """
     The verdict for an answer, never more favourable than the evidence.
@@ -74,25 +82,36 @@ def answer_verdict(result: dict) -> tuple[str, str, str]:
     problems = counts["contradicted"] + counts["unsupported"]
     not_confirmed = problems + counts["unverified"]
     status = result.get("validation_status")
+    cut = result.get("answer_truncated") is True
 
     if result_outcome(result) == "answered_unverified" or status == "failed":
         return (
             "failed",
             "FAILED VERIFICATION",
-            f"{problems} statement(s) could not be matched to the documents, even after a "
-            "revision. Treat the marked statements as wrong until checked."
-            if problems
-            else "The answer did not pass verification, even after a revision.",
+            (
+                f"{problems} statement(s) could not be matched to the documents, even after a "
+                "revision. Treat the marked statements as wrong until checked."
+                if problems
+                else "The answer did not pass verification, even after a revision."
+            ) + (f" Also, {_CUT_OFF}" if cut else ""),
         )
-    if status == "warning" or (status == "passed" and not_confirmed):
-        return (
-            "partial",
-            "PARTIALLY VERIFIED",
-            f"{counts['supported']} of {total} statement(s) matched to the documents; "
-            f"{not_confirmed} could not be confirmed."
-            if total
-            else "Some statements could not be matched to a source.",
-        )
+    if status == "warning" or (status == "passed" and (not_confirmed or cut)):
+        # A cut answer is downgraded to "warning" with every claim possibly
+        # supported; "0 could not be confirmed" would hide the real reason.
+        if cut and not not_confirmed:
+            detail = (
+                f"All {total} statement(s) matched to the documents, but {_CUT_OFF}"
+                if total
+                else f"Nothing in it could be checked, and {_CUT_OFF}"
+            )
+        else:
+            detail = (
+                f"{counts['supported']} of {total} statement(s) matched to the documents; "
+                f"{not_confirmed} could not be confirmed."
+                if total
+                else "Some statements could not be matched to a source."
+            ) + (f" Also, {_CUT_OFF}" if cut else "")
+        return ("partial", "PARTIALLY VERIFIED", detail)
     if status == "passed":
         if not total:
             return (
@@ -183,6 +202,8 @@ def _render_claim(check: dict) -> None:
     header = pill(label, variant)
     if method:
         header += f"<span class='dd-cite-meta'>via {method}</span>"
+    if check.get("suspected_misstatement") is True:
+        header += f"<span class='dd-cite-meta'>· {DOUBTED_WORDING}</span>"
     st.markdown(header, unsafe_allow_html=True)
     st.markdown(escape_currency(html.escape(check.get("claim") or "")))
 
