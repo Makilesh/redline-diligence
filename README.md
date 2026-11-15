@@ -337,7 +337,7 @@ Without a Qdrant server (development only), set `QDRANT_MODE=local` to use an em
 ### 4. Tests and evaluation
 
 ```bash
-pytest                                                    # offline suite (~1,430 tests, ~35 s) — what CI runs
+pytest                                                    # offline suite (~1,490 tests, ~40 s) — what CI runs
 python -m eval.run_verification_eval --no-nli --baseline eval/verification_baseline.json  # verification gate, no models
 python -m eval.run_retrieval_eval --baseline eval/baseline.json   # retrieval regression gate
 python tests/run_end_to_end_validation.py                 # live 41-question golden set (spends quota)
