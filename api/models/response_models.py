@@ -17,6 +17,63 @@ class Citation(BaseModel):
     superseded_by: str = ""
 
 
+class PassageLocation(BaseModel):
+    """
+    Where a passage with instruction-like text sits — never what it says
+    (src/data_processing/injection_screen.flagged_locations).
+    """
+    page_number: int | None = None
+    section_heading: str = ""
+    signals: list[str] = Field(
+        default_factory=list,
+        description=(
+            "instruction_override | model_address | role_marker | forged_marker | "
+            "supersession_claim | invisible_text"
+        ),
+    )
+
+
+class FlaggedPassage(PassageLocation):
+    """A retrieved passage with instruction-like text, by document and place."""
+    source_file: str = ""
+
+
+class InjectionScreen(BaseModel):
+    """
+    What the ingest screen found in an upload (Decisions 76, 82). A label only:
+    the file is indexed exactly as written either way.
+    """
+    flagged_passages: int = Field(
+        0, description="Indexed passages whose text reads like instructions to an AI model"
+    )
+    signals: list[str] = Field(default_factory=list, description="Every signal found")
+    locations: list[PassageLocation] = Field(
+        default_factory=list,
+        description="Distinct pages/sections holding them, at most 10; no document text",
+    )
+
+
+class InjectionReview(BaseModel):
+    """
+    What the validator found about instruction-like text behind one answer
+    (Decisions 76, 82). Empty when no retrieved passage carried any.
+    """
+    flagged_passages: list[FlaggedPassage] = Field(
+        default_factory=list,
+        description="Retrieved passages with instruction-like text, by location, at most 10",
+    )
+    cited_flagged_passages: int = Field(
+        0, description="How many of them the answer cites (each makes 'passed' a 'warning')"
+    )
+    tainted_figures: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Answer figures that only instruction-like text states (each makes 'passed' a "
+            "'warning'; the claim carries injection_suspect)"
+        ),
+    )
+
+
 class QueryResponse(BaseModel):
     """Response model for the /query endpoint."""
     answer: str = Field(..., description="Generated answer with citations")
@@ -67,6 +124,13 @@ class QueryResponse(BaseModel):
     request_id: str = Field(
         "", description="Correlation id of the request, also sent as X-Request-ID"
     )
+    injection_review: InjectionReview = Field(
+        default_factory=InjectionReview,
+        description=(
+            "Retrieved passages whose text reads like instructions to an AI model, whether "
+            "the answer cites them, and figures only they state. Locations only, never the text"
+        ),
+    )
 
 
 class IngestResponse(BaseModel):
@@ -86,6 +150,13 @@ class IngestResponse(BaseModel):
             "Indexed documents this upload looks related to: [{doc_id, source_file, "
             "relation: newer|older|same_document}]. A proposal only — nothing was "
             "superseded; send supersedes_doc_id to act on it."
+        ),
+    )
+    injection_screen: InjectionScreen = Field(
+        default_factory=InjectionScreen,
+        description=(
+            "Passages of this upload whose text reads like instructions to an AI model. A "
+            "label only — nothing was blocked or changed, and status is unaffected"
         ),
     )
 
