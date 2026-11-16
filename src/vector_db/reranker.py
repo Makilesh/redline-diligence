@@ -37,7 +37,7 @@ _rerank_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="rerank"
 # ==============================================================================
 # The defaults are the models every measurement in RESULTS.md was produced with.
 # They are overridable because the cross-encoder does not fit a CPU-only host:
-# measured on 2 vCPU (the free-tier deployment target), bge-reranker-v2-m3 takes
+# measured at two threads on x86, emulating 2 vCPU (the free-tier deployment target; not measured on ARM), bge-reranker-v2-m3 takes
 # 111s to score 40 passages, and a decomposed query reranks four times — roughly
 # 7.5 minutes per question, against 0.12s for the whole dense embedding step.
 #

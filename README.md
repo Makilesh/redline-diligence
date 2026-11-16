@@ -110,8 +110,8 @@ Personal identifiers (SSNs in any separator style, account numbers, IBANs with a
 ## Retrieval
 
 - **Hybrid dense + sparse** — `BAAI/bge-m3` (1024-dim) and BM25 in one Qdrant deployment, fused with a rank-based **Reciprocal Rank Fusion** that ignores raw scores to avoid scale mismatch. Text is normalised before BM25 on both the document and the query side (case, punctuation, figures such as `$452.8M`) and Qdrant applies IDF; each chunk records which encoding wrote its sparse vector, so an index that predates a change is reported at startup instead of silently missed. (The keyword channel was case-sensitive until November 2026 — [Decision 52](DECISIONS_LOG.md).)
-- **Cross-encoder rerank** — `BAAI/bge-reranker-v2-m3` locally (`ms-marco-MiniLM-L-6-v2` on the CPU-only host), sigmoid-normalised to [0, 1], half precision on a GPU. Every pass of a decomposed question is scored in **one** call, longest pairs first: p50 latency 943 → 144 ms per question.
-- **Document focus (legal questions)** — after fusion, the document holding the most fused score gets its own dense search, and those passages join the rerank pool; nothing is removed from it. On real contracts the corpus-wide lists find the right agreement but the wrong clause: a deal-point question matches that clause in every merger agreement. On LegalBench-RAG's held-out documents, final-context character recall rose from 73.2% to 85.3% (+12.1 [+5.2, +21.2]) and MAUD from 21% to 61%, for about 156 ms more at p50. The golden set and the answerability gate are unchanged ([Decision 67](DECISIONS_LOG.md)).
+- **Cross-encoder rerank** — `BAAI/bge-reranker-v2-m3` locally (`ms-marco-MiniLM-L-6-v2` on the CPU-only host), sigmoid-normalised to [0, 1], half precision on a GPU. Every pass of a decomposed question is scored in **one** call, longest pairs first: p50 latency 943 → 144 ms per question (168 ms on the current code, which adds document focus and the filing-period step).
+- **Document focus (legal questions)** — after fusion, the document holding the most fused score gets its own dense search, and those passages join the rerank pool; nothing is removed from it. On real contracts the corpus-wide lists find the right agreement but the wrong clause: a deal-point question matches that clause in every merger agreement. On LegalBench-RAG's held-out documents, final-context character recall rose from 73.2% to 85.3% (+12.1 [+5.2, +21.2]) and MAUD from 21% to 61%, for about 156 ms more at p50. The golden set and the answerability gate are unchanged ([Decision 67](DECISIONS_LOG.md)). On the CPU host's MiniLM reranker the depth is 10, not 30: on LegalBench-RAG's dev documents, under an emulated two-core host, 10 recalled more than 30 (78.6% against 75.3%, +3.3 [+0.5, +6.6]) and added 0.26 s at p50 instead of 0.79 s ([Decision 71](DECISIONS_LOG.md)).
 - **Section and table completion** — a retrieved paragraph brings the table printed in its own section, and a retrieved table brings its exact grid, whole and in order, directly after the chunk that hit.
 - **Sub-question decomposition** — query expansion rephrases the same question and cannot retrieve a fact the question never asks for. A multi-fact question is split into atomic sub-questions, each retrieved in **its own pass and reranked against itself**, then merged so every facet keeps a share of the context. A passage containing only a share price scores near zero against "what is the implied EV/EBITDA multiple?" and high against "what is the per-share merger consideration?".
 - **Server-enforced filters** — deal isolation, the current-version filter and PII exclusion are applied by the server on every query, on both search channels (pinned by a test). The only filter a model may propose is a known document category; it cannot see superseded versions or PII, because those conditions are never read from model output.
@@ -208,11 +208,11 @@ Validated against a synthetic data room of **9 documents (~13K tokens, 58K chara
 
 | ablation | fact coverage@10 | fact coverage (final context) | recall@10 | MRR@10 | nDCG@10 | p50 / p95 ms |
 |---|---|---|---|---|---|---|
-| dense only | 88.8 | — | 69.8 | 60.1 | 59.8 | 20 / 25 |
-| sparse only (BM25) | 95.2 | — | 78.0 | 68.7 | 68.9 | 20 / 25 |
-| hybrid RRF, no rerank | 97.1 | — | 80.1 | 69.0 | 69.6 | 21 / 26 |
-| **production** (hybrid + rerank + expansion) | 94.3 | **97.1** | 78.7 | 77.2 | 73.8 | **144 / 182** |
-| **production + decomposition** | 95.2 | **98.1** | **81.2** | **77.7** | **75.7** | 153 / 512 |
+| dense only | 88.8 | — | 69.8 | 60.1 | 59.8 | 20 / 23 |
+| sparse only (BM25) | 95.2 | — | 78.0 | 68.7 | 68.9 | 20 / 23 |
+| hybrid RRF, no rerank | 97.1 | — | 80.1 | 69.0 | 69.6 | 21 / 24 |
+| **production** (hybrid + rerank + expansion) | 94.3 | **97.1** | 78.7 | 77.2 | 73.8 | **168 / 205** |
+| **production + decomposition** | 95.2 | **98.1** | **81.2** | **77.7** | **75.6** | 194 / 553 |
 
 *Fact coverage* is the share of a question's expected facts present in the retrieved text; the ceiling on this corpus is 99.0% (one expected figure is a computed multiple that appears in no document). Every mean in the harness output carries a 95% bootstrap interval and every difference a paired one — on 35 questions one question is worth up to 2.9 points, so most single-row differences are within noise and are reported as such.
 

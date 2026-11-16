@@ -7,8 +7,18 @@ and parsed intent signals.
 
 RETRIEVAL_CONFIGS maps query types to optimal dense/sparse weights,
 top-k values, reranker thresholds, and expansion flags.
+
+Env:
+    DOCUMENT_FOCUS_K  Document-focus depth for the query types that use it
+                      (legal), overriding the reranker profile's ceiling;
+                      clamped to [0, 30], 0 turns focus off. For a reranker
+                      or host its profile was not measured on — see
+                      document_focus_depth.
 """
 
+import os
+
+from src.decisions.reranker_calibration import UncalibratedReranker, active_profile
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -27,7 +37,9 @@ RETRIEVAL_CONFIGS: dict[str, dict] = {
         # rerank pool (retrieval_executor._candidates_for_query). Chosen on
         # LegalBench-RAG's dev documents (10 / 20 / 30 simulated); on the
         # held-out half final-context character recall 73.2 -> 85.3%,
-        # +12.1 points [+5.2, +21.2], MAUD 21 -> 61% — Decision 67.
+        # +12.1 points [+5.2, +21.2], MAUD 21 -> 61% — Decision 67. Measured
+        # with bge-reranker-v2-m3; a reranker's profile may lower it
+        # (document_focus_depth; MiniLM runs 10, Decision 71).
         "document_focus_k": 30,
     },
     "financial": {
@@ -175,6 +187,43 @@ def apply_filter_overrides(base: dict, overrides: dict | None) -> dict:
     return merged
 
 
+def document_focus_depth(configured: int) -> int:
+    """
+    The document-focus depth this deployment runs for a query type configured
+    with `configured` (0 = the type does not focus, and stays off).
+
+    The depth in RETRIEVAL_CONFIGS was chosen with bge-reranker-v2-m3 on a GPU.
+    Whether more in-document candidates help depends on how well the reranker
+    orders them, and what they cost on the host it runs on, so the reranker's
+    calibration profile may cap it: MiniLM, the CPU host's reranker, recalled
+    more with 10 than with 30 (Decision 71). DOCUMENT_FOCUS_K overrides both,
+    for a reranker or host the profile was not measured on.
+
+    Args:
+        configured: The query type's document_focus_k.
+
+    Returns:
+        The depth to use, in RETRIEVAL_CONFIG_BOUNDS' range.
+    """
+    if configured <= 0:
+        return 0
+    _, low, high = RETRIEVAL_CONFIG_BOUNDS["document_focus_k"]
+    override = os.getenv("DOCUMENT_FOCUS_K", "").strip()
+    if override:
+        try:
+            return int(min(max(int(override), low), high))
+        except ValueError:
+            logger.warning("DOCUMENT_FOCUS_K is not an integer; ignored",
+                           extra={"value": override})
+    try:
+        ceiling = getattr(active_profile(), "document_focus_k", None)
+    except UncalibratedReranker:
+        # The reranker itself refuses to load for the same reason, loudly;
+        # the depth is not the place to report it.
+        ceiling = None
+    return configured if ceiling is None else min(configured, ceiling)
+
+
 def get_retrieval_config(query_type: str, parsed_intent: dict) -> dict:
     """
     Deterministic retrieval config selection. No LLM.
@@ -201,6 +250,8 @@ def get_retrieval_config(query_type: str, parsed_intent: dict) -> dict:
         query_type = "summary"
 
     config = RETRIEVAL_CONFIGS[query_type].copy()
+    if "document_focus_k" in config:
+        config["document_focus_k"] = document_focus_depth(config["document_focus_k"])
 
     # Augment with intent signals
     if parsed_intent.get("requires_cross_document"):

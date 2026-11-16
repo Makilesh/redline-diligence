@@ -89,6 +89,11 @@ class RerankerProfile:
             some genuinely relevant passages near zero needs a lower ceiling
             than bge, or those questions are refused outright.
         derivation: Where the map and the ceiling come from.
+        document_focus_k: Most in-document candidates the legal document-focus
+            pass may add to the rerank pool with this reranker, or None for
+            the query type's own depth (src/agents/retrieval_strategy.py).
+            More candidates help only as far as this model orders them
+            well, and each is one more cross-encoder pair on its host.
     """
 
     name: str
@@ -97,12 +102,15 @@ class RerankerProfile:
     knots: tuple[tuple[float, float], ...] = ()
     refusal_ceiling: float = CONFIDENT_REFUSAL_CEILING
     derivation: str = ""
+    document_focus_k: int | None = None
 
     def __post_init__(self) -> None:
         if not 0.0 < self.refusal_ceiling <= CONFIDENT_REFUSAL_CEILING:
             # Raising it would refuse more than the measured reference does.
             raise ValueError(f"{self.name}: refusal_ceiling must be in (0, "
                              f"{CONFIDENT_REFUSAL_CEILING}]")
+        if self.document_focus_k is not None and self.document_focus_k < 0:
+            raise ValueError(f"{self.name}: document_focus_k must be >= 0 or None")
         if self.knots:
             xs = [k[0] for k in self.knots]
             ys = [k[1] for k in self.knots]
@@ -180,6 +188,14 @@ MINILM_PROFILE = RerankerProfile(
     refusal_ceiling=0.0175,
     derivation="Quantile map + refusal ceiling on eval/answerability_dev.json pairs "
                "(eval/decisions/run_reranker_calibration.py, fp32, max_length 512).",
+    # Decision 71: on LegalBench-RAG's dev documents, run on CPU with two
+    # threads, MiniLM put more of the ground truth into the final context with
+    # 10 focus candidates than with 20 or 30 (78.6% against 75.2 / 75.3; 30 -> 10
+    # +3.3 points [+0.5, +6.6], MAUD 23.4 -> 33.8%): past the first few, the
+    # extra passages of the same agreement are ones it ranks above the clause
+    # that answers. The cost would have been acceptable (+0.8 s at p50 for 30
+    # against +0.3 s for 10, emulated 2-core host); the ranking was not.
+    document_focus_k=10,
 )
 
 PROFILES: tuple[RerankerProfile, ...] = (REFERENCE_PROFILE, MINILM_PROFILE)
