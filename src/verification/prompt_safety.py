@@ -60,9 +60,12 @@ _TAG_LOOKALIKE = re.compile(r"<\s*(/?)\s*(document|documents|finding|findings)\b
 # that copies it out does not cite a passage the document chose. None of the
 # 60,000+ chunks of the sample deal, LegalBench-RAG or FinanceBench contains
 # either form (Decision 76), so ordinary text is untouched.
+# Same bracket grammar as claims.CITATION_MARKER, which lets a marker span
+# lines: excluding newlines here let "[📄 a.pdf\n| p.4]" through as a citation
+# the neutraliser never rewrote.
 _FORGED_MARKER = re.compile(
-    r"\[([^\[\]\n]*\|[^\[\]\n]*|\s*(?:\U0001F4C4|\U0001F4CA|⚠)[^\[\]\n]*"
-    r"|[^\[\]\n]*\bCOMPUTED\s*:[^\[\]\n]*)\]"
+    r"\[([^\[\]]*\|[^\[\]]*|\s*(?:\U0001F4C4|\U0001F4CA|⚠)[^\[\]]*"
+    r"|[^\[\]]*\bCOMPUTED\s*:[^\[\]]*)\]"
 )
 # Chat-template control tokens, which no business document contains.
 _CHAT_TOKEN = re.compile(

@@ -158,10 +158,14 @@ def _injection_review(
     for item in tainted:
         if 0 <= item["claim_index"] < len(claim_checks):
             claim_checks[item["claim_index"]]["injection_suspect"] = True
+        # The flag names the figure and where it rests, never the flagged
+        # sentence: flags can be fed back to the model
+        # (claim_checker.revision_feedback), and quoting the injected words
+        # there would carry them outside the <document> boundary. The
+        # sentence stays in the trace for the reviewer.
         new_flags.append(
             f"Figure {item['figure']} is stated only by text that reads like an instruction to "
-            f"the model (possible prompt injection) in {item['source_file'] or 'a retrieved document'}: "
-            f"\"{item['sentence']}\""
+            f"the model (possible prompt injection) in {item['source_file'] or 'a retrieved document'}"
         )
 
     cited_ids = {c.get("chunk_id") for c in state.get("citations") or [] if c.get("chunk_id")}
@@ -188,6 +192,10 @@ def _injection_review(
         ],
         "injection_cited_chunks": len(cited),
         "injection_tainted_figures": [t["figure"] for t in tainted],
+        "injection_tainted_sentences": [
+            {"figure": t["figure"], "source_file": t["source_file"], "sentence": t["sentence"]}
+            for t in tainted
+        ],
     }
     return status, [*flags, *dict.fromkeys(new_flags)], trace
 

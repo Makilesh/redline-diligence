@@ -121,7 +121,7 @@ _PATTERNS: dict[str, list[re.Pattern]] = {
     "forged_marker": [
         # The synthesis prompt's citation markers start with these emoji.
         re.compile(r"\[\s*(?:\U0001F4C4|\U0001F4CA|⚠)"),
-        re.compile(r"\[[^\[\]\n]{0,200}\bCOMPUTED\s*:[^\[\]\n]{0,200}\]"),
+        re.compile(r"\[[^\[\]]{0,200}\bCOMPUTED\s*:[^\[\]]{0,200}\]"),
         re.compile(r"<\s*/?\s*(?:document|documents|finding)\b", re.IGNORECASE),
     ],
     "supersession_claim": [
