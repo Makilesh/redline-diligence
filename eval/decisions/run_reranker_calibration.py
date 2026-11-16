@@ -169,10 +169,22 @@ def quantile_map(raw: list[float], reference: list[float],
     bq = np.quantile(np.asarray(reference), levels)
     knots = [(0.0, 0.0)]
     for r, b in zip(rq.tolist(), bq.tolist()):
-        if r > knots[-1][0] and b > knots[-1][1] and r < 1.0 and b < 1.0:
-            knots.append((round(r, 6), round(b, 6)))
+        _append_knot(knots, r, b)
     knots.append((1.0, 1.0))
     return knots
+
+
+def _append_knot(knots: list[tuple[float, float]], x: float, y: float) -> None:
+    """
+    Appends (x, y) rounded to 6 decimals if it advances on both axes and stays below 1.
+
+    Rounded before the comparison: a model whose sigmoid output crowds toward 1
+    (Ettin's regression logits sit mostly above 0) has distinct quantiles that
+    round to the same knot, and comparing the unrounded values let a duplicate in.
+    """
+    x, y = round(x, 6), round(y, 6)
+    if x > knots[-1][0] and y > knots[-1][1] and x < 1.0 and y < 1.0:
+        knots.append((x, y))
 
 
 def apply_map(knots: list[tuple[float, float]], score: float) -> float:
@@ -224,8 +236,7 @@ def probability_matched_map(target_scores: list[float], reference_scores: list[f
         # Smallest reference score whose calibrated P reaches p.
         idx = int(np.searchsorted(rp, p, side="left"))
         b = float(rx_[min(idx, len(rx_) - 1)])
-        if x > knots[-1][0] and b > knots[-1][1] and x < 1.0 and b < 1.0:
-            knots.append((round(x, 6), round(b, 6)))
+        _append_knot(knots, x, b)
     knots.append((1.0, 1.0))
     return knots
 
