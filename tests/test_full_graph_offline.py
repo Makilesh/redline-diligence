@@ -602,7 +602,19 @@ class TestIsolation:
         assert "audited_accounts.pdf" not in prompt.sources
         assert prompt.user.count("</document>") == len(prompt.documents)
         assert prompt.user.count("<document ") == len(prompt.documents)
-        assert run.state["validation_status"] == "passed"
+        # The memo is labelled as carrying instruction-like text (Decision 76).
+        # The scripted answer quotes the first document holding "Total revenue
+        # for FY2023" — the memo's harmless line, when the memo ranks first —
+        # and an answer citing a passage that also says "Ignore the other
+        # documents" is a warning for the reviewer, never "passed".
+        memo = next(d for d in prompt.documents if d.source == "vendor_memo.txt")
+        assert "supersession_claim" in memo.attributes["screening"]
+        if "vendor_memo.txt" in run.cited_sources:
+            assert run.state["validation_status"] == "warning"
+            assert any("vendor_memo.txt" in f and "instructions" in f
+                       for f in run.state["hallucination_flags"])
+        else:
+            assert run.state["validation_status"] == "passed"
 
 
 # ==============================================================================

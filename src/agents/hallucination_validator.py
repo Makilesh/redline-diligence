@@ -25,8 +25,9 @@ from src.llm.prompt_templates.hallucination_validator import (
 )
 from src.verification.claim_checker import verify_answer
 from src.verification.evidence import chunk_evidence_text
+from src.verification.injection_check import figures_resting_on_flagged_text, flagged_chunks
 from src.verification.nli import nli_enabled
-from src.verification.prompt_safety import chunk_attributes, wrap_document
+from src.verification.prompt_safety import chunk_attributes, escape_document_text, wrap_document
 from src.workflow.state_definitions import AgentState
 from src.utils.logger import setup_logger
 
@@ -50,7 +51,9 @@ def build_judge_prompt(query: str, claims: list[dict], documents: list[dict]) ->
     Returns:
         User prompt text.
     """
-    claim_lines = "\n".join(f"{c['id']}. {c['claim']}" for c in claims)
+    # Claims are the answer's words, and the answer was written from untrusted
+    # documents: a forged tag or marker it copied is neutralised here as well.
+    claim_lines = "\n".join(f"{c['id']}. {escape_document_text(c['claim'])}" for c in claims)
     doc_parts = []
     for i, chunk in enumerate(documents, 1):
         # Same evidence text the synthesizer was shown (parent section included).
@@ -120,6 +123,81 @@ TRUNCATED_ANSWER_FLAG = (
     "The answer was cut off at the model's output limit and may be incomplete: "
     "statements after the cut were never written."
 )
+
+
+def _injection_review(
+    state: AgentState, answer: str, chunks: list[dict], claim_checks: list[dict],
+    status: str, flags: list[str],
+) -> tuple[str, list[str], dict]:
+    """
+    Tells the reviewer when an answer leans on instruction-like document text.
+
+    Two findings downgrade "passed" to "warning" and add a flag: a figure that
+    only such text states (it would otherwise count as grounded — the document
+    does contain it), and a cited chunk that carries such text. A flagged chunk
+    that the answer did not cite is recorded in the trace only. Nothing is
+    removed from the answer or the context, and "failed" / "warning" are kept.
+    See src/verification/injection_check.py and Decision 76.
+
+    Args:
+        state: Current AgentState (for the citations).
+        answer: The verified answer.
+        chunks: Context it was verified against.
+        claim_checks: The report's claim checks; matching ones are annotated.
+        status: Verdict so far.
+        flags: Flags so far.
+
+    Returns:
+        (status, flags, trace fields).
+    """
+    flagged = flagged_chunks(chunks)
+    if not flagged:
+        return status, flags, {}
+    tainted = figures_resting_on_flagged_text(answer, chunks)
+    new_flags: list[str] = []
+    for item in tainted:
+        if 0 <= item["claim_index"] < len(claim_checks):
+            claim_checks[item["claim_index"]]["injection_suspect"] = True
+        # The flag names the figure and where it rests, never the flagged
+        # sentence: flags can be fed back to the model
+        # (claim_checker.revision_feedback), and quoting the injected words
+        # there would carry them outside the <document> boundary. The
+        # sentence stays in the trace for the reviewer.
+        new_flags.append(
+            f"Figure {item['figure']} is stated only by text that reads like an instruction to "
+            f"the model (possible prompt injection) in {item['source_file'] or 'a retrieved document'}"
+        )
+
+    cited_ids = {c.get("chunk_id") for c in state.get("citations") or [] if c.get("chunk_id")}
+    cited_pages = {
+        (c.get("source_file"), c.get("page_number")) for c in state.get("citations") or []
+    }
+    cited = [
+        f for f in flagged
+        if (f["chunk_id"] and f["chunk_id"] in cited_ids)
+        or (f["source_file"], f["page_number"]) in cited_pages
+    ]
+    for f in cited:
+        where = f["source_file"] + (f" p.{f['page_number']}" if f["page_number"] else "")
+        new_flags.append(
+            f"A cited passage of {where} contains text that reads like instructions to an AI "
+            f"model ({', '.join(f['signals'])}); check the answer against the document itself"
+        )
+    if new_flags and status == "passed":
+        status = "warning"
+    trace = {
+        "suspected_injection": [
+            {k: f[k] for k in ("source_file", "page_number", "section_heading", "signals", "excerpts")}
+            for f in flagged
+        ],
+        "injection_cited_chunks": len(cited),
+        "injection_tainted_figures": [t["figure"] for t in tainted],
+        "injection_tainted_sentences": [
+            {"figure": t["figure"], "source_file": t["source_file"], "sentence": t["sentence"]}
+            for t in tainted
+        ],
+    }
+    return status, [*flags, *dict.fromkeys(new_flags)], trace
 
 
 def _mark_truncation(state: AgentState, status: str, flags: list[str]) -> tuple[str, list[str]]:
@@ -243,7 +321,10 @@ async def hallucination_validator_node(state: AgentState) -> dict:
     # that scored claims and, only if one was needed, the LLM that judged the
     # rest — never a guess at the first rung of the ladder.
     models = [m for m in (report.nli_model, report.llm_model) if m]
-    status, flags = _mark_truncation(state, report.validation_status, report.flags)
+    status, flags, injection_trace = _injection_review(
+        state, answer, chunks, report.claim_checks, report.validation_status, report.flags
+    )
+    status, flags = _mark_truncation(state, status, flags)
 
     return {
         "confidence_score": report.confidence,
@@ -275,6 +356,7 @@ async def hallucination_validator_node(state: AgentState) -> dict:
                 "citation_mismatches": [
                     {**m, "claim": m["claim"][:240]} for m in report.citation_mismatches
                 ],
+                **injection_trace,
                 "attempt": attempt,
                 "elapsed_ms": report.elapsed_ms,
                 # Compact per-claim view for the UI; the full checks are in state.
@@ -286,6 +368,7 @@ async def hallucination_validator_node(state: AgentState) -> dict:
                         "score": c["score"],
                         "evidence_source": c["evidence_source"],
                         **({"citation_mismatch": True} if c.get("citation_mismatch") else {}),
+                        **({"injection_suspect": True} if c.get("injection_suspect") else {}),
                     }
                     for c in report.claim_checks
                 ],

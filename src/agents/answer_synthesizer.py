@@ -32,7 +32,12 @@ from src.llm.prompt_templates.answer_synthesizer import (
 from src.verification.claims import CITATION_MARKER, PAGE_IN_MARKER
 from src.verification.evidence import chunk_evidence_text, parent_key
 from src.verification.numeric_grounding import ground_answer_numbers
-from src.verification.prompt_safety import chunk_attributes, wrap_document, wrap_finding
+from src.verification.prompt_safety import (
+    chunk_attributes,
+    escape_document_text,
+    wrap_document,
+    wrap_finding,
+)
 from src.workflow.state_definitions import AgentState
 from src.utils.logger import setup_logger
 
@@ -460,8 +465,11 @@ def _build_user_prompt(
     financial_verification, inconsistencies = _financial_context(state)
     feedback = ""
     if revision_feedback:
+        # Each line quotes a claim of the previous answer, which was written
+        # from untrusted documents and sits here outside any <document>: a
+        # forged tag or marker it copied is neutralised (no-op on plain text).
         feedback = REVISION_FEEDBACK_TEMPLATE.format(
-            feedback="\n".join(f"- {line}" for line in revision_feedback)
+            feedback="\n".join(f"- {escape_document_text(line)}" for line in revision_feedback)
         )
     return ANSWER_SYNTHESIZER_USER_TEMPLATE.format(
         query=question,
