@@ -5,12 +5,15 @@ import { ChevronDown, FileText, ListChecks, TriangleAlert } from "lucide-react";
 
 import type { ClaimCheck } from "@/lib/types";
 import {
+  citationMarker,
   claimMarker,
   claimView,
   countClaims,
   evidenceLocation,
   figureView,
+  needsReview,
   sortClaimsForReview,
+  type ClaimMarker,
   type Tone,
 } from "@/lib/verification";
 
@@ -37,7 +40,9 @@ const TONE_RULE: Record<Tone, string> = {
 
 function ClaimRow({ check }: { check: ClaimCheck }) {
   const view = claimView(check);
-  const marker = claimMarker(check);
+  const markers = [claimMarker(check), citationMarker(check)].filter(
+    (m): m is ClaimMarker => m !== null,
+  );
   const location = evidenceLocation(check);
 
   return (
@@ -53,15 +58,16 @@ function ClaimRow({ check }: { check: ClaimCheck }) {
         )}
         {/* Beside the verdict, not instead of it: the judge may still have
             confirmed the statement. */}
-        {marker && (
+        {markers.map((marker) => (
           <span
+            key={marker.label}
             title={marker.title}
             className="inline-flex items-center gap-1 text-[0.68rem] text-warn"
           >
             <TriangleAlert size={11} className="shrink-0" aria-hidden />
             {marker.label}
           </span>
-        )}
+        ))}
       </div>
 
       <p className="mt-1.5 text-[0.84rem] leading-relaxed text-ash-50">{check.claim}</p>
@@ -137,8 +143,10 @@ export default function ClaimChecks({ checks }: ClaimChecksProps) {
 
   const counts = countClaims(checks);
   const ordered = sortClaimsForReview(checks);
-  const attention = ordered.filter((c) => c.status !== "supported");
-  const supported = ordered.filter((c) => c.status === "supported");
+  // A supported claim whose citation does not hold its figure is not folded
+  // away with the rest: the reader would open the wrong source (Decision 78).
+  const attention = ordered.filter(needsReview);
+  const supported = ordered.filter((c) => !needsReview(c));
 
   const summary: [number, string, Tone][] = [
     [counts.supported, "supported", "ok"],
