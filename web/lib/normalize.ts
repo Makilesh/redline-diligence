@@ -11,6 +11,7 @@
 
 import type {
   Citation,
+  CitationMismatch,
   ClaimCheck,
   ClaimMethod,
   ClaimStatus,
@@ -91,8 +92,16 @@ function normalizeFigure(raw: unknown): FigureCheck | null {
   };
 }
 
+function normalizeMismatch(raw: unknown): CitationMismatch | null {
+  if (!isBag(raw) || !str(raw.figure)) return null;
+  return { figure: str(raw.figure), found_in: stringList(raw.found_in) };
+}
+
 function normalizeClaim(raw: unknown): ClaimCheck | null {
   if (!isBag(raw) || !str(raw.claim)) return null;
+  const mismatch = list(raw.citation_mismatch)
+    .map(normalizeMismatch)
+    .filter((m): m is CitationMismatch => m !== null);
   let reason = str(raw.reason);
   // Never sent by the current checker (a claim beyond the budget is
   // "unverified" with a "not checked: …" reason), but named in the contract
@@ -120,6 +129,8 @@ function normalizeClaim(raw: unknown): ClaimCheck | null {
     suspected_misattribution: raw.suspected_misattribution === true || undefined,
     suspected_misstatement: raw.suspected_misstatement === true || undefined,
     absence: raw.absence === true || undefined,
+    citation_mismatch: mismatch.length > 0 ? mismatch : undefined,
+    cited_documents: mismatch.length > 0 ? stringList(raw.cited_documents) : undefined,
   };
 }
 

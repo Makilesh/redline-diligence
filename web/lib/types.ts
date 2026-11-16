@@ -93,6 +93,20 @@ export interface ClaimCheck {
   suspected_misstatement?: boolean;
   /** The claim says the documents do not contain something. */
   absence?: boolean;
+  /**
+   * Figures of the claim that no document it cites states, and where they are
+   * stated instead (Decision 78). The verdict in `status` is unaffected: the
+   * figure is in the documents, the citation points elsewhere.
+   */
+  citation_mismatch?: CitationMismatch[];
+  /** The retrieved documents the claim's citations name (set with a mismatch). */
+  cited_documents?: string[];
+}
+
+/** One figure cited to a document that does not state it. */
+export interface CitationMismatch {
+  figure: string;
+  found_in: string[];
 }
 
 /**

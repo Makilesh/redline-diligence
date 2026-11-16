@@ -67,6 +67,32 @@ _CUT_OFF = "the answer was cut off before it finished."
 # checker doubted (Decision 64). The verdict is still the judge's.
 DOUBTED_WORDING = "wording doubted (its figures match; the passages do not clearly say this)"
 
+# Beside a claim with a figure that no document it cites states (Decision 78).
+# The figure is in the documents; the citation points elsewhere.
+MISCITED = "cited source lacks figure"
+
+
+def is_miscited(check: dict) -> bool:
+    """True when a figure of the claim is stated only outside the documents it cites."""
+    return any(isinstance(m, dict) and m.get("figure") for m in check.get("citation_mismatch") or [])
+
+
+def citation_note(check: dict) -> str:
+    """Where the claim's miscited figures are stated, in a sentence; "" when none."""
+    items = [m for m in check.get("citation_mismatch") or [] if isinstance(m, dict) and m.get("figure")]
+    if not items:
+        return ""
+    cited = [d for d in check.get("cited_documents") or [] if isinstance(d, str) and d]
+    parts = []
+    for m in items:
+        found = ", ".join(f for f in m.get("found_in") or [] if isinstance(f, str) and f)
+        parts.append(f"{m['figure']} is stated in {found or 'another document'}")
+    where = "; ".join(parts)
+    return where + (
+        f", not in the cited {', '.join(cited)}." if cited
+        else ", not in any retrieved document its citation names."
+    )
+
 
 def answer_verdict(result: dict) -> tuple[str, str, str]:
     """
@@ -81,6 +107,7 @@ def answer_verdict(result: dict) -> tuple[str, str, str]:
     total = len(checks)
     problems = counts["contradicted"] + counts["unsupported"]
     not_confirmed = problems + counts["unverified"]
+    miscited = sum(1 for c in checks if is_miscited(c))
     status = result.get("validation_status")
     cut = result.get("answer_truncated") is True
 
@@ -95,7 +122,7 @@ def answer_verdict(result: dict) -> tuple[str, str, str]:
                 else "The answer did not pass verification, even after a revision."
             ) + (f" Also, {_CUT_OFF}" if cut else ""),
         )
-    if status == "warning" or (status == "passed" and (not_confirmed or cut)):
+    if status == "warning" or (status == "passed" and (not_confirmed or cut or miscited)):
         # A cut answer is downgraded to "warning" with every claim possibly
         # supported; "0 could not be confirmed" would hide the real reason.
         if cut and not not_confirmed:
@@ -103,6 +130,12 @@ def answer_verdict(result: dict) -> tuple[str, str, str]:
                 f"All {total} statement(s) matched to the documents, but {_CUT_OFF}"
                 if total
                 else f"Nothing in it could be checked, and {_CUT_OFF}"
+            )
+        elif miscited and not not_confirmed:
+            # Downgraded for a citation that does not hold its figure.
+            detail = (
+                f"All {total} statement(s) matched to the documents, but {miscited} cite(s) a "
+                "document that does not state the figure."
             )
         else:
             detail = (
@@ -185,8 +218,10 @@ def render_claim_checks(checks: list[dict]) -> None:
     )
 
     ordered = sorted(checks, key=_rank)
-    attention = [c for c in ordered if c.get("status") != "supported"]
-    supported = [c for c in ordered if c.get("status") == "supported"]
+    # A supported claim whose citation does not hold its figure is not folded
+    # away: the reader would open the wrong source (Decision 78).
+    attention = [c for c in ordered if c.get("status") != "supported" or is_miscited(c)]
+    supported = [c for c in ordered if c.get("status") == "supported" and not is_miscited(c)]
 
     for c in attention:
         _render_claim(c)
@@ -204,8 +239,13 @@ def _render_claim(check: dict) -> None:
         header += f"<span class='dd-cite-meta'>via {method}</span>"
     if check.get("suspected_misstatement") is True:
         header += f"<span class='dd-cite-meta'>· {DOUBTED_WORDING}</span>"
+    if is_miscited(check):
+        header += f"<span class='dd-cite-meta'>· {MISCITED}</span>"
     st.markdown(header, unsafe_allow_html=True)
     st.markdown(escape_currency(html.escape(check.get("claim") or "")))
+    note = citation_note(check)
+    if note:
+        st.caption(escape_currency(html.escape(note)))
 
     reason = check.get("reason") or ""
     if reason and check.get("status") != "supported":
