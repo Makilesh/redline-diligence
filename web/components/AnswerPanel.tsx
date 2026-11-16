@@ -226,6 +226,12 @@ export default function AnswerPanel({
                 </a>
               );
             },
+            // An image would load with no click, so `![](https://host/?q=…)`
+            // in an answer steered by a planted document could send data out
+            // (Decision 76). Answers never need images: show the alt text.
+            img({ alt }) {
+              return alt ? <span className="text-ash-300">{alt}</span> : null;
+            },
             // Wide financial tables must scroll inside their own container —
             // otherwise a ten-column comparison scrolls the whole page sideways.
             table({ children, ...props }) {

