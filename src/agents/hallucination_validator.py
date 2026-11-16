@@ -268,6 +268,13 @@ async def hallucination_validator_node(state: AgentState) -> dict:
                 "method_counts": report.method_counts,
                 "numeric_counts": report.numeric_counts,
                 "notes": report.notes,
+                # Figures checked against the documents their claims cite
+                # (Decision 78): counts, and each figure cited to a document
+                # that does not state it.
+                "citation_counts": report.citation_counts,
+                "citation_mismatches": [
+                    {**m, "claim": m["claim"][:240]} for m in report.citation_mismatches
+                ],
                 "attempt": attempt,
                 "elapsed_ms": report.elapsed_ms,
                 # Compact per-claim view for the UI; the full checks are in state.
@@ -278,6 +285,7 @@ async def hallucination_validator_node(state: AgentState) -> dict:
                         "method": c["method"],
                         "score": c["score"],
                         "evidence_source": c["evidence_source"],
+                        **({"citation_mismatch": True} if c.get("citation_mismatch") else {}),
                     }
                     for c in report.claim_checks
                 ],

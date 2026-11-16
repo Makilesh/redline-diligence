@@ -400,6 +400,38 @@ def split_claims(answer: str) -> list[Claim]:
     return claims
 
 
+def cited_documents(markers: list[str], chunks: list[dict]) -> list[str]:
+    """
+    The retrieved documents a claim's citation markers name.
+
+    Document level, not chunk level: a figure the cited document states in
+    another section, page or table chunk than the marker names is attributed
+    to the right source (Decision 78). A file is named by its full name, as the
+    synthesis prompt asks, or by its name without the extension.
+
+    Args:
+        markers: Marker bodies (text inside the brackets).
+        chunks: Context chunks with source_file.
+
+    Returns:
+        Source file names, in context order, de-duplicated; empty when no
+        marker names a retrieved document.
+    """
+    bodies = [body.lower() for body in markers]
+    named: list[str] = []
+    for chunk in chunks:
+        source = chunk.get("source_file") or ""
+        if not source or source in named:
+            continue
+        full = source.lower()
+        stem = full.rsplit(".", 1)[0] if "." in full else full
+        # Word-bounded stem: "financials" must not name "aurora_financials.txt".
+        stem_re = re.compile(r"(?<![\w.-])" + re.escape(stem) + r"(?![\w-])")
+        if any(full in body or stem_re.search(body) for body in bodies):
+            named.append(source)
+    return named
+
+
 def resolve_cited_chunks(markers: list[str], chunks: list[dict]) -> list[int]:
     """
     Maps citation marker bodies to indices of the chunks they name.

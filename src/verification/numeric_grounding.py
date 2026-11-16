@@ -1245,6 +1245,10 @@ class NumericCheck:
     # the exact passage the number came from. Internal: not serialised.
     evidence_chunk: int = -1
     evidence_figure: str = ""
+    # Every document the value was found in, not only the one bound above: a
+    # figure several documents state is attributed correctly to any of them
+    # (claim_checker's citation check, Decision 78). Internal: not serialised.
+    evidence_files: tuple[str, ...] = ()
 
     @property
     def is_confirmed(self) -> bool:
@@ -1258,7 +1262,7 @@ class NumericCheck:
     def to_dict(self) -> dict:
         """Serialisable form for AgentState."""
         out = asdict(self)
-        del out["evidence_chunk"], out["evidence_figure"]
+        del out["evidence_chunk"], out["evidence_figure"], out["evidence_files"]
         return out
 
 
@@ -2231,6 +2235,7 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
                     binding_note=binding.note,
                     evidence_chunk=fig.chunk_index,
                     evidence_figure=fig.mention.raw,
+                    evidence_files=tuple(dict.fromkeys(f.source_file for f in group if f.source_file)),
                 )
                 if fig.mention.kind == "bps" and mention.kind == "percent":
                     # Found in the other notation: a conversion, shown as one.
@@ -2386,6 +2391,7 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
                 cur.binding_note = prev.binding_note
                 cur.evidence_chunk = prev.evidence_chunk
                 cur.evidence_figure = prev.evidence_figure
+                cur.evidence_files = prev.evidence_files
 
         results.append(checks)
 

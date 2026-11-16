@@ -540,6 +540,8 @@ async def verify_records(records: list[dict], contexts: dict, cache: ScoreCache 
                 "numbers": [{k: n.get(k) for k in ("raw", "status", "binding")} for n in check["numbers"]],
                 "evidence": check.get("evidence", ""),
                 "evidence_source": check.get("evidence_source", ""),
+                # Figures stated only outside the documents the claim cites (Decision 78).
+                "citation_mismatch": check.get("citation_mismatch") or [],
             })
         rows.append({
             "key": key,
@@ -549,6 +551,7 @@ async def verify_records(records: list[dict], contexts: dict, cache: ScoreCache 
             "judge_called": bool(asked),
             "judge_claims": len(asked),
             "nli_model": report.nli_model,
+            "citation_counts": report.citation_counts,
             "claims": checks,
         })
     return rows
