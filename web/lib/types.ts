@@ -101,6 +101,60 @@ export interface ClaimCheck {
   citation_mismatch?: CitationMismatch[];
   /** The retrieved documents the claim's citations name (set with a mismatch). */
   cited_documents?: string[];
+  /**
+   * A figure of the claim is stated only by document text that reads like an
+   * instruction to an AI model (Decision 76). The verdict in `status` may still
+   * be "supported": the figure is in the documents.
+   */
+  injection_suspect?: boolean;
+}
+
+/**
+ * The ingest screen's signals (`src/data_processing/injection_screen.py`).
+ * Typed as plain strings on the wire: a signal this client does not know is
+ * kept, and simply not described.
+ */
+export type InjectionSignal =
+  | "instruction_override"
+  | "model_address"
+  | "role_marker"
+  | "forged_marker"
+  | "supersession_claim"
+  | "invisible_text";
+
+/** Where a passage with instruction-like text sits. Never what it says. */
+export interface PassageLocation {
+  page_number: number | null;
+  section_heading: string;
+  signals: string[];
+}
+
+/** A retrieved passage with instruction-like text, by document and place. */
+export interface FlaggedPassage extends PassageLocation {
+  source_file: string;
+}
+
+/**
+ * `QueryResponse.injection_review` (Decision 82): retrieved passages whose text
+ * reads like instructions to an AI model, how many the answer cites, and the
+ * figures only they state. Empty lists and 0 when there were none.
+ */
+export interface InjectionReview {
+  flagged_passages: FlaggedPassage[];
+  cited_flagged_passages: number;
+  tainted_figures: string[];
+}
+
+/**
+ * `IngestResult.injection_screen` (Decision 82): passages of the upload whose
+ * text reads like instructions to an AI model. A label only — the file was
+ * indexed as written, and `status` does not change for it.
+ */
+export interface InjectionScreen {
+  flagged_passages: number;
+  signals: string[];
+  /** Distinct pages/sections, at most ten. */
+  locations: PassageLocation[];
 }
 
 /** One figure cited to a document that does not state it. */
@@ -166,6 +220,8 @@ export interface QueryResponse {
   llm_calls: number;
   /** Correlation id, also sent as X-Request-ID; quoted when reporting a problem. */
   request_id: string;
+  /** Instruction-like text behind the answer; empty when there was none. */
+  injection_review: InjectionReview;
 }
 
 export interface Deal {
@@ -222,6 +278,7 @@ export interface IngestResult {
   /** Why a partial ingestion was partial, when known. */
   notices: string[];
   version_candidates: VersionCandidate[];
+  injection_screen: InjectionScreen;
 }
 
 export interface BudgetEntry {
