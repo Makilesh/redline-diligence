@@ -169,6 +169,13 @@ def top_passages(chunks: list[dict], k: int = TOP_K_PASSAGES) -> list[str]:
     before. Held out (golden, headers on): ctrl_02 0.356 (admitted) -> 0.244
     (refused); lowest answerable 0.394; controls refused 4/6 as with headers off.
 
+    The header also costs the gate (Decision 74). On dev questions whose top 3
+    passages are the same with and without headers, the header form lowers AUC
+    from 0.733 to 0.639: naming the document and section makes an adjacent passage
+    look like the answer. Re-deriving form, top-k and threshold with headers on
+    reaches 8 of 28 unanswerables at best, against 11 of 28 with headers off. This
+    is why CHUNK_CONTEXT_HEADERS stays off by default.
+
     Args:
         chunks: reranked_results payloads.
         k: How many to keep.

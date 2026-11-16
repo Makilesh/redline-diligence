@@ -144,6 +144,7 @@ async def run(args: argparse.Namespace) -> dict:
 
     started = time.perf_counter()
     client, _ = await build_index()
+    args.index_seconds = round(time.perf_counter() - started, 1)
     rows: list[dict] = []
     contexts: list[tuple[dict, list[dict]]] = []
     with use_client(client):
@@ -159,6 +160,10 @@ async def run(args: argparse.Namespace) -> dict:
 
     # Retrieval is done: free its models before Laya loads (memory-tight hosts).
     release_retrieval_models()
+    if args.pair_scores:
+        report = await pair_score_report(rows, contexts, started)
+        report["index_seconds"] = args.index_seconds
+        return report
     for n, (row, (state, reranked)) in enumerate(zip(rows, contexts), start=1):
         for name, instruction in phrasings.items():
             ans.ANSWERABILITY_INSTRUCTION = instruction
@@ -204,6 +209,83 @@ async def run(args: argparse.Namespace) -> dict:
         "total_seconds": round(time.perf_counter() - started, 1),
     }
     return report
+
+
+async def pair_score_report(rows: list[dict], contexts: list, started: float) -> dict:
+    """
+    --pair-scores: Laya P for each of the top MAX_K passages in every passage
+    form (eval/answerability_grid.py), the full (form, k, threshold) grid, and
+    the pre-registered selection on it. Run once with CHUNK_CONTEXT_HEADERS=0
+    and once with =1: the index is built under whatever the environment says.
+    """
+    import src.decisions.answerability as ans
+    from eval import answerability_grid as ag
+    from src.agents.quality_assessor import _heuristic_assessment
+    from src.data_processing.chunk_context import context_headers_enabled
+
+    for n, (row, (state, reranked)) in enumerate(zip(rows, contexts), start=1):
+        verdict = _heuristic_assessment({**state, "reranked_results": reranked})
+        # The node consults Laya unless the heuristic forced a refusal.
+        row["consulted"] = not (verdict is not None and verdict.get("force_refusal"))
+        facets = ans.answerability_facets(state["original_query"], state.get("sub_questions"))
+        row["matrix"] = await ag.pair_scores(facets, reranked, ans.ANSWERABILITY_INSTRUCTION)
+        row["top"] = [{"file": c.get("source_file") or c.get("filename"),
+                       "chunk_index": c.get("chunk_index"),
+                       "is_table": bool(c.get("is_table")),
+                       "reranker_score": round(float(c.get("reranker_score", 0.0)), 4),
+                       "context_header": c.get("context_header") or "",
+                       "chars": len(c.get("text") or "")}
+                      for c in ag.ranked_chunks(reranked)]
+        print(f"[pairs] {n}/{len(rows)} {row['id']} {row['label']} heuristic={row['heuristic']} "
+              f"header@3={ag.score_at(row['matrix'], 'header', 3)} "
+              f"bare@3={ag.score_at(row['matrix'], 'bare', 3)}", file=sys.stderr)
+    cells = ag.grid(rows)
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "command": "python -m eval.run_answerability_eval " + " ".join(sys.argv[1:]),
+        "dev_set": str(DEV_SET_PATH.relative_to(PROJECT_ROOT)),
+        "chunk_context_headers": context_headers_enabled(),
+        "instruction": ans.ANSWERABILITY_INSTRUCTION,
+        "environment": {"laya_device": _laya_device()},
+        "labels": {lab: sum(r["label"] == lab for r in rows)
+                   for lab in ("answerable", "unanswerable", "retrieval_miss", "excluded")},
+        "today": ag.evaluate(rows, "header", ans.TOP_K_PASSAGES, ans.VETO_THRESHOLD),
+        "selected": ag.select(cells),
+        "grid": cells,
+        "questions": rows,
+        "total_seconds": round(time.perf_counter() - started, 1),
+    }
+
+
+def render_pairs_markdown(report: dict) -> str:
+    """Today's setting, the selected one, and the best admissible cell per (form, k)."""
+    from eval import answerability_grid as ag
+
+    def row(c: dict) -> str:
+        auc_ = "—" if c["auc"] is None else f"{c['auc']:.3f}"
+        low = "—" if c["lowest_answerable"] is None else f"{c['lowest_answerable']:.3f}"
+        return (f"| {c['form']} | {c['k']} | {c['threshold']} | {c['false_vetoes']}/{c['answerable']} | "
+                f"{c['caught']}/{c['unanswerable']} | {low} | {auc_} |")
+
+    head = ["| form | top-k | veto below | false vetoes | unanswerable caught | lowest answerable | AUC |",
+            "|---|---|---|---|---|---|---|"]
+    lab = report["labels"]
+    lines = [f"# Answerability pair scores — headers {'on' if report['chunk_context_headers'] else 'off'}, "
+             f"{report['generated_at'][:10]}", "",
+             f"{lab['answerable']} answerable, {lab['unanswerable']} unanswerable, "
+             f"{lab['retrieval_miss']} retrieval misses, {lab['excluded']} excluded.", "",
+             "Today's setting (header form when a header exists, else bare):", "", *head,
+             row(report["today"]), ""]
+    sel = report["selected"]
+    lines += ["Selected by the pre-registered rule:", "", *head,
+              row(sel) if sel else "| none admissible | | | | | | |", "",
+              "Best admissible threshold per (form, top-k):", "", *head]
+    for form in ag.FORMS:
+        for k in ag.KS:
+            cell = ag.select([c for c in report["grid"] if c["form"] == form and c["k"] == k])
+            if cell:
+                lines.append(row(cell))
+    return "\n".join(lines)
 
 
 def _laya_device() -> str:
@@ -264,6 +346,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="also score the alternative instructions P2, P3")
     parser.add_argument("--limit", type=int, help="first N dev questions only (timing runs)")
     parser.add_argument("--threads", type=int, help="torch.set_num_threads, e.g. 2 to mimic the host")
+    parser.add_argument("--pair-scores", action="store_true",
+                        help="score the top-5 passages in every passage form and write the "
+                             "(form, top-k, threshold) grid instead of the standard report")
+    parser.add_argument("--tag", default="", help="suffix for --pair-scores output names")
     parser.add_argument("--output-dir", default=str(RESULTS_DIR))
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args(argv)
@@ -282,6 +368,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
+    if args.pair_scores:
+        name = f"answerability_pairs{'_' + args.tag if args.tag else ''}"
+        (out / f"{name}.json").write_text(
+            json.dumps(report, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        markdown = render_pairs_markdown(report)
+        (out / f"{name}.md").write_text(markdown + "\n", encoding="utf-8")
+        print(markdown)
+        return 0
     suffix = "" if not (args.limit or args.threads) else "_timing"
     (out / f"answerability_dev{suffix}.json").write_text(
         json.dumps(report, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
