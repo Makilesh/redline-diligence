@@ -71,6 +71,10 @@ Two consequences worth stating plainly:
   saved in sentence-transformers 5's format and load *silently wrong* (random
   classification head) under this repository's pinned 2.x; do not point
   `RERANKER_MODEL` at one without the conversion described in Decision 77.
+- **Keep `QDRANT_MODE=local` for development.** The embedded index searches
+  exactly but slowly: with FinanceBench's 84 filings (45K chunks) indexed, a
+  filing question's retrieval took 9.8 s at p50 in local mode against 0.6 s on
+  a Qdrant server, with the same evidence pages retrieved (Decision 79).
 - **Uploads index slowly.** bge-m3 on two cores embeds about one chunk every
   1.5–3 s: the 111-chunk sample deal takes about 3 minutes, and a document of a
   few hundred chunks several minutes. Seed the demo corpus before going live.
