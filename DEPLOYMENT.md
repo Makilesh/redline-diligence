@@ -62,6 +62,15 @@ Two consequences worth stating plainly:
   30), so the MiniLM calibration profile caps the depth at 10, at about +0.3 s per
   legal question on two cores. `DOCUMENT_FOCUS_K` overrides it (0–30) if you run
   a different reranker or host (Decision 71).
+- **MiniLM is still the best fit for two cores, not the best small reranker.**
+  Six Apache-2.0 alternatives were measured on the same emulated host
+  (Decision 77). Only `ettin-reranker-68m-v1` beat it on LegalBench-RAG's dev
+  documents (84.1% against 78.6%, matching bge on a GPU), at 306 ms a pair
+  against 74 ms — about 8 s more per legal question. `ettin-reranker-17m-v1`
+  is faster than MiniLM (40 ms a pair) but no better. The Ettin models are
+  saved in sentence-transformers 5's format and load *silently wrong* (random
+  classification head) under this repository's pinned 2.x; do not point
+  `RERANKER_MODEL` at one without the conversion described in Decision 77.
 - **Uploads index slowly.** bge-m3 on two cores embeds about one chunk every
   1.5–3 s: the 111-chunk sample deal takes about 3 minutes, and a document of a
   few hundred chunks several minutes. Seed the demo corpus before going live.
