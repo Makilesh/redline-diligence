@@ -43,7 +43,7 @@ from __future__ import annotations
 import bisect
 import re
 from dataclasses import dataclass, asdict, field
-from typing import Iterable
+from typing import Callable, Iterable
 
 # ─── Extraction ────────────────────────────────────────────────────────────────
 
@@ -1276,6 +1276,7 @@ def _fmt(v: float) -> str:
 def _derive(
     mention: NumericMention,
     operands: list[tuple[float, str]],
+    veto: Callable[[int, int], bool] | None = None,
 ) -> str | None:
     """
     Tries to reproduce a figure from two grounded figures stated alongside it.
@@ -1293,6 +1294,9 @@ def _derive(
     Args:
         mention: Ungrounded figure from the answer.
         operands: (normalised value, kind) of grounded figures in the same claim.
+        veto: Called with the operand indices of a difference or a change
+            (|a - b|, (a - b) / b) that matches; True rejects that pair — see
+            _direction_veto. Sums, ratios and conversions are never vetoed.
 
     Returns:
         A formula string when reproducible, else None.
@@ -1308,65 +1312,173 @@ def _derive(
         tol = max(mention.half_unit * s, _REL_TOLERANCE * abs(target), 1e-9)
         return abs(target - got) <= tol
 
-    amounts = [(v, k) for v, k in operands if k in ("currency", "count")]
-    percents = [v for v, k in operands if k == "percent"]
-    multiples = [v for v, k in operands if k == "multiple"]
-    basis_points = [v for v, k in operands if k == "bps"]
+    def allowed(i: int, j: int) -> bool:
+        return veto is None or not veto(i, j)
+
+    amounts = [(i, v, k) for i, (v, k) in enumerate(operands) if k in ("currency", "count")]
+    percents = [(i, v) for i, (v, k) in enumerate(operands) if k == "percent"]
+    multiples = [(i, v) for i, (v, k) in enumerate(operands) if k == "multiple"]
+    basis_points = [(i, v) for i, (v, k) in enumerate(operands) if k == "bps"]
 
     def amount_pairs():
-        """Ordered pairs of distinct amounts of the same kind."""
-        for i, (a, ka) in enumerate(amounts):
-            for j, (b, kb) in enumerate(amounts):
+        """Ordered pairs of distinct amounts of the same kind, with their indices."""
+        for i, a, ka in amounts:
+            for j, b, kb in amounts:
                 if i != j and ka == kb and b:
-                    yield a, b
+                    yield i, a, j, b
+
+    def pairs(values):
+        """Unordered pairs, with their indices."""
+        for x, (i, a) in enumerate(values):
+            for j, b in values[x + 1:]:
+                yield i, a, j, b
 
     for s in scales:
         target = mention.value * s
         if kind in ("currency", "count"):
-            for a, b in amount_pairs():
-                if close(target, abs(a - b), s):
+            for i, a, j, b in amount_pairs():
+                if close(target, abs(a - b), s) and allowed(i, j):
                     return f"|{_fmt(a)} - {_fmt(b)}|"
                 if close(target, a + b, s):
                     return f"{_fmt(a)} + {_fmt(b)}"
         elif kind == "percent":
-            for a, b in amount_pairs():
-                if close(target, abs(a - b) / b * 100, s):
+            for i, a, j, b in amount_pairs():
+                if close(target, abs(a - b) / b * 100, s) and allowed(i, j):
                     return f"({_fmt(a)} - {_fmt(b)}) / {_fmt(b)}"
                 if a < b and close(target, a / b * 100, s):
                     return f"{_fmt(a)} / {_fmt(b)}"
-            for i, a in enumerate(percents):
-                for b in percents[i + 1:]:
-                    if close(target, abs(a - b), s):
-                        return f"|{a:g}% - {b:g}%|"
-            for a in basis_points:
+            for i, a, j, b in pairs(percents):
+                if close(target, abs(a - b), s) and allowed(i, j):
+                    return f"|{a:g}% - {b:g}%|"
+            for _, a in basis_points:
                 if close(target, a / 100, s):
                     return f"{a:g} bps / 100"
         elif kind == "pp":
-            for i, a in enumerate(percents):
-                for b in percents[i + 1:]:
-                    if close(target, abs(a - b), s):
-                        return f"|{a:g}% - {b:g}%|"
+            for i, a, j, b in pairs(percents):
+                if close(target, abs(a - b), s) and allowed(i, j):
+                    return f"|{a:g}% - {b:g}%|"
         elif kind == "bps":
-            for i, a in enumerate(basis_points):
-                for b in basis_points[i + 1:]:
-                    if close(target, abs(a - b), s):
-                        return f"|{a:g} bps - {b:g} bps|"
-            for i, a in enumerate(percents):
-                for b in percents[i + 1:]:
-                    if close(target, abs(a - b) * 100, s):
-                        return f"|{a:g}% - {b:g}%| x 100"
-            for a in percents:
+            for i, a, j, b in pairs(basis_points):
+                if close(target, abs(a - b), s) and allowed(i, j):
+                    return f"|{a:g} bps - {b:g} bps|"
+            for i, a, j, b in pairs(percents):
+                if close(target, abs(a - b) * 100, s) and allowed(i, j):
+                    return f"|{a:g}% - {b:g}%| x 100"
+            for _, a in percents:
                 if close(target, a * 100, s):
                     return f"{a:g}% x 100"
         elif kind == "multiple":
-            for a, b in amount_pairs():
+            for _, a, _, b in amount_pairs():
                 if close(target, a / b, s):
                     return f"{_fmt(a)} / {_fmt(b)}"
-            for i, a in enumerate(multiples):
-                for b in multiples[i + 1:]:
-                    if close(target, abs(a - b), s):
-                        return f"|{a:g}x - {b:g}x|"
+            for i, a, j, b in pairs(multiples):
+                if close(target, abs(a - b), s) and allowed(i, j):
+                    return f"|{a:g}x - {b:g}x|"
     return None
+
+
+# The direction a claim gives a change: "grew by $65.7M", "fell 1.8%",
+# "+$12.0M". Narrower than _UP_RE / _DOWN_RE: "improved" and "higher/lower"
+# say nothing about the sign of a difference (leverage "improves" by falling).
+_RISE_RE = re.compile(
+    r"\b(?:increas\w*|grew|grow\w*|rose|rise[sn]?|rising|up|gain\w*|expan\w*|climb\w*|jump\w*)\b",
+    re.IGNORECASE,
+)
+_FALL_RE = re.compile(
+    r"\b(?:decreas\w*|declin\w*|fell|fall\w*|drop\w*|down|reduc\w*|contract\w*|shr[iu]nk\w*)\b",
+    re.IGNORECASE,
+)
+
+
+def _stated_direction(text: str, mentions: list[NumericMention], mention: NumericMention) -> int:
+    """
+    +1 or -1 when a claim gives a figure a direction — a sign attached to it,
+    or rise/fall wording just before it (after the previous figure) — else 0.
+    Wording both ways ("rose … then fell by") gives 0.
+    """
+    sign = _written_sign(text, mention.start)
+    if sign:
+        return sign
+    floor = max((m.end for m in mentions if m.end <= mention.start), default=0)
+    lead_in = text[max(floor, mention.start - _CUE_WINDOW): mention.start]
+    up, down = bool(_RISE_RE.search(lead_in)), bool(_FALL_RE.search(lead_in))
+    return 1 if up and not down else -1 if down and not up else 0
+
+
+def _coarser_than_inputs(mention: NumericMention, mentions: list[NumericMention]) -> bool:
+    """
+    _coarse, for a figure _derive reproduced — and printed more coarsely than
+    the figures beside it allow.
+
+    "1.7 percentage points" from 13.3% and 15.0% is under the 2% line, yet it
+    is as precise as a difference of those two can be; "5x" for 452.8 / 92.8
+    and "$21M" for $110.0M − $89.4M are not. So a coarse result counts only
+    when its half-unit exceeds twice the inputs' — absolute for a difference
+    of like figures, relative for a ratio. Measured: without this, seven
+    correct differences on the live-answer replay and two on the benchmark
+    went to the judge (Decision 73, addendum).
+    """
+    if not _coarse(mention):
+        return False
+    dim = _DIMENSION.get(mention.kind)
+    others = [m for m in mentions if m is not mention and m.value and _DIMENSION.get(m.kind)]
+    alike = [m for m in others if _DIMENSION[m.kind] == dim]
+    if alike:
+        return mention.half_unit > 2 * max(m.half_unit for m in alike) * (1 + 1e-9)
+    if not others:
+        return True
+    return mention.half_unit / mention.value > 2 * max(m.half_unit / m.value for m in others)
+
+
+def _later_of(first: str, second: str) -> int | None:
+    """
+    0 when the first of two figures is the later one, 1 when the second is,
+    None when nothing says. Each is described by its period: a year, "*" (worded
+    as the comparison value — "from $387.1M", "up from") or "" (not stated).
+    """
+    if first not in ("", "*") and second not in ("", "*") and first != second:
+        return 0 if first > second else 1
+    if first == "*" and second != "*":
+        return 1
+    if second == "*" and first != "*":
+        return 0
+    return None
+
+
+def _direction_veto(
+    direction: int,
+    operands: list[tuple[float, str]],
+    periods: list[str],
+) -> Callable[[int, int], bool] | None:
+    """
+    A _derive veto: rejects a difference whose sign the claim contradicts.
+
+    "Change in total debt: +$12.0M ($110.0M - $122.0M)", with $110.0M bound to
+    FY2023 and $122.0M to FY2022, is a fall of $12.0M; |a - b| matched it
+    anyway. The later figure is known only when the claim states the periods,
+    words one figure as the comparison ("from $387.1M to $452.8M"), or the
+    documents' columns say which is which; otherwise nothing is rejected.
+
+    Args:
+        direction: _stated_direction of the figure being derived.
+        operands: _derive's operands.
+        periods: Per operand, its period ("2023", "*" or "").
+
+    Returns:
+        The veto, or None when the claim gives no direction.
+    """
+    if not direction:
+        return None
+
+    def veto(i: int, j: int) -> bool:
+        later = _later_of(periods[i], periods[j])
+        if later is None:
+            return False
+        newer, older = (operands[i][0], operands[j][0]) if later == 0 else (operands[j][0], operands[i][0])
+        change = newer - older
+        return bool(change) and (change > 0) != (direction > 0)
+
+    return veto
 
 
 # ─── Written arithmetic ───────────────────────────────────────────────────────
@@ -2060,6 +2172,7 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
         checks: list[NumericCheck] = []
         pending: list[tuple[NumericMention, NumericCheck]] = []
         operands: list[tuple[float, str]] = []
+        periods: list[str] = []  # per operand (see _direction_veto)
         # (figure, its check, its value in the context's normalisation)
         grounded: list[tuple[NumericMention, NumericCheck, float]] = []
         reading: list[_Reading] = []
@@ -2095,6 +2208,12 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
                 if not mention.explicit_scale and fig.mention.explicit_scale:
                     value = fig.mention.value
                 operands.append((value, mention.kind))
+                # The period it is for: as the claim states it, else the
+                # column the documents put it in, when it is the claim's figure.
+                period = stated.get((mention.start, mention.end), "")
+                if not period and binding.status == "bound":
+                    period = fig.period
+                periods.append(period)
                 reading.append(_Reading(
                     value,
                     mention.explicit_scale or fig.mention.explicit_scale,
@@ -2134,11 +2253,38 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
         # A figure the context holds somewhere the claim does not name is still
         # confirmed when the claim's own confirmed figures reproduce it: "up
         # 17.0% from $387.1 million" needs no "Revenue Growth: 17.0%" line.
-        confirmed = [(value, c.kind) for _, c, value in grounded if c.binding == "bound"]
+        # A difference must also have the direction the claim gives it, and a
+        # result printed too coarsely to pin the computation ("$1B", "8x") is
+        # reproduced but not confirmed (_coarse) — Decision 73's addendum.
+        bound = [k for k, (_, c, _) in enumerate(grounded) if c.binding == "bound"]
+        confirmed = [operands[k] for k in bound]
+        confirmed_periods = [periods[k] for k in bound]
+        # What the derivation did without these rules — so that they only
+        # ever take a confirmation away (see below).
+        legacy_lifted = {
+            id(check) for mention, check, _ in grounded
+            if check.binding != "bound" and _derive(mention, confirmed)
+        }
+        legacy_operands = list(operands)
+        legacy_derived: dict[int, str] = {}
+        for _ in range(2):
+            progressed = False
+            for mention, check in pending:
+                if id(check) not in legacy_derived:
+                    formula = _derive(mention, legacy_operands)
+                    if formula:
+                        legacy_derived[id(check)] = formula
+                        legacy_operands.append((mention.value, mention.kind))
+                        progressed = True
+            if not progressed:
+                break
         for mention, check, _ in grounded:
-            if check.binding == "bound":
+            if check.binding == "bound" or _coarser_than_inputs(mention, mentions):
                 continue
-            formula = _derive(mention, confirmed)
+            veto = _direction_veto(
+                _stated_direction(text, mentions, mention), confirmed, confirmed_periods
+            )
+            formula = _derive(mention, confirmed, veto)
             if formula:
                 check.binding = "bound"
                 check.binding_note = ""
@@ -2151,19 +2297,35 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
             for mention, check in pending:
                 if check.status == "derived":
                     continue
-                formula = _derive(mention, operands)
+                veto = _direction_veto(_stated_direction(text, mentions, mention), operands, periods)
+                formula = _derive(mention, operands, veto)
                 if formula:
                     check.status = "derived"
                     check.formula = formula
+                    if _coarser_than_inputs(mention, mentions):
+                        check.binding = "unbound"
+                        check.binding_note = "printed too coarsely to confirm the computation"
                     operands.append((mention.value, mention.kind))
+                    periods.append("")
                     progressed = True
             if not progressed:
                 break
+        # A figure the unchecked derivation reproduced but these rules do not:
+        # the magnitude is right, the direction (or a figure it rests on) is
+        # not confirmed — a warning for the judge, not "figure not found", since
+        # the periods are read from wording and columns and may be read wrong.
+        for _, check in pending:
+            if check.status == "unsupported" and id(check) in legacy_derived:
+                check.status = "derived_unverified"
+                check.formula = f"{legacy_derived[id(check)]}, direction not confirmed"
 
-        segments.append((text, mentions, checks, pending, list(operands)))
+        # The plausibility pass below sees what it saw before these rules, so
+        # tightening a derivation never turns a warning into a failure.
+        segments.append((text, mentions, checks, pending, legacy_operands))
         readings.append(reading)
         answer_operands.extend(
-            (value, check.kind) for _, check, value in grounded if check.is_confirmed
+            (value, check.kind) for _, check, value in grounded
+            if check.is_confirmed or id(check) in legacy_lifted
         )
 
     # Second pass: what to make of a figure that is neither in the context nor

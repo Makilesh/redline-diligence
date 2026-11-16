@@ -368,6 +368,60 @@ class TestReviewFindings:
         assert _by_raw(checks, "110.0M").status != "derived"
 
 
+class TestTwoFigureDerivation:
+    """The older _derive (figures in prose, no operator): direction and coarseness."""
+
+    def test_signed_change_against_the_columns_is_not_confirmed(self):
+        # $110.0M is the FY2023 column, $122.0M FY2022: debt fell by $12.0M.
+        [checks] = _ground("Change in total debt: +$12.0M ($110.0M - $122.0M)")
+        assert _by_raw(checks, "$12.0M").status != "derived"
+        assert not _confirmed(checks)
+
+    def test_direction_word_against_from_to(self):
+        [fell] = _ground("Total debt fell by $12.0M, from $122.0M to $110.0M.")
+        [rose] = _ground("Total debt rose by $12.0M, from $122.0M to $110.0M.")
+        assert _by_raw(fell, "$12.0M").status == "derived" and _confirmed(fell)
+        assert _by_raw(rose, "$12.0M").status == "derived_unverified"
+        assert not _confirmed(rose)
+
+    def test_points_change_direction(self):
+        [expanded] = _ground("Gross margin expanded 0.9 percentage points, from 59.1% to 60.0%.")
+        [contracted] = _ground("Gross margin contracted 0.9 percentage points, from 59.1% to 60.0%.")
+        assert _by_raw(expanded, "0.9 percentage points").status == "derived"
+        assert _by_raw(contracted, "0.9 percentage points").status != "derived"
+
+    def test_no_direction_keeps_the_old_behaviour(self):
+        [checks] = _ground("Total debt changed by $12.0M between $122.0M and $110.0M.")
+        assert _by_raw(checks, "$12.0M").status == "derived"
+
+    def test_unknown_order_keeps_the_old_behaviour(self):
+        # Neither wording nor columns say which is later: nothing is rejected.
+        [checks] = _ground("Debt rose by $66.4M, comparing $85.0M and $18.6M.", context=LINES)
+        assert _by_raw(checks, "$66.4M").status == "derived"
+
+    def test_coarse_derived_result_is_not_confirmed(self):
+        # 452.8 / 92.8 = 4.88: "5x" is that at its printed precision, and so
+        # is anything from 4.5x to 5.5x.
+        [coarse] = _ground("Revenue of $452.8M over EBITDA of $92.8M is 5x.")
+        [precise] = _ground("Revenue of $452.8M over EBITDA of $92.8M is 4.88x.")
+        assert _by_raw(coarse, "5x").status == "derived"
+        assert not _confirmed(coarse)
+        assert _confirmed(precise)
+
+    def test_small_difference_as_precise_as_its_inputs_is_confirmed(self):
+        # 1.7 is under the 2% line, but a difference of two one-decimal
+        # margins cannot be printed more precisely.
+        [checks] = _ground("The operating margin expanded by 1.7 percentage points, from 13.3% to 15.0%.")
+        assert _confirmed(checks)
+
+    def test_coarse_amount_is_not_confirmed(self):
+        [checks] = _ground(
+            "Net debt of $21M is total debt of $110.0M less cash and cash equivalents of $89.4M.",
+            context=NO_NET_DEBT,
+        )
+        assert not _confirmed(checks)
+
+
 class TestAnswerOutcome:
     """What the verifier makes of it, with no model and no judge."""
 
