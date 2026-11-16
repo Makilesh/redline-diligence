@@ -552,6 +552,10 @@ async def verify_records(records: list[dict], contexts: dict, cache: ScoreCache 
             "judge_claims": len(asked),
             "nli_model": report.nli_model,
             "citation_counts": report.citation_counts,
+            # The local stages' time for this answer (the judge is stubbed).
+            # Meaningful only when the pairs were scored by the model, not
+            # served from --score-cache.
+            "validator_ms": report.elapsed_ms,
             "claims": checks,
         })
     return rows
@@ -781,8 +785,18 @@ async def run(args: argparse.Namespace) -> dict:
     return report
 
 
+def latency_summary(values: list[float]) -> dict | None:
+    """p50 / p95 / max of per-answer milliseconds (nearest rank), or None."""
+    xs = sorted(v for v in values if v is not None)
+    if not xs:
+        return None
+    rank = lambda q: xs[min(len(xs) - 1, max(0, int(round(q * len(xs))) - 1))]  # noqa: E731
+    return {"answers": len(xs), "p50_ms": round(rank(0.5), 1), "p95_ms": round(rank(0.95), 1),
+            "max_ms": round(xs[-1], 1)}
+
+
 def summarise(rows: list[dict], reproduction: dict) -> dict:
-    """Counts per run: answers, reproduction, claim outcomes, judge calls."""
+    """Counts per run: answers, reproduction, claim outcomes, judge calls, validator time."""
     out = {}
     for run in sorted({r["run"] for r in rows}):
         rs = [r for r in rows if r["run"] == run]
@@ -812,6 +826,7 @@ def summarise(rows: list[dict], reproduction: dict) -> dict:
                 c["method"] for r in kept for c in r["claims"] if c["outcome"] == "flag")),
             "judge_called_reproduced": sum(r["judge_called"] for r in kept),
             "answers_reproduced": len(kept),
+            "validator_latency_reproduced": latency_summary([r.get("validator_ms") for r in kept]),
         }
     return out
 
@@ -834,6 +849,11 @@ def render(report: dict) -> str:
         lines.append(f"- claim outcomes (reproduced answers): {s['claim_outcomes_reproduced']}; "
                      f"flags by stage {s['flag_methods_reproduced']}; judge called on "
                      f"{s['judge_called_reproduced']}/{s['answers_reproduced']} answers")
+        lat = s.get("validator_latency_reproduced")
+        if lat and report.get("score_cache_misses") is None:
+            # Pairs served from a score cache cost nothing; the times would not be the model's.
+            lines.append(f"- validator time per answer (local stages, judge stubbed): p50 {lat['p50_ms']} ms, "
+                         f"p95 {lat['p95_ms']} ms, max {lat['max_ms']} ms")
         lines.append("")
     for which, r in (report.get("rates") or {}).items():
         lines.append(f"## Rates on {which} ({r['questions']} questions, labelled {r['labelled']})")
