@@ -10,7 +10,11 @@ the retrieved context, normalised the same way. A figure is:
 - derived             — not verbatim, but reproducible by one arithmetic step
                         (difference, sum, ratio, percentage change) from two
                         figures the answer itself states AND that are grounded,
-                        or the same rate in the other notation (225 bps = 2.25%);
+                        or the same rate in the other notation (225 bps = 2.25%),
+                        or by an equation the answer writes out whose inputs
+                        are grounded or computed by another such equation
+                        ("$716.6M = $696.0M + $20.6M", then "$716.6M / $92.8M
+                        = 7.72x"; see _check_written_arithmetic);
 - derived_unverified  — not reproducible, but the sentence presents it as a
                         computation ("an increase of", "combined", "approximately")
                         AND states figures it could have been computed from, so
@@ -38,8 +42,8 @@ from __future__ import annotations
 
 import bisect
 import re
-from dataclasses import dataclass, asdict
-from typing import Iterable
+from dataclasses import dataclass, asdict, field
+from typing import Callable, Iterable
 
 # ─── Extraction ────────────────────────────────────────────────────────────────
 
@@ -1241,6 +1245,10 @@ class NumericCheck:
     # the exact passage the number came from. Internal: not serialised.
     evidence_chunk: int = -1
     evidence_figure: str = ""
+    # Every document the value was found in, not only the one bound above: a
+    # figure several documents state is attributed correctly to any of them
+    # (claim_checker's citation check, Decision 78). Internal: not serialised.
+    evidence_files: tuple[str, ...] = ()
 
     @property
     def is_confirmed(self) -> bool:
@@ -1254,7 +1262,7 @@ class NumericCheck:
     def to_dict(self) -> dict:
         """Serialisable form for AgentState."""
         out = asdict(self)
-        del out["evidence_chunk"], out["evidence_figure"]
+        del out["evidence_chunk"], out["evidence_figure"], out["evidence_files"]
         return out
 
 
@@ -1272,6 +1280,7 @@ def _fmt(v: float) -> str:
 def _derive(
     mention: NumericMention,
     operands: list[tuple[float, str]],
+    veto: Callable[[int, int], bool] | None = None,
 ) -> str | None:
     """
     Tries to reproduce a figure from two grounded figures stated alongside it.
@@ -1289,6 +1298,9 @@ def _derive(
     Args:
         mention: Ungrounded figure from the answer.
         operands: (normalised value, kind) of grounded figures in the same claim.
+        veto: Called with the operand indices of a difference or a change
+            (|a - b|, (a - b) / b) that matches; True rejects that pair — see
+            _direction_veto. Sums, ratios and conversions are never vetoed.
 
     Returns:
         A formula string when reproducible, else None.
@@ -1304,65 +1316,833 @@ def _derive(
         tol = max(mention.half_unit * s, _REL_TOLERANCE * abs(target), 1e-9)
         return abs(target - got) <= tol
 
-    amounts = [(v, k) for v, k in operands if k in ("currency", "count")]
-    percents = [v for v, k in operands if k == "percent"]
-    multiples = [v for v, k in operands if k == "multiple"]
-    basis_points = [v for v, k in operands if k == "bps"]
+    def allowed(i: int, j: int) -> bool:
+        return veto is None or not veto(i, j)
+
+    amounts = [(i, v, k) for i, (v, k) in enumerate(operands) if k in ("currency", "count")]
+    percents = [(i, v) for i, (v, k) in enumerate(operands) if k == "percent"]
+    multiples = [(i, v) for i, (v, k) in enumerate(operands) if k == "multiple"]
+    basis_points = [(i, v) for i, (v, k) in enumerate(operands) if k == "bps"]
 
     def amount_pairs():
-        """Ordered pairs of distinct amounts of the same kind."""
-        for i, (a, ka) in enumerate(amounts):
-            for j, (b, kb) in enumerate(amounts):
+        """Ordered pairs of distinct amounts of the same kind, with their indices."""
+        for i, a, ka in amounts:
+            for j, b, kb in amounts:
                 if i != j and ka == kb and b:
-                    yield a, b
+                    yield i, a, j, b
+
+    def pairs(values):
+        """Unordered pairs, with their indices."""
+        for x, (i, a) in enumerate(values):
+            for j, b in values[x + 1:]:
+                yield i, a, j, b
 
     for s in scales:
         target = mention.value * s
         if kind in ("currency", "count"):
-            for a, b in amount_pairs():
-                if close(target, abs(a - b), s):
+            for i, a, j, b in amount_pairs():
+                if close(target, abs(a - b), s) and allowed(i, j):
                     return f"|{_fmt(a)} - {_fmt(b)}|"
                 if close(target, a + b, s):
                     return f"{_fmt(a)} + {_fmt(b)}"
         elif kind == "percent":
-            for a, b in amount_pairs():
-                if close(target, abs(a - b) / b * 100, s):
+            for i, a, j, b in amount_pairs():
+                if close(target, abs(a - b) / b * 100, s) and allowed(i, j):
                     return f"({_fmt(a)} - {_fmt(b)}) / {_fmt(b)}"
                 if a < b and close(target, a / b * 100, s):
                     return f"{_fmt(a)} / {_fmt(b)}"
-            for i, a in enumerate(percents):
-                for b in percents[i + 1:]:
-                    if close(target, abs(a - b), s):
-                        return f"|{a:g}% - {b:g}%|"
-            for a in basis_points:
+            for i, a, j, b in pairs(percents):
+                if close(target, abs(a - b), s) and allowed(i, j):
+                    return f"|{a:g}% - {b:g}%|"
+            for _, a in basis_points:
                 if close(target, a / 100, s):
                     return f"{a:g} bps / 100"
         elif kind == "pp":
-            for i, a in enumerate(percents):
-                for b in percents[i + 1:]:
-                    if close(target, abs(a - b), s):
-                        return f"|{a:g}% - {b:g}%|"
+            for i, a, j, b in pairs(percents):
+                if close(target, abs(a - b), s) and allowed(i, j):
+                    return f"|{a:g}% - {b:g}%|"
         elif kind == "bps":
-            for i, a in enumerate(basis_points):
-                for b in basis_points[i + 1:]:
-                    if close(target, abs(a - b), s):
-                        return f"|{a:g} bps - {b:g} bps|"
-            for i, a in enumerate(percents):
-                for b in percents[i + 1:]:
-                    if close(target, abs(a - b) * 100, s):
-                        return f"|{a:g}% - {b:g}%| x 100"
-            for a in percents:
+            for i, a, j, b in pairs(basis_points):
+                if close(target, abs(a - b), s) and allowed(i, j):
+                    return f"|{a:g} bps - {b:g} bps|"
+            for i, a, j, b in pairs(percents):
+                if close(target, abs(a - b) * 100, s) and allowed(i, j):
+                    return f"|{a:g}% - {b:g}%| x 100"
+            for _, a in percents:
                 if close(target, a * 100, s):
                     return f"{a:g}% x 100"
         elif kind == "multiple":
-            for a, b in amount_pairs():
+            for _, a, _, b in amount_pairs():
                 if close(target, a / b, s):
                     return f"{_fmt(a)} / {_fmt(b)}"
-            for i, a in enumerate(multiples):
-                for b in multiples[i + 1:]:
-                    if close(target, abs(a - b), s):
-                        return f"|{a:g}x - {b:g}x|"
+            for i, a, j, b in pairs(multiples):
+                if close(target, abs(a - b), s) and allowed(i, j):
+                    return f"|{a:g}x - {b:g}x|"
     return None
+
+
+# The direction a claim gives a change: "grew by $65.7M", "fell 1.8%",
+# "+$12.0M". Narrower than _UP_RE / _DOWN_RE: "improved" and "higher/lower"
+# say nothing about the sign of a difference (leverage "improves" by falling).
+_RISE_RE = re.compile(
+    r"\b(?:increas\w*|grew|grow\w*|rose|rise[sn]?|rising|up|gain\w*|expan\w*|climb\w*|jump\w*)\b",
+    re.IGNORECASE,
+)
+_FALL_RE = re.compile(
+    r"\b(?:decreas\w*|declin\w*|fell|fall\w*|drop\w*|down|reduc\w*|contract\w*|shr[iu]nk\w*)\b",
+    re.IGNORECASE,
+)
+
+
+def _stated_direction(text: str, mentions: list[NumericMention], mention: NumericMention) -> int:
+    """
+    +1 or -1 when a claim gives a figure a direction — a sign attached to it,
+    or rise/fall wording just before it (after the previous figure) — else 0.
+    Wording both ways ("rose … then fell by") gives 0.
+    """
+    sign = _written_sign(text, mention.start)
+    if sign:
+        return sign
+    floor = max((m.end for m in mentions if m.end <= mention.start), default=0)
+    lead_in = text[max(floor, mention.start - _CUE_WINDOW): mention.start]
+    up, down = bool(_RISE_RE.search(lead_in)), bool(_FALL_RE.search(lead_in))
+    return 1 if up and not down else -1 if down and not up else 0
+
+
+def _coarser_than_inputs(mention: NumericMention, mentions: list[NumericMention]) -> bool:
+    """
+    _coarse, for a figure _derive reproduced — and printed more coarsely than
+    the figures beside it allow.
+
+    "1.7 percentage points" from 13.3% and 15.0% is under the 2% line, yet it
+    is as precise as a difference of those two can be; "5x" for 452.8 / 92.8
+    and "$21M" for $110.0M − $89.4M are not. So a coarse result counts only
+    when its half-unit exceeds twice the inputs' — absolute for a difference
+    of like figures, relative for a ratio. Measured: without this, seven
+    correct differences on the live-answer replay and two on the benchmark
+    went to the judge (Decision 73, addendum).
+    """
+    if not _coarse(mention):
+        return False
+    dim = _DIMENSION.get(mention.kind)
+    others = [m for m in mentions if m is not mention and m.value and _DIMENSION.get(m.kind)]
+    alike = [m for m in others if _DIMENSION[m.kind] == dim]
+    if alike:
+        return mention.half_unit > 2 * max(m.half_unit for m in alike) * (1 + 1e-9)
+    if not others:
+        return True
+    return mention.half_unit / mention.value > 2 * max(m.half_unit / m.value for m in others)
+
+
+def _later_of(first: str, second: str) -> int | None:
+    """
+    0 when the first of two figures is the later one, 1 when the second is,
+    None when nothing says. Each is described by its period: a year, "*" (worded
+    as the comparison value — "from $387.1M", "up from") or "" (not stated).
+    """
+    if first not in ("", "*") and second not in ("", "*") and first != second:
+        return 0 if first > second else 1
+    if first == "*" and second != "*":
+        return 1
+    if second == "*" and first != "*":
+        return 0
+    return None
+
+
+def _direction_veto(
+    direction: int,
+    operands: list[tuple[float, str]],
+    periods: list[str],
+) -> Callable[[int, int], bool] | None:
+    """
+    A _derive veto: rejects a difference whose sign the claim contradicts.
+
+    "Change in total debt: +$12.0M ($110.0M - $122.0M)", with $110.0M bound to
+    FY2023 and $122.0M to FY2022, is a fall of $12.0M; |a - b| matched it
+    anyway. The later figure is known only when the claim states the periods,
+    words one figure as the comparison ("from $387.1M to $452.8M"), or the
+    documents' columns say which is which; otherwise nothing is rejected.
+
+    Args:
+        direction: _stated_direction of the figure being derived.
+        operands: _derive's operands.
+        periods: Per operand, its period ("2023", "*" or "").
+
+    Returns:
+        The veto, or None when the claim gives no direction.
+    """
+    if not direction:
+        return None
+
+    def veto(i: int, j: int) -> bool:
+        later = _later_of(periods[i], periods[j])
+        if later is None:
+            return False
+        newer, older = (operands[i][0], operands[j][0]) if later == 0 else (operands[j][0], operands[i][0])
+        change = newer - older
+        return bool(change) and (change > 0) != (direction > 0)
+
+    return veto
+
+
+# ─── Written arithmetic ───────────────────────────────────────────────────────
+#
+# Answers write their arithmetic out: "Implied EV = $696.0M + $20.6M =
+# $716.6M", "21.5% ($97.3M / $452.8M)", "7.45x [📊 COMPUTED: $716.6M /
+# $96.2M]", LaTeX "\frac{\$716.6\text{ million}}{\$92.8\text{ million}} =
+# 7.72x". _derive tries pairs of a claim's figures for one step, so the EV, a
+# ratio of a result computed in another claim, and a margin whose denominator
+# the claim does not name were all left unconfirmed — on the replay of live
+# answers (Decision 72) these were 11% of the remaining false alarms, and the
+# retry prompt then told the model to drop the correct numbers.
+#
+# The check below reads only equations the text writes — figures joined by an
+# operator, tied to a result by "=", "≈", "→", parentheses or a COMPUTED
+# marker — and never guesses which figures combine. Its inputs must be the
+# claim's own figures, each in the documents at the precision printed (or the
+# result of another written equation of the answer — chaining), and the
+# result must match at the precision it is printed, with the sign it is
+# written with. A result inherits the
+# weakest of its inputs: computed from figures tied to what the claim names it
+# is confirmed; from a figure that is merely present somewhere it is reproduced
+# but left to the judge; from a figure nothing reproduces it stays a warning.
+
+# LaTeX that answers wrap their arithmetic in. Read literally, "\$716.6\text{
+# million}" is an unscaled "$716.6" — the scale sits behind "\text{" — and the
+# \frac loses the division, so the markup is rewritten to what it renders as.
+_LATEX_COMMAND_RE = re.compile(r"\\(?:[A-Za-z]+|[$%])")
+_LATEX_WRAPPER_RE = re.compile(
+    r"\\(?:text|textbf|textit|textrm|mathbf|mathrm|mathit|boldsymbol|operatorname|mbox)"
+    r"\s*\{([^{}]*)\}"
+)
+_LATEX_FRAC_RE = re.compile(r"\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}")
+# Inline math: unescaped "$" … "$" on one line, holding a command. The two
+# alternatives of a character never overlap, so a failed match is linear.
+_LATEX_INLINE_RE = re.compile(
+    r"(?<![\\$])\$(?=(?:[^$\\\n]|\\.)*?\\[A-Za-z])((?:[^$\\\n]|\\.)*)\$"
+)
+_LATEX_SYMBOLS = (
+    ("\\rightarrow", " → "), ("\\Rightarrow", " → "), ("\\to", " → "),
+    ("\\times", " × "), ("\\cdot", " × "), ("\\div", " ÷ "), ("\\approx", " ≈ "),
+    ("\\left", ""), ("\\right", ""), ("\\qquad", " "), ("\\quad", " "),
+    ("\\,", " "), ("\\;", " "), ("\\!", ""), ("\\%", "%"),
+)
+
+
+def plain_math(text: str) -> str:
+    """
+    Rewrites LaTeX math in an answer as the plain text it renders as.
+
+    "$$\\frac{\\$716.6\\text{ million}}{\\$92.8\\text{ million}} =
+    \\mathbf{7.72x}$$" becomes "$716.6 million / $92.8 million = 7.72x".
+    Text without a LaTeX command is returned unchanged.
+
+    Args:
+        text: An answer segment.
+
+    Returns:
+        The segment with math markup replaced.
+    """
+    if not text or not _LATEX_COMMAND_RE.search(text):
+        return text
+    out = text.replace("$$", " ")
+    # Inline math, "$\le 3.50\text{x}$": a pair of unescaped dollars around a
+    # command. One that opens on a digit is kept: "$58.00 \times \text{Shares}$"
+    # is a price, and "$0.22x" still reads as a multiple.
+    out = _LATEX_INLINE_RE.sub(
+        lambda m: (" $" if m.group(1)[:1].isdigit() else " ") + m.group(1) + " ", out
+    )
+    for _ in range(8):
+        unwrapped = _LATEX_FRAC_RE.sub(r"\1 / \2", _LATEX_WRAPPER_RE.sub(r"\1", out))
+        if unwrapped == out:
+            break
+        out = unwrapped
+    for command, plain in _LATEX_SYMBOLS:
+        out = out.replace(command, plain)
+    out = out.replace("\\$", "$")
+    out = re.sub(r"\\[A-Za-z]+", " ", out)
+    return out.replace("{", "").replace("}", "")
+
+
+@dataclass(frozen=True)
+class _Reading:
+    """
+    How a claim's figure enters arithmetic.
+
+    Attributes:
+        value: Its magnitude — the context's, when the context states the unit
+            the claim left out ("$452.8" against "$452.8 million").
+        absolute: True when that magnitude is known; False for an unscaled
+            amount, which may be read at any one scale shared by its equation.
+        exact: True when a document prints this figure to the precision the
+            claim does. Grounding tolerates "$452.6M" for a document's
+            "$452.8"; an equation input is held to its last printed digit.
+    """
+
+    value: float
+    absolute: bool
+    exact: bool
+
+
+def _printed_alike(mention: NumericMention, figure: NumericMention) -> bool:
+    """True when a context figure equals a claimed one to the claim's last digit."""
+    for s in _SCALES:
+        for claim_scale, context_scale in ((s, 1.0), (1.0, s)):
+            target = figure.value * context_scale
+            if abs(mention.value * claim_scale - target) <= (
+                mention.half_unit * claim_scale + 1e-9 * max(1.0, abs(target))
+            ):
+                return True
+    return False
+
+
+# How firmly an equation term is established (higher is firmer).
+_CONFIRMED, _AVAILABLE, _UNVERIFIED, _MISSING = 2, 1, 0, -1
+
+_DIMENSION = {
+    "currency": "amount", "count": "amount",
+    "percent": "percent", "pp": "percent",
+    "bps": "bps", "multiple": "multiple",
+}
+_OPERATORS = {"+": "+", "-": "-", "−": "-", "–": "-", "×": "×", "÷": "/", "/": "/"}
+
+# What may stand between two terms, around the operator: the closing and
+# opening parentheses of labelled terms — "($696.0M) + Net Debt ($20.6M)".
+_TERM_LEAD = r"(?:(?:[A-Za-z][A-Za-z&.'’ -]{0,40}?)?\s*\(\s*)?"
+_OP_GAP_RE = re.compile(r"\s*\)?\s*(?P<op>[+\-−–×÷/])\s*" + _TERM_LEAD)
+# Between an expression and its result: "= $716.6M", ") ≈ 7.45x", "→ 7.45x".
+# A sign right before the next figure is part of the gap's text; it is read
+# separately (_written_sign), never dropped.
+_EQ_GAP_RE = re.compile(
+    r"\s*[)\]]?\s*(?:=|≈|~=|→|⇒|=>)\s*(?:(?:~|≈|approx(?:imately|\.)?)\s*)?"
+    + _TERM_LEAD + r"[+\-−–]?\s*",
+    re.IGNORECASE,
+)
+# Between a result and its parenthesised computation: "21.5% (", "7.45x [📊 COMPUTED: ".
+_OPEN_GAP_RE = re.compile(
+    r"\s*[(\[]\s*(?:📊\s*)?(?:(?:computed|calculated|calc\.?)\s*:\s*)?(?:=\s*)?[+\-−–]?\s*",
+    re.IGNORECASE,
+)
+# A computation marker with no result before it: "[📊 COMPUTED: $716.6M / $92.8M]".
+_COMPUTED_LEAD_RE = re.compile(r"\b(?:computed|calculated)\s*:\s*$", re.IGNORECASE)
+_CLOSE_RE = re.compile(r"\s*[)\]]")
+_SIGNS = {"+": 1, "-": -1, "−": -1, "–": -1}
+# Wording that gives an unsigned result its direction: "an increase of $X (…)".
+_UP_RE = re.compile(
+    r"\b(?:increas\w*|grew|grow\w*|rose|rise[sn]?|gain\w*|up|higher|expan\w*|improv\w*)\b",
+    re.IGNORECASE,
+)
+_DOWN_RE = re.compile(
+    r"\b(?:decreas\w*|declin\w*|fell|fall\w*|drop\w*|down|lower|reduc\w*|contract\w*|shr[iu]nk\w*)\b",
+    re.IGNORECASE,
+)
+# A result printed this coarsely ("$1B", "8x", "22%" for 21.5%) matches too
+# wide a range of computations to confirm one: it needs at least two
+# significant figures and at most a 2% relative half-unit, or the claim goes to
+# the judge. "0.22x" (2.3%) is on the judge's side of the line too.
+_MAX_RESULT_HALF_UNIT = 0.02
+_MIN_RESULT_SIGNIFICANT = 2
+_DIGITS_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+# Bounds: an answer is model output.
+_MAX_EQUATIONS = 64
+_MAX_TERMS = 12
+_ARITHMETIC_ROUNDS = 4
+
+
+@dataclass
+class _Equation:
+    """
+    One written computation in a claim.
+
+    Attributes:
+        segment: Index of the claim.
+        inputs: Indices (into the claim's figures) of the terms, in order.
+        ops: The operator between consecutive inputs: "+", "-", "×" or "/".
+        negative_first: True when the first term is written with a minus
+            attached ("-$3.2M").
+        results: Indices of the figures it is said to equal; empty for a bare
+            "[COMPUTED: A / B]" marker, whose inputs are still resolved.
+        result_signs: Per result, +1 or -1 when it is written with a sign or
+            introduced as an increase or a decrease, 0 when it is not.
+    """
+
+    segment: int
+    inputs: list[int]
+    ops: list[str]
+    negative_first: bool
+    results: list[int]
+    result_signs: list[int] = field(default_factory=list)
+
+
+@dataclass
+class _Computed:
+    """A result an equation of the answer reproduced — an input for the next."""
+
+    value: float
+    kind: str
+    currency: str
+    level: int
+    inputs: list[tuple[float, str]]
+    formula: str
+
+
+def _written_equations(text: str, mentions: list[NumericMention], segment: int) -> list[_Equation]:
+    """
+    The computations a claim writes out, from the text between its figures.
+
+    Recognised: "A op B [op C …] = R" and "R = A op B", where op is one of
+    + − × ÷ / and "=" may be "≈" or "→"; "R (A op B)" and "R [COMPUTED: A op
+    B]"; "R (A op B = R2)"; a restatement of the result in parentheses right
+    after it, "= 7.72x (7.72198x)"; and a bare "[COMPUTED: A op B]". The
+    figures must be adjacent — only an operator, an "=", parentheses and the
+    label of a term may stand between them — so two figures that merely share
+    a sentence are never combined.
+
+    Args:
+        text: The claim, LaTeX already rewritten (plain_math).
+        mentions: Its figures (extract_numbers, claims only), in order.
+        segment: The claim's index.
+
+    Returns:
+        The claim's equations.
+    """
+    n = len(mentions)
+    if n < 2:
+        return []
+    links: list[tuple[str, str]] = []
+    for i in range(n - 1):
+        gap = text[mentions[i].end: mentions[i + 1].start]
+        op = _OP_GAP_RE.fullmatch(gap) if len(gap) <= 60 else None
+        if op:
+            links.append(("op", _OPERATORS[op.group("op")]))
+        elif len(gap) <= 60 and _EQ_GAP_RE.fullmatch(gap):
+            links.append(("eq", ""))
+        elif len(gap) <= 60 and _OPEN_GAP_RE.fullmatch(gap):
+            links.append(("open", ""))
+        else:
+            links.append(("other", ""))
+
+    # Runs of figures joined by operators; a run of one is a lone figure.
+    runs: list[tuple[int, int]] = []
+    i = 0
+    while i < n:
+        j = i
+        while j < n - 1 and links[j][0] == "op":
+            j += 1
+        runs.append((i, j))
+        i = j + 1
+
+    def closed(run: tuple[int, int]) -> bool:
+        return bool(_CLOSE_RE.match(text, mentions[run[1]].end))
+
+    equations = []
+    for k, (first, last) in enumerate(runs):
+        if first == last or last - first + 1 > _MAX_TERMS:
+            continue
+        results: list[int] = []
+        following = runs[k + 1] if k + 1 < len(runs) else None
+        if following and following[0] == following[1] and links[last][0] == "eq":
+            results.append(following[0])
+            restated = runs[k + 2] if k + 2 < len(runs) else None
+            if (
+                restated and restated[0] == restated[1]
+                and links[following[0]][0] == "open" and closed(restated)
+            ):
+                results.append(restated[0])
+        preceding = runs[k - 1] if k else None
+        if preceding and preceding[0] == preceding[1]:
+            link = links[preceding[0]][0]
+            if link == "eq" or (link == "open" and (closed((first, last)) or results)):
+                results.append(preceding[0])
+        lead = text[max(0, mentions[first].start - 30): mentions[first].start]
+        if not results and not _COMPUTED_LEAD_RE.search(lead):
+            continue
+        first_sign = _written_sign(text, mentions[first].start)
+        if first_sign is None:
+            continue  # "Total Debt - $110.0M + …": a separator or a minus?
+        signs = []
+        for r in results:
+            sign = _written_sign(text, mentions[r].start)
+            if sign == 0:
+                floor = mentions[r - 1].end if r else 0
+                before = text[max(floor, mentions[r].start - 40): mentions[r].start]
+                up, down = bool(_UP_RE.search(before)), bool(_DOWN_RE.search(before))
+                sign = 1 if up and not down else -1 if down and not up else 0
+            signs.append(sign)
+        kept = [(r, s) for r, s in zip(results, signs) if s is not None]
+        if results and not kept:
+            continue
+        equations.append(_Equation(
+            segment=segment,
+            inputs=list(range(first, last + 1)),
+            ops=[links[x][1] for x in range(first, last)],
+            negative_first=first_sign < 0,
+            results=[r for r, _ in kept],
+            result_signs=[s for _, s in kept],
+        ))
+    return equations
+
+
+def _written_sign(text: str, start: int) -> int | None:
+    """
+    The sign written on the figure starting at `start`.
+
+    +1 or -1 for a sign attached to the figure ("-$3.2M", "(+17.0%)"; hyphen,
+    minus and en dash alike); 0 for none; None for a dash set off by a space
+    ("Total Debt - $110.0M"), which may be a minus or a separator.
+    """
+    if start <= 0:
+        return 0
+    attached = text[start - 1]
+    if attached in _SIGNS:
+        if start >= 2 and text[start - 2].isalnum():
+            return 0  # "pre-2023", "FY23-$5M": a hyphenated word, not a sign
+        return _SIGNS[attached]
+    stripped = text[:start].rstrip()
+    if stripped and stripped[-1] in "-−–" and len(stripped) < start:
+        return None
+    return 0
+
+
+def _compute(
+    ops: list[str],
+    negative_first: bool,
+    terms: list[tuple[float, NumericMention]],
+    result: NumericMention,
+) -> float | None:
+    """
+    The value an expression gives, signed, in the result's unit, or None when
+    the kinds do not combine into the result's.
+
+    Sums and differences take terms of one kind only — "$" with "$", "%" with
+    "%" (never a bare count beside a currency, nor "%" beside "pp" or "bps")
+    — and give that kind; percentages may also give points or (x100) basis
+    points. An amount over an amount of the same kind is a multiple or (x100)
+    a percentage; a price over a count, or a price times a count, is a price;
+    an amount times a percentage or a multiple is an amount of its kind. Two
+    currencies never combine.
+    """
+    kinds = [m.kind for _, m in terms]
+    if None in (_DIMENSION.get(k) for k in kinds) or _DIMENSION.get(result.kind) is None:
+        return None
+    currencies = {m.currency for _, m in terms if m.currency}
+    if result.currency:
+        currencies.add(result.currency)
+    if len(currencies) > 1:
+        return None
+    if all(op in "+-" for op in ops):
+        if len(set(kinds)) != 1:
+            return None
+        total = 0.0
+        for k, (value, _) in enumerate(terms):
+            negative = negative_first if k == 0 else ops[k - 1] == "-"
+            total += -value if negative else value
+        if kinds[0] == "percent":
+            if result.kind in ("percent", "pp"):
+                return total
+            return total * 100.0 if result.kind == "bps" else None
+        return total if result.kind == kinds[0] else None
+    if len(terms) != 2 or negative_first:
+        return None
+    (a, ma), (b, mb) = terms
+    if ops[0] == "/":
+        if not b:
+            return None
+        if ma.kind == mb.kind and _DIMENSION[ma.kind] == "amount":
+            if result.kind == "multiple":
+                return a / b
+            if result.kind == "percent":
+                return a / b * 100.0
+        if ma.kind == "currency" and mb.kind == "count" and result.kind == "currency":
+            return a / b
+        return None
+    # ×, either order.
+    by_dimension = {_DIMENSION[ma.kind]: (a, ma), _DIMENSION[mb.kind]: (b, mb)}
+    if len(by_dimension) == 2 and "amount" in by_dimension:
+        amount, amount_mention = by_dimension["amount"]
+        if result.kind != amount_mention.kind:
+            return None
+        if "percent" in by_dimension and by_dimension["percent"][1].kind == "percent":
+            return amount * by_dimension["percent"][0] / 100.0
+        if "multiple" in by_dimension:
+            return amount * by_dimension["multiple"][0]
+        return None
+    if {ma.kind, mb.kind} == {"currency", "count"} and result.kind == "currency":
+        return a * b
+    return None
+
+
+def _solve(
+    equation: _Equation,
+    terms: list[tuple[_Reading, NumericMention]],
+    result: tuple[_Reading, NumericMention],
+    sign: int,
+) -> tuple[float, list[float], bool] | None:
+    """
+    Whether an equation holds at the precision its result is printed.
+
+    The inputs are taken exactly as printed: "7.72x" from 716.6 / 92.8 =
+    7.7220 holds; "7.73x" does not, though rounding the inputs could stretch
+    to it. Unscaled amounts ("$452.8") are read at one scale shared by the
+    whole equation. A result written with a sign, or as an increase or a
+    decrease (`sign`), must have the computed sign: "+$12.0M ($110.0M -
+    $122.0M)" does not hold.
+
+    Returns:
+        (computed magnitude, the inputs' values used, True when the result is
+        unsigned but the computation is negative) when it holds, else None.
+    """
+    result_reading, result_mention = result
+
+    def loose(reading: _Reading, mention: NumericMention) -> bool:
+        return not reading.absolute and _DIMENSION.get(mention.kind) == "amount"
+
+    scaled = any(loose(r, m) for r, m in terms) or loose(result_reading, result_mention)
+    for s in _SCALES if scaled else (1.0,):
+        values = [r.value * s if loose(r, m) else r.value for r, m in terms]
+        target = result_reading.value * s if loose(result_reading, result_mention) else result_reading.value
+        got = _compute(
+            equation.ops, equation.negative_first,
+            [(v, m) for v, (_, m) in zip(values, terms)], result_mention,
+        )
+        if got is None:
+            return None
+        ratio = target / result_mention.value if result_mention.value else 1.0
+        tolerance = result_mention.half_unit * ratio + 1e-9 * max(1.0, abs(target))
+        if sign:
+            if abs(got - sign * target) <= tolerance:
+                return abs(got), values, False
+        elif abs(abs(got) - target) <= tolerance:
+            return abs(got), values, got < -tolerance
+    return None
+
+
+def _coarse(mention: NumericMention) -> bool:
+    """True for a result printed too coarsely to confirm a computation ("$1B", "8x", "22%")."""
+    printed = _DIGITS_RE.search(mention.raw)
+    if not printed or not mention.value:
+        return True
+    significant = len(printed.group(0).replace(",", "").replace(".", "").lstrip("0"))
+    return (
+        significant < _MIN_RESULT_SIGNIFICANT
+        or mention.half_unit / mention.value > _MAX_RESULT_HALF_UNIT
+    )
+
+
+def _same_value(mention: NumericMention, reading: _Reading, value: float, kind: str, currency: str) -> bool:
+    """True when a claim's figure is `value` (of `kind`) to its last printed digit."""
+    dim = _DIMENSION.get(mention.kind)
+    if dim is None or dim != _DIMENSION.get(kind):
+        return False
+    if mention.currency and currency and mention.currency != currency:
+        return False
+    loose = not reading.absolute and dim == "amount"
+    for s in _SCALES if loose else (1.0,):
+        v = reading.value * s
+        ratio = v / mention.value if mention.value else 1.0
+        if abs(v - value) <= mention.half_unit * ratio + 1e-9 * max(1.0, abs(value)):
+            return True
+    return False
+
+
+def _term_text(value: float, kind: str) -> str:
+    if kind in ("percent", "pp"):
+        return f"{value:g}%"
+    if kind == "bps":
+        return f"{value:g} bps"
+    if kind == "multiple":
+        return f"{value:g}x"
+    return _fmt(value)
+
+
+def _check_written_arithmetic(segments: list[tuple], readings: list[list[_Reading]]) -> None:
+    """
+    Settles the figures of every equation the answer writes out, in place.
+
+    For each equation whose inputs are all available (see _written_equations
+    for what counts as one):
+
+    - an input not in the documents that equals a result computed by another
+      equation of the answer is that result (chaining: the EV, then EV/EBITDA);
+    - a result that holds is "derived" — confirmed when every input is
+      confirmed, otherwise bound "unbound" so the claim goes to the judge —
+      or "derived_unverified" when an input is itself unreproducible;
+    - a result found in the documents somewhere the claim does not name is
+      bound when every input is confirmed;
+    - when the result and all inputs but one are confirmed and that one is in
+      the documents to its printed digit, somewhere the claim does not name,
+      it is bound: it is the one value the equation allows ("21.5% ($97.3M /
+      $452.8M)" — the claim does not say "revenue").
+
+    A result printed too coarsely ("$1B", "8x", "22%") or unsigned while the
+    computation is negative is at most reproduced, never confirmed, and binds
+    nothing. A figure the documents do not hold is never solved for: inputs
+    are only ever found, or computed by an earlier equation. Afterwards, a
+    figure restating a computed result elsewhere ("7.72x based on Reported
+    EBITDA ($92.8 million)") is reproduced — never confirmed — when its claim
+    also states one of the result's inputs; a figure that is itself the result
+    of a written equation is settled by that equation alone.
+
+    Args:
+        segments: ground_texts' per-claim (text, mentions, checks, pending, operands).
+        readings: Per claim, per figure, its _Reading.
+    """
+    equations: list[_Equation] = []
+    for si, (text, mentions, *_rest) in enumerate(segments):
+        equations.extend(_written_equations(text, mentions, si))
+        if len(equations) >= _MAX_EQUATIONS:
+            break
+    equations = equations[:_MAX_EQUATIONS]
+    if not equations:
+        return
+
+    def mention(si: int, mi: int) -> NumericMention:
+        return segments[si][1][mi]
+
+    def check(si: int, mi: int) -> NumericCheck:
+        return segments[si][2][mi]
+
+    # Figures this pass settled, and how firmly.
+    settled: dict[tuple[int, int], int] = {}
+    computed: dict[tuple[int, int], _Computed] = {}
+    results_of = {(eq.segment, r) for eq in equations for r in eq.results}
+    all_bound = [
+        all(c.binding == "bound" for c in checks if c.status == "grounded" and c.kind != "quantity")
+        for _, _, checks, *_rest in segments
+    ]
+
+    def level(si: int, mi: int) -> int:
+        if (si, mi) in settled:
+            return settled[(si, mi)]
+        c, reading = check(si, mi), readings[si][mi]
+        if c.status == "grounded":
+            if not reading.exact or c.binding == "conflict":
+                return _MISSING
+            return _CONFIRMED if c.binding == "bound" else _AVAILABLE
+        if c.status == "derived":
+            if c.binding == "conflict":
+                return _MISSING
+            return _CONFIRMED if c.binding in ("", "bound") and all_bound[si] else _AVAILABLE
+        if c.status == "derived_unverified":
+            return _UNVERIFIED
+        return _MISSING
+
+    def settle(si: int, mi: int, firmness: int, formula: str) -> bool:
+        c = check(si, mi)
+        if (si, mi) in settled and firmness <= settled[(si, mi)]:
+            return False
+        if c.status == "grounded":
+            # In the documents: only its tie to the claim can change.
+            if c.binding == "unbound" and firmness == _CONFIRMED and readings[si][mi].exact:
+                c.binding, c.binding_note, c.formula = "bound", "", formula
+                settled[(si, mi)] = _CONFIRMED
+                return True
+            return False
+        if c.status == "derived" and (si, mi) not in settled:
+            return False  # reproduced from its own claim already (_derive)
+        if firmness >= _AVAILABLE:
+            c.status, c.formula = "derived", formula
+            c.binding = "" if firmness == _CONFIRMED else "unbound"
+            c.binding_note = "" if firmness == _CONFIRMED else (
+                "computed from figures this statement does not tie to a line of the documents"
+            )
+            settled[(si, mi)] = firmness
+            return True
+        if firmness == _UNVERIFIED and (si, mi) not in settled:
+            c.status, c.formula = "derived_unverified", formula
+            settled[(si, mi)] = _UNVERIFIED
+            return True
+        return False
+
+    def computed_as(si: int, mi: int) -> _Computed | None:
+        best = None
+        for key, result in computed.items():
+            if key != (si, mi) and _same_value(
+                mention(si, mi), readings[si][mi], result.value, result.kind, result.currency
+            ) and (best is None or result.level > best.level):
+                best = result
+        return best
+
+    for _ in range(_ARITHMETIC_ROUNDS):
+        changed = False
+        for eq in equations:
+            si = eq.segment
+            for mi in eq.inputs:
+                if check(si, mi).status in ("unsupported", "derived_unverified"):
+                    earlier = computed_as(si, mi)
+                    if earlier and settle(si, mi, earlier.level, f"{earlier.formula}, computed above"):
+                        changed = True
+            if not eq.results:
+                continue
+            firmness = min(level(si, mi) for mi in eq.inputs)
+            if firmness == _MISSING:
+                continue
+            terms = [(readings[si][mi], mention(si, mi)) for mi in eq.inputs]
+            currency = next((m.currency for _, m in terms if m.currency), "")
+            for ri, sign in zip(eq.results, eq.result_signs):
+                solved = _solve(eq, terms, (readings[si][ri], mention(si, ri)), sign)
+                if not solved:
+                    continue
+                got, values, unsigned_negative = solved
+                formula = " ".join(
+                    (("-" if eq.negative_first else "") if k == 0 else f"{eq.ops[k - 1]} ")
+                    + _term_text(v, m.kind)
+                    for k, (v, (_, m)) in enumerate(zip(values, terms))
+                )
+                # Reproduced, but not firmly enough to pass on its own: a
+                # result printed too coarsely to pin the computation down, or
+                # an unsigned result of a negative computation ("$12.0M
+                # ($110.0M - $122.0M)" — a fall or a rise?). The judge decides.
+                weak_result = unsigned_negative or _coarse(mention(si, ri))
+                firm = min(firmness, _AVAILABLE) if weak_result else firmness
+                changed |= settle(si, ri, firm, formula)
+                result = check(si, ri)
+                if result.status in ("derived", "derived_unverified"):
+                    known = computed.get((si, ri))
+                    if known is None or firm > known.level:
+                        computed[(si, ri)] = _Computed(
+                            got, result.kind, mention(si, ri).currency or currency, firm,
+                            [(v, m.kind) for v, (_, m) in zip(values, terms)], formula,
+                        )
+                        changed = True
+                elif (
+                    result.status == "grounded" and level(si, ri) == _CONFIRMED
+                    and firmness == _AVAILABLE and not weak_result
+                ):
+                    weak = [mi for mi in eq.inputs if level(si, mi) != _CONFIRMED]
+                    if len(weak) == 1 and check(si, weak[0]).status == "grounded":
+                        changed |= settle(si, weak[0], _CONFIRMED, f"{result.raw} = {formula}")
+
+        # A computed result restated elsewhere, beside one of its inputs, is no
+        # longer "not found" — but a matching value and a shared input do not
+        # show it is the same metric ("Interest coverage is 0.22x on EBITDA of
+        # $92.8M" beside "Net Debt / EBITDA: $20.6M / $92.8M = 0.22x"), so it is
+        # never confirmed: at most reproduced and left to the judge.
+        for si, (_, mentions, checks, *_rest) in enumerate(segments):
+            for mi, c in enumerate(checks):
+                if (
+                    c.status not in ("unsupported", "derived_unverified")
+                    or (si, mi) in settled or (si, mi) in results_of
+                ):
+                    continue
+                for key, result in computed.items():
+                    if key == (si, mi) or not _same_value(
+                        mentions[mi], readings[si][mi], result.value, result.kind, result.currency
+                    ):
+                        continue
+                    beside = any(
+                        j != mi and level(si, j) >= _AVAILABLE
+                        and _same_value(mentions[j], readings[si][j], v, k, result.currency)
+                        for j in range(len(mentions)) for v, k in result.inputs
+                    )
+                    if beside and settle(
+                        si, mi, min(result.level, _AVAILABLE), f"restates {result.formula}"
+                    ):
+                        changed = True
+                        break
+        if not changed:
+            break
 
 
 def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericCheck]]:
@@ -1386,13 +2166,20 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
     results: list[list[NumericCheck]] = []
     segments: list[tuple] = []
     answer_operands: list[tuple[float, str]] = []
+    # Per segment, per figure: its value in the context's normalisation, whether
+    # that value is an absolute magnitude, and — for a figure found in the
+    # context — whether the document prints it to the claim's own precision.
+    readings: list[list[_Reading]] = []
 
     for ti, text in enumerate(texts):
+        text = plain_math(text)
         checks: list[NumericCheck] = []
         pending: list[tuple[NumericMention, NumericCheck]] = []
         operands: list[tuple[float, str]] = []
+        periods: list[str] = []  # per operand (see _direction_veto)
         # (figure, its check, its value in the context's normalisation)
         grounded: list[tuple[NumericMention, NumericCheck, float]] = []
+        reading: list[_Reading] = []
 
         mentions = extract_numbers(text, claims_only=True)
         found = [index.candidates(mention) for mention in mentions]
@@ -1425,6 +2212,17 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
                 if not mention.explicit_scale and fig.mention.explicit_scale:
                     value = fig.mention.value
                 operands.append((value, mention.kind))
+                # The period it is for: as the claim states it, else the
+                # column the documents put it in, when it is the claim's figure.
+                period = stated.get((mention.start, mention.end), "")
+                if not period and binding.status == "bound":
+                    period = fig.period
+                periods.append(period)
+                reading.append(_Reading(
+                    value,
+                    mention.explicit_scale or fig.mention.explicit_scale,
+                    _printed_alike(mention, fig.mention),
+                ))
                 check = NumericCheck(
                     raw=mention.raw,
                     value=mention.value,
@@ -1437,6 +2235,7 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
                     binding_note=binding.note,
                     evidence_chunk=fig.chunk_index,
                     evidence_figure=fig.mention.raw,
+                    evidence_files=tuple(dict.fromkeys(f.source_file for f in group if f.source_file)),
                 )
                 if fig.mention.kind == "bps" and mention.kind == "percent":
                     # Found in the other notation: a conversion, shown as one.
@@ -1454,15 +2253,43 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
                 )
                 checks.append(check)
                 pending.append((mention, check))
+                reading.append(_Reading(mention.value, mention.explicit_scale, False))
 
         # A figure the context holds somewhere the claim does not name is still
         # confirmed when the claim's own confirmed figures reproduce it: "up
         # 17.0% from $387.1 million" needs no "Revenue Growth: 17.0%" line.
-        confirmed = [(value, c.kind) for _, c, value in grounded if c.binding == "bound"]
+        # A difference must also have the direction the claim gives it, and a
+        # result printed too coarsely to pin the computation ("$1B", "8x") is
+        # reproduced but not confirmed (_coarse) — Decision 73's addendum.
+        bound = [k for k, (_, c, _) in enumerate(grounded) if c.binding == "bound"]
+        confirmed = [operands[k] for k in bound]
+        confirmed_periods = [periods[k] for k in bound]
+        # What the derivation did without these rules — so that they only
+        # ever take a confirmation away (see below).
+        legacy_lifted = {
+            id(check) for mention, check, _ in grounded
+            if check.binding != "bound" and _derive(mention, confirmed)
+        }
+        legacy_operands = list(operands)
+        legacy_derived: dict[int, str] = {}
+        for _ in range(2):
+            progressed = False
+            for mention, check in pending:
+                if id(check) not in legacy_derived:
+                    formula = _derive(mention, legacy_operands)
+                    if formula:
+                        legacy_derived[id(check)] = formula
+                        legacy_operands.append((mention.value, mention.kind))
+                        progressed = True
+            if not progressed:
+                break
         for mention, check, _ in grounded:
-            if check.binding == "bound":
+            if check.binding == "bound" or _coarser_than_inputs(mention, mentions):
                 continue
-            formula = _derive(mention, confirmed)
+            veto = _direction_veto(
+                _stated_direction(text, mentions, mention), confirmed, confirmed_periods
+            )
+            formula = _derive(mention, confirmed, veto)
             if formula:
                 check.binding = "bound"
                 check.binding_note = ""
@@ -1475,18 +2302,35 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
             for mention, check in pending:
                 if check.status == "derived":
                     continue
-                formula = _derive(mention, operands)
+                veto = _direction_veto(_stated_direction(text, mentions, mention), operands, periods)
+                formula = _derive(mention, operands, veto)
                 if formula:
                     check.status = "derived"
                     check.formula = formula
+                    if _coarser_than_inputs(mention, mentions):
+                        check.binding = "unbound"
+                        check.binding_note = "printed too coarsely to confirm the computation"
                     operands.append((mention.value, mention.kind))
+                    periods.append("")
                     progressed = True
             if not progressed:
                 break
+        # A figure the unchecked derivation reproduced but these rules do not:
+        # the magnitude is right, the direction (or a figure it rests on) is
+        # not confirmed — a warning for the judge, not "figure not found", since
+        # the periods are read from wording and columns and may be read wrong.
+        for _, check in pending:
+            if check.status == "unsupported" and id(check) in legacy_derived:
+                check.status = "derived_unverified"
+                check.formula = f"{legacy_derived[id(check)]}, direction not confirmed"
 
-        segments.append((text, mentions, checks, pending, list(operands)))
+        # The plausibility pass below sees what it saw before these rules, so
+        # tightening a derivation never turns a warning into a failure.
+        segments.append((text, mentions, checks, pending, legacy_operands))
+        readings.append(reading)
         answer_operands.extend(
-            (value, check.kind) for _, check, value in grounded if check.is_confirmed
+            (value, check.kind) for _, check, value in grounded
+            if check.is_confirmed or id(check) in legacy_lifted
         )
 
     # Second pass: what to make of a figure that is neither in the context nor
@@ -1494,7 +2338,7 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
     # so it runs after all of them are grounded.
     answer_operands = list(dict.fromkeys(answer_operands))[:_MAX_ANSWER_OPERANDS]
     attempts = 0
-    for text, mentions, checks, pending, operands in segments:
+    for text, mentions, _checks, pending, operands in segments:
         for mention, check in pending:
             if check.status == "derived":
                 continue
@@ -1521,6 +2365,12 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
             if plausible:
                 check.status = "derived_unverified"
 
+    # Arithmetic the answer writes out ("$716.6M = $696.0M + $20.6M",
+    # "21.5% ($97.3M / $452.8M)"), checked across the whole answer so that a
+    # result computed in one claim can be an input of the next.
+    _check_written_arithmetic(segments, readings)
+
+    for _text, mentions, checks, _pending, _operands in segments:
         # A figure restating the one just before it in other units —
         # "$0.02 million ($20,000)", "$97.3M ($97,300,000)" — is the same claim
         # twice, so it shares that figure's verdict instead of being judged on
@@ -1541,6 +2391,7 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
                 cur.binding_note = prev.binding_note
                 cur.evidence_chunk = prev.evidence_chunk
                 cur.evidence_figure = prev.evidence_figure
+                cur.evidence_files = prev.evidence_files
 
         results.append(checks)
 
@@ -1625,6 +2476,7 @@ __all__ = [
     "binding_tokens",
     "figure_periods",
     "extract_numbers",
+    "plain_math",
     "strip_citations",
     "ground_texts",
     "ground_answer_numbers",

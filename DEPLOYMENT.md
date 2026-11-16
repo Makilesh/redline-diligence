@@ -35,7 +35,7 @@ are an order of magnitude short. What fits is a VM with at least 8GB of RAM:
 Oracle Cloud's Always Free ARM instance (2 OCPU / 12GB) is the free option, and
 co-locating Qdrant and Postgres on it removes two external accounts.
 
-**The reranker had to change.** Measured on 2 vCPU, which is what a free VM
+**The reranker had to change.** Measured at two threads on x86 (an emulation of the 2-vCPU host; not measured on ARM), which is what a free VM
 provides:
 
 | Reranker | `max_length` | 40 passages | ×4 passes (a decomposed query) |
@@ -56,6 +56,24 @@ Two consequences worth stating plainly:
 - **The retrieval numbers in `RESULTS.md` were measured with the default
   reranker.** They do not describe the deployed profile until the eval is re-run
   against it (last step below).
+- **Document focus runs 10 deep, not 30.** Legal questions add passages from the
+  leading document to the rerank pool (Decision 67). With MiniLM, more than ten
+  of them lowered recall on LegalBench-RAG's dev documents (78.6% at 10, 75.3% at
+  30), so the MiniLM calibration profile caps the depth at 10, at about +0.3 s per
+  legal question on two cores. `DOCUMENT_FOCUS_K` overrides it (0–30) if you run
+  a different reranker or host (Decision 71).
+- **MiniLM is still the best fit for two cores, not the best small reranker.**
+  Six Apache-2.0 alternatives were measured on the same emulated host
+  (Decision 77). Only `ettin-reranker-68m-v1` beat it on LegalBench-RAG's dev
+  documents (84.1% against 78.6%, matching bge on a GPU), at 306 ms a pair
+  against 74 ms — about 8 s more per legal question. `ettin-reranker-17m-v1`
+  is faster than MiniLM (40 ms a pair) but no better. The Ettin models are
+  saved in sentence-transformers 5's format and load *silently wrong* (random
+  classification head) under this repository's pinned 2.x; do not point
+  `RERANKER_MODEL` at one without the conversion described in Decision 77.
+- **Uploads index slowly.** bge-m3 on two cores embeds about one chunk every
+  1.5–3 s: the 111-chunk sample deal takes about 3 minutes, and a document of a
+  few hundred chunks several minutes. Seed the demo corpus before going live.
 
 **The embedding model does not change.** It costs 0.12s per query — it was never
 the problem — and swapping it would invalidate every vector already indexed.

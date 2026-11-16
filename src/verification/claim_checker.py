@@ -49,8 +49,9 @@ documents; the NLI model and the figure binding raise the question.
 Answer-level outcome:
 
     failed   any contradicted claim, or any figure not found in the context
-    warning  any unsupported or unverified claim, or an unverifiable
-             calculation
+    warning  any unsupported or unverified claim, an unverifiable
+             calculation, or a figure its claim cites to documents that do
+             not state it (a citation mismatch, see _check_citations)
     passed   otherwise
 
 Confidence (shown to users) is COMPUTED, not self-reported by a model:
@@ -76,7 +77,7 @@ from typing import Awaitable, Callable
 
 from src.utils.logger import setup_logger
 from src.verification import nli
-from src.verification.claims import Claim, resolve_cited_chunks, split_claims
+from src.verification.claims import Claim, cited_documents, resolve_cited_chunks, split_claims
 from src.verification.evidence import chunk_evidence_text
 from src.verification.numeric_grounding import (
     ContextIndex,
@@ -254,6 +255,10 @@ class VerificationReport:
     llm_calls: int = 0
     notes: list[str] = field(default_factory=list)
     elapsed_ms: float = 0.0
+    # Figures whose claim cites documents that do not state them (Decision 78):
+    # [{"claim", "figures", "found_in", "cited"}], and counts over all figures.
+    citation_mismatches: list[dict] = field(default_factory=list)
+    citation_counts: dict = field(default_factory=dict)
 
 
 class _FigureView:
@@ -285,6 +290,11 @@ class _FigureView:
             n.raw for n in nums if n.kind == "quantity" and n.status != "grounded"
         ]
         self.unbound = [n.raw for n in figures if n.binding == "unbound"]
+        # Of those, results of a written-out equation whose inputs are not all
+        # tied to what the claim names (numeric_grounding, Decision 73).
+        self.computed_unbound = [
+            n.raw for n in figures if n.binding == "unbound" and n.status == "derived"
+        ]
         self.confirmed = (
             bool(figures)
             and all(n.is_confirmed for n in figures)
@@ -480,6 +490,93 @@ def _evidence_fields(chunk: dict | None) -> dict:
 def _short(text: str, limit: int = 200) -> str:
     """Truncates claim text for flags."""
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+# Opens every citation-mismatch flag, so consoles and the revision prompt can
+# tell it apart from a finding against the answer's content.
+CITATION_MISMATCH_FLAG = "Citation mismatch:"
+
+
+def _looked_up(n) -> bool:
+    """
+    True for an amount or ratio whose evidence is where the documents state it.
+
+    Not for one the answer computes: a figure reproduced from its claim's own
+    figures, or by an equation the answer writes, rests on those inputs (which
+    are checked themselves), even when the same value also happens to occur in
+    some other document — the verification benchmark's "60% of the $6,500,000
+    pool" matched "60% cash" in the board deck. A percentage found as basis
+    points, and a figure restating its neighbour in other units, are lookups.
+    """
+    if n.kind == "quantity" or not n.evidence_files or n.status not in ("grounded", "derived"):
+        return False
+    return not n.formula or n.formula.endswith(" bps / 100") or n.formula.startswith("restates ")
+
+
+def _check_citations(
+    claims: list[Claim],
+    checks: list[dict],
+    numeric: list[list],
+    chunks: list[dict],
+    report: VerificationReport,
+) -> None:
+    """
+    Checks that each figure is stated by a document its claim cites.
+
+    Numeric grounding finds a figure anywhere in the retrieved context, so an
+    answer could cite a clean document for a number only another passage
+    states: wrong attribution for the reviewer who opens the citation, and a
+    way to launder a planted figure through a trusted source (Decision 76's
+    open item, Decision 16's). A claim's citations are its own markers or the
+    nearest one in its paragraph (claims.py).
+
+    Per figure the documents count, not the chunk: another section, page or
+    table chunk of a cited document is the right source, and so is any one of
+    several documents that state the same value. A figure stated only outside
+    the cited documents is a citation mismatch: the claim is annotated
+    (`citation_mismatch`, `cited_documents`), the answer gets a flag and
+    cannot be "passed" — but its verdict is untouched and it never fails or
+    triggers a revision: the figure is right, its citation is not. Amounts and
+    ratios only: a quantity ("24 months") recurs across a data room and its
+    location proves little. Only figures found where a document states them,
+    not those the answer computes (_looked_up). A claim with no marker at all
+    cites nothing to be wrong about; it is counted, not penalised.
+
+    Args:
+        claims: The answer's claims.
+        checks: Their checks, annotated in place.
+        numeric: Per claim, its NumericChecks.
+        chunks: Retrieved context.
+        report: Receives citation_mismatches and citation_counts.
+    """
+    counts = Counter()
+    for claim, check in zip(claims, checks):
+        located = [n for n in numeric[claim.index] if _looked_up(n)]
+        if not located:
+            continue
+        counts["figures"] += len(located)
+        if not claim.markers:
+            counts["figures_without_citation"] += len(located)
+            counts["claims_without_citation"] += 1
+            continue
+        cited = cited_documents(claim.markers, chunks)
+        wrong = [n for n in located if not set(n.evidence_files) & set(cited)]
+        counts["figures_in_cited_documents"] += len(located) - len(wrong)
+        if not wrong:
+            continue
+        counts["figures_citation_mismatch"] += len(wrong)
+        counts["claims_citation_mismatch"] += 1
+        check["citation_mismatch"] = [
+            {"figure": n.raw, "found_in": list(n.evidence_files)} for n in wrong
+        ]
+        check["cited_documents"] = cited
+        report.citation_mismatches.append({
+            "claim": claim.text,
+            "figures": [n.raw for n in wrong],
+            "found_in": list(dict.fromkeys(f for n in wrong for f in n.evidence_files)),
+            "cited": cited,
+        })
+    report.citation_counts = dict(counts)
 
 
 async def verify_answer(
@@ -829,10 +926,19 @@ async def verify_answer(
             undecided.append(claim.index)
             check["score"] = round(entail, 3) if ev else None
             if unbound:
-                check["reason"] = (
-                    "figure(s) present in the documents but not in a passage this "
-                    "statement names: " + ", ".join(unbound)
-                )
+                present = [raw for raw in unbound if raw not in view.computed_unbound]
+                reasons = []
+                if present:
+                    reasons.append(
+                        "figure(s) present in the documents but not in a passage this "
+                        "statement names: " + ", ".join(present)
+                    )
+                if view.computed_unbound:
+                    reasons.append(
+                        "computed as written, from figures this statement does not tie "
+                        "to a line of the documents: " + ", ".join(view.computed_unbound)
+                    )
+                check["reason"] = "; ".join(reasons)
             elif nli_available and ev is None:
                 check["reason"] = "no retrieved passage shares vocabulary with this claim"
         checks.append(check)
@@ -914,7 +1020,10 @@ async def verify_answer(
                 logger.warning("LLM judge unavailable", extra={"error": str(e)})
                 report.notes.append(f"validation unavailable: LLM judge failed ({type(e).__name__}: {e})")
 
-    # ── 5. Aggregate ────────────────────────────────────────────────────────
+    # ── 5. Citations ────────────────────────────────────────────────────────
+    _check_citations(claims, checks, numeric, chunks, report)
+
+    # ── 6. Aggregate ────────────────────────────────────────────────────────
     report.claim_checks = checks
     status_counts = Counter(c["status"] for c in checks)
     method_counts = Counter(c["method"] for c in checks if c["method"] != "none")
@@ -981,6 +1090,17 @@ async def verify_answer(
         flags.append(
             f"validation unavailable: {status_counts['unverified']} claim(s) could not be verified"
         )
+    for m in report.citation_mismatches:
+        figures = ", ".join(m["figures"])
+        where = ", ".join(m["found_in"])
+        cited = (
+            "the cited " + ", ".join(m["cited"]) if m["cited"]
+            else "any retrieved document its citation names"
+        )
+        flags.append(
+            f"{CITATION_MISMATCH_FLAG} {figures} {'is' if len(m['figures']) == 1 else 'are'} stated in "
+            f"{where}, not in {cited} — {_short(m['claim'])}"
+        )
     report.flags = flags
 
     numeric_failure = any(
@@ -992,6 +1112,10 @@ async def verify_answer(
         status_counts["unsupported"]
         or status_counts["unverified"]
         or unverifiable_calcs
+        # The figures are right; where the answer says they come from is not.
+        # A reviewer who opens the citation will not find them, so the answer
+        # is not "passed" — but nothing in it is wrong, so never "failed".
+        or report.citation_mismatches
     ):
         report.validation_status = "warning"
     else:
@@ -1022,5 +1146,10 @@ def revision_feedback(claim_checks: list[dict], flags: list[str] | None = None) 
         )
         lines.append(f"\"{_short(c.get('claim', ''), 300)}\" — {reason}")
     if not lines and flags:
-        lines = [f for f in flags if not f.startswith("validation unavailable")]
+        # A citation mismatch is a note for the reviewer, never a reason to
+        # rewrite: the figure is right (Decision 78).
+        lines = [
+            f for f in flags
+            if not f.startswith(("validation unavailable", CITATION_MISMATCH_FLAG))
+        ]
     return lines

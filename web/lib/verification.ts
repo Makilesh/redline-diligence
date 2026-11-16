@@ -83,6 +83,7 @@ export function answerVerdict(result: QueryResponse): AnswerVerdict {
   const counts = countClaims(result.claim_checks);
   const problems = counts.contradicted + counts.unsupported;
   const notConfirmed = problems + counts.unverified;
+  const miscited = result.claim_checks.filter(isMiscited).length;
 
   if (result.outcome === "answered_unverified" || result.validation_status === "failed") {
     return {
@@ -102,7 +103,7 @@ export function answerVerdict(result: QueryResponse): AnswerVerdict {
   // confirmed" would leave the reader looking for a problem that is not there.
   if (
     result.validation_status === "warning" ||
-    (result.validation_status === "passed" && (notConfirmed > 0 || result.answer_truncated))
+    (result.validation_status === "passed" && (notConfirmed > 0 || result.answer_truncated || miscited > 0))
   ) {
     let detail: string;
     if (result.answer_truncated && notConfirmed === 0) {
@@ -110,6 +111,12 @@ export function answerVerdict(result: QueryResponse): AnswerVerdict {
         counts.total > 0
           ? `All ${plural(counts.total, "statement")} matched to the documents, but ${CUT_OFF}`
           : `Nothing in it could be checked, and ${CUT_OFF}`;
+    } else if (notConfirmed === 0 && miscited > 0) {
+      // Downgraded for a citation that does not hold its figure (Decision 78):
+      // every statement checked out, so say what is wrong instead.
+      detail = `All ${plural(counts.total, "statement")} matched to the documents, but ${miscited} ${
+        miscited === 1 ? "cites a document that does not state its figures" : "cite documents that do not state their figures"
+      }.`;
     } else {
       detail =
         (counts.total > 0
@@ -242,6 +249,36 @@ export function claimMarker(c: ClaimCheck): ClaimMarker | null {
       "clearly support the statement as worded (another party, a reversed condition), " +
       "so it was not confirmed on its figures alone and was left to the LLM judge.",
   };
+}
+
+/** Whether a figure of the claim is stated only outside the documents it cites. */
+export function isMiscited(c: ClaimCheck): boolean {
+  return (c.citation_mismatch?.length ?? 0) > 0;
+}
+
+/**
+ * A note beside a claim whose citation does not hold its figures (Decision
+ * 78). The figures are in the documents, so the verdict may be "Supported";
+ * the note tells the reader where to look instead of the cited source.
+ */
+export function citationMarker(c: ClaimCheck): ClaimMarker | null {
+  if (!isMiscited(c)) return null;
+  const items = c.citation_mismatch!;
+  const cited = c.cited_documents?.length
+    ? `the cited ${c.cited_documents.join(", ")}`
+    : "any retrieved document its citation names";
+  return {
+    label: "Cited source lacks figure",
+    title:
+      items
+        .map((m) => `${m.figure} is stated in ${m.found_in.join(", ") || "another document"}`)
+        .join("; ") + `, not in ${cited}.`,
+  };
+}
+
+/** Whether a claim belongs in the list a reader sees first, not the folded one. */
+export function needsReview(c: ClaimCheck): boolean {
+  return c.status !== "supported" || isMiscited(c);
 }
 
 /** Problems first, so the statements that need a reader's attention lead. */

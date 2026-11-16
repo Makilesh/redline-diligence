@@ -23,8 +23,11 @@ Payload fields written per child chunk (see _child_payload):
     superseded_by, is_redline, context_header, plus format extras (sheet_name,
     currency, scale_factor, scale_label, slide_number, page_range, metrics,
     redline_base_doc_id), plus, for a public filing only, filing_form,
-    filing_period_end / filing_date, filing_fiscal_years, filing_entity_keys
-    and filing_company (filing_metadata.py; read from the cover page).
+    filing_period_end / filing_date, filing_fiscal_years, filing_fiscal_quarter,
+    filing_entity_keys and filing_company (filing_metadata.py; read from the
+    cover page), plus, only on a chunk whose text reads like instructions to a
+    model, suspected_injection=1 and injection_signals (injection_screen.py;
+    parents are screened too).
 
 `text` is always the exact source text. `context_header` ("Document: ... /
 Section: ...", see chunk_context.py; written only when CHUNK_CONTEXT_HEADERS
@@ -73,6 +76,7 @@ from src.data_processing.financial_table_converter import (
     representation_content_type,
     table_from_rows,
 )
+from src.data_processing.injection_screen import screen_text
 from src.data_processing.pii_detector import PIIDetector
 from src.data_processing.risk_signal_extractor import RiskSignalExtractor
 from src.data_processing.semantic_chunker import (
@@ -159,6 +163,9 @@ class ExtractedDocument:
     category_confidence: float | None = None
     # filing_* fields of a public filing (filing_metadata.py); {} for anything else.
     filing: dict = field(default_factory=dict)
+    # Child chunks whose text reads like instructions to a model
+    # (injection_screen.py): {chunk_id, page_number, section_heading, signals}.
+    suspected_injection: list[dict] = field(default_factory=list)
 
 
 # ==============================================================================
@@ -672,6 +679,33 @@ def _child_payload(
     return payload
 
 
+def _mark_injection(payload: dict, doc: ExtractedDocument) -> None:
+    """
+    Screens one payload's text for instruction-like wording (injection_screen).
+
+    The fields are written only when something is found, so the payload of an
+    ordinary chunk is unchanged; an index written before the screen existed is
+    re-screened at query time anyway (src/verification/injection_check.py).
+
+    Args:
+        payload: Child or parent payload; gains suspected_injection=1 and
+            injection_signals when flagged.
+        doc: Document being built; flagged children are listed on it.
+    """
+    signals = screen_text(payload.get("text") or "")
+    if not signals:
+        return
+    payload["suspected_injection"] = 1
+    payload["injection_signals"] = signals
+    if "child_chunk_ids" not in payload:
+        doc.suspected_injection.append({
+            "chunk_id": payload["chunk_id"],
+            "page_number": payload.get("page_number"),
+            "section_heading": payload.get("section_heading") or "",
+            "signals": signals,
+        })
+
+
 def _laya_chunk_scores(
     texts: list[str],
     regex_risk: list,
@@ -894,7 +928,7 @@ def extract_and_chunk(
             parent_pii[parent_index] = max(parent_pii[parent_index], contains_pii)
             parent_children[parent_index].append(chunk_id)
 
-        doc.chunks.append(_child_payload(
+        payload = _child_payload(
             chunk, chunk_id, i, doc,
             is_current_version=is_current_version,
             supersedes_doc_id=supersedes_doc_id,
@@ -905,10 +939,12 @@ def extract_and_chunk(
             pii_source=pii.source,
             pii_confidence=pii.laya_probability,
             title=title,
-        ))
+        )
+        _mark_injection(payload, doc)
+        doc.chunks.append(payload)
 
     for j, parent in enumerate(parents):
-        doc.parents.append({
+        parent_payload = {
             "chunk_id": parent_ids[j],
             "deal_id": deal_id,
             "doc_id": doc_id,
@@ -924,9 +960,23 @@ def extract_and_chunk(
             # child is — otherwise parent expansion would leak what the child
             # filter withheld.
             "contains_pii": parent_pii[j],
-        })
+        }
+        _mark_injection(parent_payload, doc)
+        doc.parents.append(parent_payload)
 
     doc.risk_signals = list(aggregated_risk.values())
+    if doc.suspected_injection:
+        # Labelled, never dropped: the text stays indexed exactly as written,
+        # and the query path tells the reviewer when an answer leans on it.
+        logger.warning(
+            "Document contains text that reads like instructions to an AI model",
+            extra={
+                "doc_id": doc_id,
+                "file_name": filename,
+                "chunks": len(doc.suspected_injection),
+                "signals": sorted({s for f in doc.suspected_injection for s in f["signals"]}),
+            },
+        )
 
     logger.info(
         "Document extracted and chunked",
@@ -1108,7 +1158,7 @@ async def index_document(
     Returns:
         Dict with doc_id, deal_id, filename, document_category, chunks_created,
         parent_chunks_created, table_count, risk_signals, has_redline, warnings,
-        content_sha256, previously_indexed, superseded_by ("" unless this
+        suspected_injection (child chunks with instruction-like text), content_sha256, previously_indexed, superseded_by ("" unless this
         document had been retired by a newer version) and version_candidates
         (current documents of the deal this upload looks like another version
         of — a proposal; see _version_candidates).
@@ -1268,6 +1318,7 @@ async def index_document(
         "category_confidence": doc.category_confidence,
         "has_redline": doc.has_redline,
         "warnings": doc.warnings,
+        "suspected_injection": doc.suspected_injection,
         "content_sha256": doc.content_sha256,
         "previously_indexed": bool(existing.count),
         "superseded_by": retired_by,
@@ -1282,7 +1333,7 @@ async def index_document(
             # "filename" is a reserved LogRecord attribute
             "file_name": filename,
             **{k: v for k, v in result.items()
-               if k not in ("filename", "risk_signals", "warnings")},
+               if k not in ("filename", "risk_signals", "warnings", "suspected_injection")},
         },
     )
     return result

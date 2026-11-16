@@ -18,29 +18,56 @@ cover page, in fixed language:
     FORM 10-K ... For the fiscal year ended December 31, 2018
     Commission file number 1-3285   3M COMPANY (Exact name of registrant ...)
 
-and an earnings release names its company and ticker in the opening line
+and an earnings release names its company and period in its opening line
 ("PepsiCo, Inc. (NASDAQ: PEP) today reported results for the first quarter
-2023"). Those are deterministic patterns, so the extraction is regexes over the
-first pages — no model, no network. A document that matches none of them (a
-CIM, a contract, management accounts) gets no filing metadata at all, and
-everything that uses it then does nothing.
+2023"; "Amcor reports fiscal 2023 results"). Those are deterministic patterns,
+so the extraction is regexes over the first pages — no model, no network.
+
+It fails safe: a field is written only when its fixed language is found, and
+a document that is recognisably an SEC form of a kind not modelled here (S-1,
+6-K, a proxy statement, an OCR-garbled form name) gets no metadata at all
+rather than a guess. Everything that uses the fields then does nothing.
 
 Output, written onto every child payload of the document when present:
 
-    filing_form           "10-K" | "10-Q" | "8-K" | "earnings_release"
-    filing_period_end     ISO date the period ended (10-K / 10-Q)
+    filing_form           "10-K" | "10-Q" | "8-K" | "20-F" | "40-F" (each
+                          optionally "/A") | "earnings_release"
+    filing_period_end     ISO date the period ended (annual forms, 10-Q, and a
+                          release that states it)
     filing_date           ISO date of the report (8-K / earnings release)
     filing_fiscal_years   fiscal years a question may call this filing by
+    filing_fiscal_quarter 4 for an annual report or a fourth-quarter/full-year
+                          release, 1-3 for a 10-Q or release whose quarter is
+                          stated; absent when not stated
     filing_entity_keys    identities of the registrant ("sec:1-3285",
                           "name:3m", "ticker:pep"); two filings are the same
                           company when they share any key
     filing_company        the registrant's name as printed (display only)
+
+Naming a fiscal year (Decision 70). A registrant names its fiscal year itself
+(dei:DocumentFiscalYearFocus is that label), and for most year ends every
+convention agrees: the year ended June 30, 2023 is fiscal 2023. Two cases need
+a rule, and both are decided by the year's *nominal* month, its end date less
+a week (a 52/53-week year ends within a few days of the month it is anchored
+to, so January 1, 2023 is a December year):
+  - a nominal December year is named after that calendar year only. Johnson &
+    Johnson's 52-week year ended January 1, 2023 is "full-year 2022" in its
+    own release and its 10-K; it spends 358 of its 364 days in 2022, and the
+    SEC's calendar frames (CY#### = 365 days +/- 30) put it in CY2022;
+  - a nominal January-March year is named both ways, because registrants
+    disagree: Walmart and Best Buy call the year ended in January 2023 "fiscal
+    2023", Target, Home Depot and Ulta Beauty call it "fiscal 2022", Japanese
+    March year ends are usually named after the start year, and question
+    writers follow neither (FinanceBench calls Ulta's fiscal 2022 "FY2023").
+A quarter belongs to the fiscal year that ends one to three quarters after it
+(exactly 4 - q quarters after when its quarter q is stated), named by the
+same rule.
 """
 
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, timedelta
 
 # Only the opening pages are read: the cover of an SEC form is page 1, and an
 # earnings release states its subject in its first lines. Reading further would
@@ -53,28 +80,56 @@ COVER_CHARS = 12_000
 _SEC_HEADER_WITHIN = 800
 _SEC_FORM_WITHIN = 400
 _RELEASE_HEAD_CHARS = 1_500
+# A release recognised by its headline alone ("Amcor reports fiscal 2023
+# results") must say so at the very top of the document.
+_HEADLINE_CHARS = 250
 
-_MONTHS = {
-    m: i for i, m in enumerate(
-        ("january", "february", "march", "april", "may", "june", "july", "august",
-         "september", "october", "november", "december"), start=1)
-}
-_DATE = r"(January|February|March|April|May|June|July|August|September|October|November|December)" \
-        r"\s+(\d{1,2})\s*,?\s*((?:19|20)\d\d)"
+_MONTH_NAMES = ("january", "february", "march", "april", "may", "june", "july", "august",
+                "september", "october", "november", "december")
+_MONTHS = {m: i for i, m in enumerate(_MONTH_NAMES, start=1)}
+_MONTH = "(" + "|".join(m.capitalize() for m in _MONTH_NAMES) + ")"
+_YEAR = r"((?:19|20)\d\d)"
+_DATE = _MONTH + r"\s+(\d{1,2})\s*,?\s*" + _YEAR                  # December 31, 2022
+_DATE_DMY = r"(\d{1,2})\s+" + _MONTH + r"\s*,?\s*" + _YEAR + r"(?!\d)"   # 31 December 2022 (non-US covers)
 _DATE_RE = re.compile(_DATE, re.IGNORECASE)
+_ANY_DATE = re.compile(f"(?:{_DATE})|(?:{_DATE_DMY})", re.IGNORECASE)
+# A month name, full or abbreviated, between a cover's label and the date it
+# reads means that date is not the label's: the label's own date was garbled
+# ("December 3l, 2O22" on a scanned cover) or abbreviated.
+_MONTH_WORD = re.compile(
+    r"\b(?:" + "|".join(_MONTH_NAMES) + r"|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\b", re.IGNORECASE)
 
 # Every cover opens "UNITED STATES SECURITIES AND EXCHANGE COMMISSION
 # Washington, D.C. 20549"; a contract or a release that merely mentions the
 # Commission does not follow it with its address.
 _SEC_HEADER = re.compile(r"SECURITIES\s+AND\s+EXCHANGE\s+COMMISSION\W{0,10}Washington", re.IGNORECASE)
-_SEC_FORM = re.compile(r"\bFORM\s+(10-K|10-Q|8-K)\b", re.IGNORECASE)
+# The first form name after the header is the form ("FORM 10-K", "FORM 10-K/A",
+# "FORM 20-F", "FORM S-1", "FORM 6-K").
+_SEC_FORM = re.compile(r"\bFORM\s+([0-9A-Z]{1,3}-[0-9A-Z]{1,4})\b(\s*/\s*A\b)?", re.IGNORECASE)
+# Forms whose period is a fiscal year, stated as "For the fiscal year ended".
+# A 20-F or 40-F is a foreign private issuer's annual report.
+_ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
+_SUPPORTED_FORMS = _ANNUAL_FORMS | {"10-Q", "8-K"}
 # The cover's layout is sometimes interleaved by the PDF text layer
 # ("For the fiscal year ended Commission file December 31, 2022 number 1-5805"),
-# so a few words may sit between the phrase and its date.
-_PERIOD_PATTERNS = {
-    "10-K": re.compile(r"fiscal\s+year\s+ended\b.{0,60}?" + _DATE, re.IGNORECASE | re.DOTALL),
-    "10-Q": re.compile(r"quarterly\s+period\s+ended\b.{0,60}?" + _DATE, re.IGNORECASE | re.DOTALL),
-    "8-K": re.compile(r"Date\s+of\s+report\b.{0,80}?" + _DATE, re.IGNORECASE | re.DOTALL),
+# so a few words may sit between the label and its date.
+_PERIOD_LABELS = {
+    "annual": (re.compile(r"fiscal\s+year\s+ended\b", re.IGNORECASE), 60),
+    "10-Q": (re.compile(r"quarterly\s+period\s+ended\b", re.IGNORECASE), 60),
+    "8-K": (re.compile(r"Date\s+of\s+report\b", re.IGNORECASE), 80),
+}
+# A 10-Q's statements cover the quarter and the year to date: "three and six
+# months ended June 30" is the second quarter. Read where it names the cover's
+# own quarter end (month and day), so another period's statement cannot count.
+_YTD = re.compile(
+    r"\b(three|six|nine|twelve|thirteen|sixteen|twenty[\s-]?(?:four|six|eight)|thirty[\s-]?(?:six|nine)|forty"
+    r"|3|6|9|12|13|16|24|26|28|36|39|40)\s+(months|weeks)\s+ended\s+" + _MONTH + r"\s+(\d{1,2})\b",
+    re.IGNORECASE)
+_YTD_QUARTER = {
+    "months": {"three": 1, "3": 1, "six": 2, "6": 2, "nine": 3, "9": 3},
+    "weeks": {"twelve": 1, "12": 1, "thirteen": 1, "13": 1, "sixteen": 1, "16": 1,
+              "twentyfour": 2, "24": 2, "twentysix": 2, "26": 2, "twentyeight": 2, "28": 2,
+              "thirtysix": 3, "36": 3, "thirtynine": 3, "39": 3, "forty": 3, "40": 3},
 }
 
 # SEC file numbers look like "1-3285", "001-07882", "0-15175". An IRS employer
@@ -85,16 +140,40 @@ _FILE_NUMBER = re.compile(r"(?<![\d\-)])(?<!\)\s)(\d{1,3})-(\d{4,6})(?![\d\-])")
 # with its neighbour: "(Commission (IRS Employer of incorporation) File Number)".
 _COMMISSION_FILE = re.compile(r"Commission\b.{0,60}?\bFile\b", re.IGNORECASE | re.DOTALL)
 _REGISTRANT_MARKER = re.compile(r"\(\s*Exact\s+name\s+of\s+(?:the\s+)?registrant", re.IGNORECASE)
+# A foreign private issuer prints its name in its own language and then in
+# English: "SONY GROUP CORPORATION (Translation of Registrant's name into English)".
+_TRANSLATION_MARKER = re.compile(r"\(\s*Translation\s+of\s+(?:the\s+)?registrant", re.IGNORECASE)
 
 # Earnings release: "Ulta Beauty, Inc. (NASDAQ: ULTA) today announced ..."
 _EXCHANGE_TICKER = re.compile(r"\(\s*(?:NYSE|NASDAQ|Nasdaq|NYSE American)\s*:\s*([A-Z][A-Z.]{0,5})\b")
 _RESULTS = re.compile(r"\bresults\b", re.IGNORECASE)
+# "Amcor reports fiscal 2023 results": the company is whatever opens the headline.
+_HEADLINE = re.compile(r"\s*(.{2,80}?)\s+(?:reports|reported|announces|announced|posts|delivers)\b",
+                       re.IGNORECASE)
+# A line break inside a hyphenated word survives as "second- quarter".
 _RELEASE_YEARS = (
-    re.compile(r"\b(?:fiscal(?:\s+year)?|full[\s-]year|(?:first|second|third|fourth)[\s-]quarter"
+    re.compile(r"\b(?:fiscal(?:\s+year)?|full[\s-]+year|(?:first|second|third|fourth)[\s-]+quarter"
                r"(?:\s+(?:of\s+)?(?:fiscal\s+)?)?|Q[1-4])\s*((?:19|20)\d\d)\b", re.IGNORECASE),
-    re.compile(r"\b((?:19|20)\d\d)\s+(?:first|second|third|fourth|full)[\s-](?:quarter|year)\b",
+    re.compile(r"\b((?:19|20)\d\d)\s+(?:first|second|third|fourth|full)[\s-]+(?:quarter|year)\b",
                re.IGNORECASE),
 )
+_RELEASE_QUARTERS = (
+    (re.compile(r"\b(?:first[\s-]+quarter|Q1|1Q)\b", re.IGNORECASE), 1),
+    (re.compile(r"\b(?:second[\s-]+quarter|Q2|2Q)\b", re.IGNORECASE), 2),
+    (re.compile(r"\b(?:third[\s-]+quarter|Q3|3Q)\b", re.IGNORECASE), 3),
+    (re.compile(r"\b(?:fourth[\s-]+quarter|Q4|4Q|full[\s-]+year|fiscal\s+year|fifty[\s-]+two[\s-]+week"
+                r"|fifty[\s-]+three[\s-]+week|annual)\b", re.IGNORECASE), 4),
+    # "fiscal 2023 results": a fiscal year's results with no quarter named.
+    (re.compile(r"\bfiscal\s+(?:19|20)\d\d\s+results\b", re.IGNORECASE), 4),
+)
+# What a release says it reports is the clause around "results"; guidance in
+# the same lead ("provides outlook for fiscal 2024", "full-year 2023 guidance")
+# names a period it does not cover.
+_RESULTS_BEFORE = 90
+_RESULTS_AFTER = 160
+_GUIDANCE = re.compile(r"\b(?:guidance|outlook|expects?|forecasts?|targets?)\b", re.IGNORECASE)
+_CLAUSE_END = re.compile(r"[.;!?]\s|\s[-–—]\s")
+_ENDED = re.compile(r"\bended\s+", re.IGNORECASE)
 # A standalone number (a date, a file number) ends the field before a name;
 # a digit inside a name ("3M") does not.
 _NUMBER_TOKEN = r"(?<![A-Za-z])\d[\d,\-]*(?![A-Za-z])"
@@ -108,14 +187,82 @@ _NAME_STOPWORDS = frozenset({
 })
 _WHITESPACE = re.compile(r"\s+")
 
+# A 52/53-week year ends within a week of the month end it is anchored to.
+_NOMINAL_SHIFT = timedelta(days=7)
+_QUARTER = timedelta(weeks=13)
 
-def _iso(match: re.Match, offset: int = 0) -> date | None:
-    """The date captured by _DATE at group offset+1..offset+3."""
-    month = _MONTHS[match.group(offset + 1).lower()]
+
+def _date_from(match: re.Match) -> date | None:
+    """The date matched by _ANY_DATE (month-day-year or day-month-year)."""
+    g = match.groups()
+    month, day, year = (g[0], g[1], g[2]) if g[0] else (g[4], g[3], g[5])
     try:
-        return date(int(match.group(offset + 3)), month, int(match.group(offset + 2)))
+        return date(int(year), _MONTHS[month.lower()], int(day))
     except ValueError:
         return None
+
+
+def _date_after(text: str, start: int, max_gap: int) -> date | None:
+    """
+    The date that follows position `start` within `max_gap` characters, or None.
+
+    The gap may hold words of an interleaved column ("Commission file") but not
+    a month name or a digit: those are a garbled or abbreviated date of the
+    label's own ("Decem ber 3l, 2O22", "Dec. 31, 2022"), and the next
+    well-formed date is then some other field's.
+    """
+    match = _ANY_DATE.search(text, start, start + max_gap + 30)
+    if not match or match.start() - start > max_gap:
+        return None
+    gap = text[start: match.start()]
+    if _MONTH_WORD.search(gap) or re.search(r"\d", gap):
+        return None
+    return _date_from(match)
+
+
+def annual_fiscal_years(end: date) -> list[int]:
+    """
+    The fiscal years a question may call a year ending on `end` (see module docstring).
+
+    Args:
+        end: Last day of the fiscal year.
+
+    Returns:
+        [nominal year] for a nominal April-December year end; [year - 1, year]
+        for a nominal January-March year end.
+    """
+    nominal = end - _NOMINAL_SHIFT
+    return [nominal.year - 1, nominal.year] if nominal.month <= 3 else [nominal.year]
+
+
+def quarter_fiscal_years(end: date, quarter: int | None = None) -> list[int]:
+    """
+    The fiscal years a question may call the fiscal year a quarter ending on `end` belongs to.
+
+    That year ends 4 - quarter quarters later. When the quarter is stated as the
+    second or third, that is the estimate (within a week either way); otherwise
+    it is anywhere from one to three quarters later. A first quarter is read
+    from the absence of six- and nine-month statements, which a cover that
+    omits its statements also shows, so it gets the wide window too.
+
+    Args:
+        end: Last day of the quarter.
+        quarter: Fiscal quarter (1-3) when stated, else None.
+
+    Returns:
+        Sorted fiscal years.
+    """
+    if quarter in (2, 3):
+        centre = end + _QUARTER * (4 - quarter)
+        low, high = centre - _NOMINAL_SHIFT, centre + _NOMINAL_SHIFT
+    else:
+        low, high = end + _QUARTER - _NOMINAL_SHIFT, end + 3 * _QUARTER + _NOMINAL_SHIFT
+    years: set[int] = set()
+    day = low
+    while day <= high:
+        years.update(annual_fiscal_years(day))
+        day += timedelta(days=1)
+    return sorted(years)
 
 
 def normalize_company_name(name: str) -> str:
@@ -141,17 +288,18 @@ def _letters(text: str) -> str:
     return re.sub(r"[^0-9a-z]+", "", text.lower())
 
 
-def _cover_text(sections: list[dict]) -> str:
+def _cover_text(sections: list[dict], tables: bool = False) -> str:
     """Whitespace-collapsed text of the opening pages."""
     parts, used, shown = [], 0, set()
     for section in sections:
         page = section.get("page_number")
         if page is not None and page > COVER_PAGES:
             break
-        # Tables are skipped: their representations restate the cover's grid
-        # several times over and would push a release's opening sentence out of
-        # the window it is looked for in.
-        if section.get("is_table"):
+        # Tables are skipped for the cover's fields: their representations
+        # restate the cover's grid several times over and would push a
+        # release's opening sentence out of the window it is looked for in.
+        # A 10-Q's table of contents may be one, so its quarter is read with them.
+        if section.get("is_table") and not tables:
             continue
         text = section.get("text") or ""
         # A processor may lift a line it reads as a heading ("FORM 10-K") out of
@@ -181,78 +329,171 @@ def _sec_file_number(cover: str) -> str | None:
     return best[1] if best else None
 
 
-def _registrant_name(cover: str) -> str:
-    """The name printed just before "(Exact name of registrant as specified in its charter)"."""
-    marker = _REGISTRANT_MARKER.search(cover)
+def _name_before(cover: str, marker_re: re.Pattern, after_label: bool = False) -> str:
+    """
+    The name printed just before a "(Exact name of registrant ...)"-style label;
+    with after_label, the name also starts after the previous label's ")" (the
+    English name of a 20-F follows the "(Exact name ...)" label of the original).
+    """
+    marker = marker_re.search(cover)
     if not marker:
         return ""
     before = cover[max(0, marker.start() - 120): marker.start()]
     # The name follows the file number or the report date on every layout seen;
     # whatever precedes the last of those is the cover's previous field.
-    tail = re.split(_NUMBER_TOKEN + r"|Number\s*:?|No\.", before)[-1]
+    tail = re.split(_NUMBER_TOKEN + r"|Number\s*:?|No\." + (r"|\)" if after_label else ""), before)[-1]
     name = tail.strip(" _.,:;()|-–—")
     return name if re.search(r"[A-Za-z]{2}", name) else ""
 
 
-def _sec_filing(cover: str, form: str) -> dict:
+def _quarter_of_10q(text: str, end: date) -> int | None:
+    """Fiscal quarter of a 10-Q from its year-to-date statements, or None."""
+    found = set()
+    for m in _YTD.finditer(text):
+        if (_MONTHS[m.group(3).lower()], int(m.group(4))) != (end.month, end.day):
+            continue
+        length = re.sub(r"[\s-]", "", m.group(1).lower())
+        quarter = _YTD_QUARTER[m.group(2).lower()].get(length)
+        if quarter:
+            found.add(quarter)
+    year_to_date = found - {1}
+    if len(year_to_date) > 1:
+        return None      # six and nine months to the same date: not a 10-Q layout seen
+    if year_to_date:
+        return year_to_date.pop()
+    return 1 if found else None
+
+
+def _sec_filing(cover: str, with_tables: str, form: str) -> dict:
     out: dict = {"filing_form": form}
-    match = _PERIOD_PATTERNS[form].search(cover)
-    when = _iso(match) if match else None
+    base = form.removesuffix("/A")
+    label, gap = _PERIOD_LABELS["annual" if base in _ANNUAL_FORMS else base]
+    when = None
+    for m in label.finditer(cover):
+        when = _date_after(cover, m.end(), gap)
+        if when:
+            break
+    if base in _ANNUAL_FORMS:
+        out["filing_fiscal_quarter"] = 4
     if when is not None:
-        if form == "8-K":
+        if base == "8-K":
             out["filing_date"] = when.isoformat()
             out["filing_fiscal_years"] = [when.year]
+        elif base in _ANNUAL_FORMS:
+            out["filing_period_end"] = when.isoformat()
+            out["filing_fiscal_years"] = annual_fiscal_years(when)
         else:
             out["filing_period_end"] = when.isoformat()
-            if form == "10-K":
-                # A fiscal year ending in January-March is named after either
-                # calendar year it touches: Walmart and Best Buy call the year
-                # ended 2023-01-28 "fiscal 2023", Ulta Beauty calls it "fiscal
-                # 2022". Both are kept rather than guessed.
-                years = {when.year} | ({when.year - 1} if when.month <= 3 else set())
-            else:
-                # A quarter belongs to the fiscal year that contains it, which
-                # ends later in the same calendar year or in the next one
-                # (Amcor's Q2 FY2023 ended 2022-12-31; Best Buy's Q2 FY2024
-                # ended 2023-07-29).
-                years = {when.year, when.year + 1}
-            out["filing_fiscal_years"] = sorted(years)
+            quarter = _quarter_of_10q(with_tables, when)
+            if quarter:
+                out["filing_fiscal_quarter"] = quarter
+            out["filing_fiscal_years"] = quarter_fiscal_years(when, quarter)
     keys = []
     file_number = _sec_file_number(cover)
     if file_number:
         keys.append(f"sec:{file_number}")
-    name = _registrant_name(cover)
+    name = _name_before(cover, _REGISTRANT_MARKER)
     if name:
         out["filing_company"] = name
         if normalize_company_name(name):
             keys.append(f"name:{normalize_company_name(name)}")
+    english = _name_before(cover, _TRANSLATION_MARKER, after_label=True)
+    if english and normalize_company_name(english) and f"name:{normalize_company_name(english)}" not in keys:
+        keys.append(f"name:{normalize_company_name(english)}")
+        out.setdefault("filing_company", english)
     if keys:
         out["filing_entity_keys"] = keys
     return out
 
 
+def _results_clauses(head: str) -> list[str]:
+    """
+    The text around each "results" that says what the release reports: the
+    headline or sentence up to it ("PepsiCo Reports First-Quarter 2023 Results")
+    and what follows "results for" ("results for the fourth quarter ended
+    January 28, 2023"), each cut at a clause end or a guidance word.
+    """
+    clauses = []
+    for m in _RESULTS.finditer(head):
+        before = head[max(0, m.start() - _RESULTS_BEFORE): m.start()]
+        before = _CLAUSE_END.split(before)[-1]
+        guidance = list(_GUIDANCE.finditer(before))
+        if guidance:
+            before = before[guidance[-1].end():]
+        clauses.append(before + m.group(0))
+        after = head[m.end(): m.end() + _RESULTS_AFTER]
+        if re.match(r"\s+for\b", after, re.IGNORECASE):
+            after = _CLAUSE_END.split(after)[0]
+            guidance_after = _GUIDANCE.search(after)
+            clauses.append(after[: guidance_after.start()] if guidance_after else after)
+    return clauses
+
+
+def _release_period(head: str) -> dict:
+    """Fiscal years, quarter and period end a release says it reports; {} when it does not say."""
+    clauses = _results_clauses(head)
+    years = {int(m.group(1)) for clause in clauses for p in _RELEASE_YEARS for m in p.finditer(clause)}
+    quarters = {q for clause in clauses for p, q in _RELEASE_QUARTERS if p.search(clause)}
+    # "second quarter of fiscal year 2023" is a second-quarter release; a
+    # fourth-quarter or full-year one names no other quarter.
+    named = quarters - {4}
+    quarter = max(named) if named else (4 if quarters else None)
+    end = None
+    for clause in clauses:
+        for m in _ENDED.finditer(clause):
+            end = _date_after(clause, m.end(), 0)
+            if end:
+                break
+        if end:
+            break
+    out: dict = {}
+    if quarter:
+        out["filing_fiscal_quarter"] = quarter
+    if end:
+        out["filing_period_end"] = end.isoformat()
+        years.update(annual_fiscal_years(end) if quarter == 4
+                     else quarter_fiscal_years(end, quarter) if quarter
+                     else annual_fiscal_years(end) + quarter_fiscal_years(end))
+    if years:
+        out["filing_fiscal_years"] = sorted(years)
+    return out
+
+
 def _earnings_release(head: str) -> dict:
     ticker = _EXCHANGE_TICKER.search(head)
-    if not ticker or not _RESULTS.search(head):
-        return {}
+    period = _release_period(head)
+    keys: list[str] = []
+    if ticker and _RESULTS.search(head):
+        keys.append(f"ticker:{ticker.group(1).lower()}")
+        name = _NAME_SPLIT.split(head[max(0, ticker.start() - 80): ticker.start()])[-1]
+    else:
+        # No ticker in the lead: a release is still recognisable by a headline
+        # at the very top that names its company and the period it reports.
+        lead = _DATE_RE.sub(" ", head[:_HEADLINE_CHARS], count=1)
+        headline = _HEADLINE.match(lead)
+        if not headline or not period.get("filing_fiscal_years") or not _RESULTS.search(lead):
+            return {}
+        name = headline.group(1)
     out: dict = {"filing_form": "earnings_release"}
-    keys = [f"ticker:{ticker.group(1).lower()}"]
-    name = _NAME_SPLIT.split(head[max(0, ticker.start() - 80): ticker.start()])[-1]
     name = name.strip(" _.,;|–—-")
     if re.search(r"[A-Za-z]{2}", name):
         out["filing_company"] = name
         if normalize_company_name(name):
             keys.append(f"name:{normalize_company_name(name)}")
+    if not keys:
+        return {}
     out["filing_entity_keys"] = keys
-    years = set()
+    out.update(period)
+    # A release is called by the period it reports and also by the year it is
+    # dated in, which is the year its guidance is about: Johnson & Johnson's
+    # "Q4 and Full-Year 2022 Results" of January 24, 2023 is where its 2023
+    # outlook is, so it is named [2022, 2023] (Decision 70, after its test look).
     first_date = _DATE_RE.search(head)
-    if first_date and _iso(first_date):
-        out["filing_date"] = _iso(first_date).isoformat()
-        years.add(_iso(first_date).year)
-    for pattern in _RELEASE_YEARS:
-        years |= {int(m.group(1)) for m in pattern.finditer(head)}
-    if years:
-        out["filing_fiscal_years"] = sorted(years)
+    if first_date:
+        when = _date_from(_ANY_DATE.match(head, first_date.start()))
+        if when:
+            out["filing_date"] = when.isoformat()
+            out["filing_fiscal_years"] = sorted({*out.get("filing_fiscal_years", []), when.year})
     return out
 
 
@@ -266,10 +507,10 @@ def extract_filing_metadata(sections: list[dict]) -> dict:
 
     Returns:
         The filing_* payload fields that could be read, or {} when the
-        document is not recognisably an SEC form or an earnings release.
-        Only filing_fiscal_years and filing_entity_keys are used for
-        retrieval; a filing missing either is simply never preferred or
-        set aside.
+        document is not recognisably a supported SEC form or an earnings
+        release. Only filing_fiscal_years, filing_fiscal_quarter and
+        filing_entity_keys are used for retrieval; a filing missing the years
+        or the keys is simply never preferred or set aside.
     """
     cover = _cover_text(sections)
     if not cover:
@@ -278,7 +519,13 @@ def extract_filing_metadata(sections: list[dict]) -> dict:
     # later. A press release mentions both too ("... in our Form 10-Q filed
     # with the Securities and Exchange Commission"), but pages in.
     header = _SEC_HEADER.search(cover[:_SEC_HEADER_WITHIN])
-    form = _SEC_FORM.search(cover, header.end(), header.end() + _SEC_FORM_WITHIN) if header else None
-    if form:
-        return _sec_filing(cover, form.group(1).upper())
+    if header:
+        form = _SEC_FORM.search(cover, header.end(), header.end() + _SEC_FORM_WITHIN)
+        name = form.group(1).upper() if form else ""
+        if name not in _SUPPORTED_FORMS:
+            # An SEC cover of a form not modelled here (S-1, 6-K, a proxy
+            # statement) or whose form name is unreadable: nothing, rather than
+            # a release read off a registration statement.
+            return {}
+        return _sec_filing(cover, _cover_text(sections, tables=True), name + ("/A" if form.group(2) else ""))
     return _earnings_release(cover[:_RELEASE_HEAD_CHARS])
