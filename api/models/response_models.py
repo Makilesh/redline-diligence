@@ -187,6 +187,16 @@ class DocumentRecord(BaseModel):
     supersedes_doc_id: str = ""
     superseded_by: str = ""
     has_redline: bool = False
+    instruction_like_passages: int = Field(
+        0,
+        description=(
+            "Indexed passages of this document whose text reads like instructions to an AI "
+            "model (Decisions 76, 82). A label only; the document is searched as usual"
+        ),
+    )
+    instruction_signals: list[str] = Field(
+        default_factory=list, description="The screen's signals found in those passages"
+    )
 
 
 class RiskSignal(BaseModel):
