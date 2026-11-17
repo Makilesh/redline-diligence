@@ -757,6 +757,53 @@ All architecture decisions that deviated from or resolved ambiguities in p4.md a
 - **Guarded by**: `tests/test_qdrant_server_copy.py` (the store copy keeps every point's dense and sparse vectors and payload across more than one scroll page).
 - **Impact**: eval/run_qdrant_server_latency.py, tests/test_qdrant_server_copy.py, README.md, DEPLOYMENT.md, DECISIONS_LOG.md (Decisions 67, 68, 70, 71 point here)
 
+## Decision 80: The round-4/5 legal retrieval results hold on 322 documents nothing was tuned on
+- **Date**: Session 16
+- **Context**: every legal-retrieval number since round 4 was chosen and tested on LegalBench-RAG's mini subset: 72 documents, split by document with seed 20261115. That covers document focus (Decision 67: 73.2 → 85.3% final-context recall on the test half), MiniLM's depth of 10 (Decision 71) and the reranker comparison (Decision 77). Mini's test half has been used. The full benchmark is already in the pinned archive (6,889 queries over 714 files, every query about a single document). That leaves 642 files that no setting was ever tuned on.
+- **Method**: the plan below was written into the scratch notes before any retrieval ran on these documents.
+  - **Fresh documents** (`load_legalbench_fresh`): every corpus file minus every file that any mini query touches through any snippet. That is ContractNLI 77, CUAD 433 and MAUD 132; there is no PrivacyQA, because mini uses all 7 of its files.
+  - **Split**: by document, per sub-corpus, with seed 20261116 (`fresh_split`, Decision 67's procedure). **fresh-dev** has 322 documents (39 / 217 / 66). **fresh-test** has 320 and is sealed: it is not evaluated, and `--split test` needs `--unseal-fresh-test`.
+  - **Query sample**: at most 3 queries per document, drawn with `Random("20261116:<document>")`. That gives 942 fresh-dev queries (ContractNLI 116, CUAD 628, MAUD 198).
+  - **Index**: all 714 files, newly indexed with the current ingestion code. That is 49,559 chunks, ten times mini's index, so a held-out passage competes with every other agreement for every rank.
+  - **Runs**: each query went through `retrieval_executor_node` once per setting. bge-reranker-v2-m3 ran on the GPU in fp16 at max_length 1024 (production) at focus 0 and 30. MiniLM-L6 ran on the GPU in fp32 at 512 (the CPU host's numerics) at 0, 10 and 30. Ettin-68m ran at 30, from rerank5's converted checkpoint. Embeddings and Qdrant calls were memoised per call arguments within a query (local mode is exact). Reranking was never cached. On a 6-query pilot the results were identical with and without memoisation.
+  - **Metrics**: primary, final-context character recall (`score_spans`, unchanged); secondary, recall@10, MRR@10 and hit@1. Paired intervals resample documents.
+  - **Rules for "holds"**, fixed in advance:
+    - (A) Decision 67's own adoption rule for bge focus 30 against 0: the interval clears zero and MRR@10 falls by no more than 2 points.
+    - (B) Decision 71's depth rule for MiniLM: eligible settings are within 1.0 point of the best recall and 2.0 points of its MRR; a non-zero depth must beat 0 with an interval clear of zero; the smallest eligible depth wins.
+    - (C) Decision 77's quality criterion (a): Ettin-68m@30 beats MiniLM@10 with an interval clear of zero.
+  - **Commitments**: no production default changes whatever the outcome, and a contradiction would go to a later decision that gets the sealed half.
+- **Measured** (fresh-dev; final-context recall, mean [95% CI]; deltas paired, documents resampled):
+  - **(A) holds.** bge 62.3 → **77.6%**, +15.3 [+12.4, +18.4] (172 queries up, 13 down). MRR@10 +13.6 [+11.4, +15.9], recall@10 +24.3, hit@1 +8.6. Another document's passage was at rank 1 on 136 queries before and 95 after. Per sub-corpus:
+    - MAUD 12.2 → 58.9 (+46.7 [+38.9, +54.1]); mini test was 21.2 → 60.9.
+    - CUAD 76.0 → 84.1 (+8.1 [+5.5, +11.0]); mini test was 84.0 → 92.9.
+    - ContractNLI 73.3 → 74.1 (+0.9 [+0.0, +2.6]); mini test was 89.0 → 89.0.
+    - The gain is larger than mini's +12.1 [+5.2, +21.2], and inside it.
+  - **(B) holds.** MiniLM at 0 / 10 / 30: 60.2 / **68.9** / 67.8; MRR 20.8 / 25.3 / 24.9. 10 against 0 is +8.7 [+6.4, +11.1]; 30 against 10 is −1.1 [−2.7, +0.5]. The rule picks 10, and only 10 is eligible. As on mini (−3.3 there), 30 is not better, but here the interval includes zero. MAUD's 30 against 10 is −2.9 [−9.1, +3.3].
+  - **(C) passes, as on mini dev.** Ettin-68m@30 is 76.2%: +7.4 [+4.7, +10.1] over MiniLM@10 (mini dev +5.5), and −1.4 [−3.9, +1.0] against bge@30 (MRR −6.4).
+  - **The GPU–CPU gap is wider.** MiniLM@10 against bge@30 is −8.7 [−11.5, −6.0] (mini dev: 78.6 against 83.3). MAUD alone is −18.9.
+  - **Absolute levels are lower than mini's.** With focus on, CUAD is 84.1 against mini test's 92.9, and ContractNLI 74.1 against 89.0. The ContractNLI NDAs are near-identical: another NDA ranks first on 52 of 116 queries. Whether the drop comes from the documents or from an index ten times larger is not separated here.
+  - **Refusal gate**: it admits 942/942 queries in every setting except bge@0 (941).
+- **Resolution**: no code change to retrieval. Document focus, its bge depth of 30 and MiniLM's depth of 10 keep their place on documents they were never tuned on. Decision 77's finding that Ettin-68m matches bge in quality also replicates. Its rejection rested on cost and on the golden and answerability gates, which this does not touch. The reusable parts ship in the harness:
+  - the full-benchmark loader;
+  - the fresh split and the sealed test half;
+  - `--corpus fresh`, `--queries-per-document` and `--unseal-fresh-test`;
+  - `--max-new-documents` for LegalBench-RAG stores, as FinanceBench has. The full corpus took 8 batches and ~50 minutes to index.
+- **Found on the way**:
+  - **NFD/NFC file name.** One CUAD file name is decomposed Unicode (NFD) in `cuad.json` ("LECLANCHE" + U+0301) but composed (NFC) in the zip, so a lookup by name misses the file. Snippet paths are now matched on NFC (`canonical_corpus_path`), which keeps the file's 8 queries.
+  - **Memory.** The measurement script's memo caches held deep copies of search and scroll results for every query of a shard. One shard process reached 11.5 GB private memory. The machine ran low and the session's shard runner was reaped. The caches are now cleared after each query, since cache hits only occur within a query. That changes no result, and the last three shards ran with it.
+  - **Sleep gap.** One shard's log shows a 10.5-hour gap between two progress lines: the laptop was asleep. Retrieval here is deterministic, so the results are unaffected.
+  - **Context expansion cost.** Context expansion's filtered scrolls cost ~1.6 s per call in local mode at 49K points; this is the "local mode is slow past 20K points" cost again (Decision 79).
+- **Not verified**:
+  - fresh-test, deliberately. It is sealed for the decision that next changes a legal-retrieval setting.
+  - Whether the lower absolute levels come from the larger index or from harder documents. Mini's dev queries on this store would separate the two.
+  - Latency, which is meaningless here: GPU, local mode, memoised searches.
+  - The CPU host itself: MiniLM's ranking was measured on the GPU in fp32, not on two cores.
+  - PrivacyQA, which has no fresh document.
+  - Queries beyond three per document. A document's queries are correlated, and the intervals resample documents.
+  - Ettin-68m at depths other than 30.
+- **Guarded by**: `tests/test_legalbench_fresh.py`. It covers ids that follow the benchmark file; the NFD file name resolving to the corpus file; fresh documents excluding files a mini query reaches through any snippet; a split that is per sub-corpus, half each, seeded, independent of input order and pinned against drift; a per-document sample independent of the other documents; the loader end to end on a small archive (halves disjoint, no mini file, every file indexed); the sealed test half and the required split at the CLI; and LegalBench-RAG stores ingesting in batches.
+- **Impact**: eval/realdocs_data.py, eval/run_realdocs_eval.py, tests/test_legalbench_fresh.py, README.md
+
 ## Decision 81: Ettin-68m's int8 build is twice as fast and still twice over the CPU host's budget
 - **Date**: Session 16
 - **Context**: Decision 77 found one small reranker that beats MiniLM-L6 on LegalBench-RAG's dev documents: `cross-encoder/ettin-reranker-68m-v1`, 84.1% final-context recall at focus 30 against MiniLM's 78.6% at 10 (+5.5 [+2.2, +9.4]). It cost 306 ms a pair against 74 ms on the emulated two-core host, about 8 s more per legal question. Every Ettin repository also ships dynamically quantised ONNX exports, and onnxruntime is already installed. Question: does the int8 build fit the budget?

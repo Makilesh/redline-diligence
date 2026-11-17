@@ -36,6 +36,7 @@ import json
 import os
 import random
 import sys
+import unicodedata
 import urllib.request
 import zipfile
 from dataclasses import dataclass, field
@@ -228,6 +229,160 @@ def load_legalbench_mini(root: Path | None = None, verify: bool = True,
             for name in sorted({s[0] for q in queries for s in q.snippets})
         }
     return LegalBenchMini(queries=queries, documents=documents)
+
+
+# ------------------------------------------------------------------------------
+# The full benchmark, and a held-out set nothing was tuned on (Decision 80)
+# ------------------------------------------------------------------------------
+# Every legal-retrieval setting since Decision 67 was chosen and tested on
+# mini's 72 documents. The full benchmark has 6,889 queries over 714 files;
+# the 642 files no mini query touches are "fresh". They are split by
+# document, per sub-corpus, with a seed fixed before anything was measured on
+# them: fresh-dev is for measuring and tuning, fresh-test stays sealed for one
+# later look. PrivacyQA has no fresh document (mini uses all 7).
+FRESH_SPLIT_SEED = 20261116
+# Queries kept per fresh document. The full benchmark averages 9.6 queries a
+# document, and a query costs seconds on a 49K-chunk local-mode store; the
+# intervals resample documents, so documents, not queries per document, are
+# what buys precision.
+FRESH_QUERIES_PER_DOCUMENT = 3
+
+
+def canonical_corpus_path(path: str, corpus: dict[str, str]) -> str:
+    """
+    The corpus name a benchmark snippet's file_path refers to. One CUAD file
+    name is NFD in cuad.json ("LECLANCHE\\u0301") and NFC in the zip; matching
+    on NFC keeps its eight queries.
+
+    Args:
+        path: file_path as the benchmark JSON gives it.
+        corpus: NFC-normalised name -> corpus name, for every file in the zip.
+    """
+    return corpus.get(unicodedata.normalize("NFC", path), path)
+
+
+def legalbench_full_queries(tests_by_subset: dict[str, list[dict]],
+                            corpus_names: list[str] | None = None) -> list[SpanQuery]:
+    """
+    Every benchmark query, id "<subset>_f<index in its benchmark file>" so an
+    id never changes with the sample drawn from them.
+
+    Args:
+        tests_by_subset: Sub-corpus name -> the "tests" list of its benchmark JSON.
+        corpus_names: Every file under corpus/ (to canonicalise snippet paths).
+
+    Returns:
+        SpanQuery list, sub-corpora in LEGALBENCH_SUBSETS order.
+    """
+    corpus = {unicodedata.normalize("NFC", n): n for n in corpus_names or []}
+    queries: list[SpanQuery] = []
+    for subset in LEGALBENCH_SUBSETS:
+        for n, test in enumerate(tests_by_subset.get(subset) or []):
+            queries.append(SpanQuery(
+                id=f"{subset}_f{n:04d}",
+                subset=subset,
+                query=test["query"],
+                snippets=[(canonical_corpus_path(s["file_path"], corpus), int(s["span"][0]), int(s["span"][1]))
+                          for s in test["snippets"]],
+            ))
+    return queries
+
+
+def fresh_documents(full: list[SpanQuery], mini: list[SpanQuery]) -> dict[str, list[str]]:
+    """
+    Sub-corpus -> sorted documents of the full benchmark that no mini query
+    uses (any snippet, not only the first), so nothing tuned on mini is in them.
+    """
+    used = {p for q in mini for p, _, _ in q.snippets}
+    out: dict[str, set[str]] = {}
+    for q in full:
+        for path, _, _ in q.snippets:
+            if path not in used:
+                out.setdefault(q.subset, set()).add(path)
+    return {subset: sorted(docs) for subset, docs in sorted(out.items())}
+
+
+def fresh_split(documents_by_subset: dict[str, list[str]], seed: int = FRESH_SPLIT_SEED) -> dict[str, str]:
+    """
+    Document -> "dev" or "test": per sub-corpus, the sorted names shuffled with
+    Random("<seed>:<subset>") and the first half (the odd one) to dev — the
+    procedure Decision 67 used on mini (split_legalbench_documents), applied to
+    the fresh documents with their own seed.
+    """
+    split: dict[str, str] = {}
+    for subset in sorted(documents_by_subset):
+        docs = sorted(documents_by_subset[subset])
+        random.Random(f"{seed}:{subset}").shuffle(docs)
+        n_dev = (len(docs) + 1) // 2
+        split.update({d: ("dev" if i < n_dev else "test") for i, d in enumerate(docs)})
+    return split
+
+
+def sample_queries_per_document(queries: list[SpanQuery], per_document: int,
+                                seed: int = FRESH_SPLIT_SEED) -> list[SpanQuery]:
+    """
+    At most `per_document` queries about each document, drawn with
+    Random("<seed>:<document>") from its queries in id order — so a document's
+    sample does not depend on which other documents are in the set. Returned
+    in id order within the input's sub-corpus order.
+    """
+    by_doc: dict[str, list[SpanQuery]] = {}
+    for q in queries:
+        by_doc.setdefault(q.document, []).append(q)
+    kept: set[str] = set()
+    for doc, items in by_doc.items():
+        items = sorted(items, key=lambda q: q.id)
+        if len(items) > per_document:
+            items = random.Random(f"{seed}:{doc}").sample(items, per_document)
+        kept.update(q.id for q in items)
+    return [q for q in queries if q.id in kept]
+
+
+@dataclass
+class LegalBenchFresh:
+    queries: list[SpanQuery]                                # the split's sampled queries
+    documents: dict[str, str] = field(default_factory=dict)  # EVERY corpus file -> text
+    split: dict[str, str] = field(default_factory=dict)      # fresh document -> "dev" / "test"
+
+
+def load_legalbench_fresh(split: str, root: Path | None = None, verify: bool = True,
+                          per_document: int | None = FRESH_QUERIES_PER_DOCUMENT,
+                          seed: int = FRESH_SPLIT_SEED) -> LegalBenchFresh:
+    """
+    The sampled queries of one half of the fresh documents, and the text of
+    every corpus file (all 714 are indexed: a held-out document's passages
+    compete with mini's and with the other half's for every rank).
+
+    Args:
+        split: "dev" or "test".
+        per_document: Queries kept per document (None keeps all).
+        seed: Split and sampling seed.
+    """
+    if split not in ("dev", "test"):
+        raise ValueError(f"split must be 'dev' or 'test', not {split!r}")
+    path = fetch_legalbench(root, verify=verify)
+    with zipfile.ZipFile(path) as archive:
+        tests = {
+            subset: json.loads(archive.read(f"benchmarks/{subset}.json"))["tests"]
+            for subset in LEGALBENCH_SUBSETS
+        }
+        names = sorted(n[len("corpus/"):] for n in archive.namelist()
+                       if n.startswith("corpus/") and not n.endswith("/"))
+        documents = {name: universal_newlines(archive.read(f"corpus/{name}").decode("utf-8"))
+                     for name in names}
+    full = legalbench_full_queries(tests, names)
+    corpus = {unicodedata.normalize("NFC", n): n for n in names}
+    mini = [SpanQuery(id=q.id, subset=q.subset, query=q.query,
+                      snippets=[(canonical_corpus_path(p, corpus), s, e) for p, s, e in q.snippets])
+            for q in select_legalbench_mini(tests)]
+    halves = fresh_split(fresh_documents(full, mini), seed)
+    # Single-document queries only (the full benchmark has no other kind; a
+    # query reaching into a mini document would not be fresh).
+    chosen = [q for q in full if halves.get(q.document) == split
+              and all(halves.get(p) == split for p, _, _ in q.snippets)]
+    if per_document is not None:
+        chosen = sample_queries_per_document(chosen, per_document, seed)
+    return LegalBenchFresh(queries=chosen, documents=documents, split=halves)
 
 
 # ==============================================================================

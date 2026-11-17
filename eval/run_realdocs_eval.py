@@ -9,6 +9,8 @@ FinanceBench (10-K/10-Q PDFs, evidence pages). Zero LLM calls.
     python -m eval.run_realdocs_eval legalbench --compare eval/results/realdocs_legalbench_<date>.json
     python -m eval.run_realdocs_eval legalbench --store <dir> --ingest-only        # index once
     python -m eval.run_realdocs_eval legalbench --store <dir> --split dev          # tune on dev
+    python -m eval.run_realdocs_eval legalbench --corpus fresh --store <dir> --ingest-only --max-new-documents 200
+    python -m eval.run_realdocs_eval legalbench --corpus fresh --store <dir> --split dev   # held out from mini
 
 Why: every other quality number in this repository is measured on nine
 synthetic plain-text documents (~13K tokens) that fit in one prompt, so no
@@ -418,8 +420,17 @@ async def run_legalbench(args) -> dict:
     from src.vector_db.reranker import warm_models
 
     deal_id = DEAL_ID["legalbench"]
-    mini = data.load_legalbench_mini(subsets=tuple(args.subsets))
-    queries = mini.queries
+    fresh = None
+    if args.corpus == "fresh":
+        # Decision 80: queries about documents no mini query uses, one half of
+        # them; every corpus file is indexed.
+        # (--ingest-only may omit --split: only the documents are used then.)
+        fresh = data.load_legalbench_fresh(args.split or "dev", per_document=args.queries_per_document or None,
+                                           seed=args.split_seed)
+        queries = [q for q in fresh.queries if q.subset in args.subsets]
+    else:
+        mini = data.load_legalbench_mini(subsets=tuple(args.subsets))
+        queries = mini.queries
     if args.max_queries:
         per: Counter = Counter()
         kept = []
@@ -430,9 +441,13 @@ async def run_legalbench(args) -> dict:
         queries = kept
     # The whole corpus is indexed whatever --split asks: a held-out document's
     # passages still compete for every rank, as they would in a data room.
-    documents = {p: mini.documents[p] for p in sorted({s[0] for q in queries for s in q.snippets})}
-    split = None
-    if args.split:
+    if fresh is not None:
+        documents = fresh.documents
+        split = fresh.split
+    else:
+        documents = {p: mini.documents[p] for p in sorted({s[0] for q in queries for s in q.snippets})}
+        split = None
+    if args.split and fresh is None:
         split = split_legalbench_documents(queries, args.split_seed)
         queries = [q for q in queries if split.get(q.document) == args.split]
 
@@ -445,11 +460,19 @@ async def run_legalbench(args) -> dict:
             # own store directory.
             client, ingestion = await open_store(Path(args.store))
             done = {d["filename"] for d in ingestion}
-            ingestion += await index_files(client, [f for f in files if f[1] not in done], deal_id)
+            todo = [f for f in files if f[1] not in done]
+            if args.max_new_documents is not None:
+                # The whole 714-file corpus takes ~45 minutes to index; in
+                # batches, no single run holds the machine that long.
+                todo = todo[: args.max_new_documents]
+            ingestion += await index_files(client, todo, deal_id)
             (Path(args.store) / "ingestion.json").write_text(json.dumps(ingestion, indent=1), encoding="utf-8")
-            if args.ingest_only:
+            missing = [name for _, name in files if name not in {d["filename"] for d in ingestion}]
+            if args.ingest_only or missing:
                 await client.close()
-                return {"benchmark": "legalbench", "ingest_only": True, "remaining": []}
+                print(f"[realdocs] store {args.store}: {len(ingestion)} documents ingested, "
+                      f"{len(missing)} still to do", file=sys.stderr)
+                return {"benchmark": "legalbench", "ingest_only": True, "remaining": missing}
         else:
             client = await new_index()
             ingestion = await index_files(client, files, deal_id)
@@ -510,7 +533,10 @@ async def run_legalbench(args) -> dict:
     return {
         "benchmark": "legalbench",
         "dataset": {
-            "name": "LegalBench-RAG mini (authors' benchmark.py selection)",
+            "name": ("LegalBench-RAG full corpus, fresh documents (no mini query uses them), "
+                     f"at most {args.queries_per_document} queries each" if fresh is not None
+                     else "LegalBench-RAG mini (authors' benchmark.py selection)"),
+            "corpus": args.corpus,
             "zip_sha256": data.LEGALBENCH_SHA256, "code_revision": data.LEGALBENCH_CODE_REVISION,
             "licences": data.LEGALBENCH_LICENCES, "subsets": list(args.subsets),
             "queries": len(queries), "documents": len(documents),
@@ -1025,7 +1051,15 @@ def parse_args(argv=None):
     parser.add_argument("--k", type=int, nargs="+", default=list(DEFAULT_K))
     parser.add_argument("--subsets", nargs="+", choices=data.LEGALBENCH_SUBSETS,
                         default=list(data.LEGALBENCH_SUBSETS), help="LegalBench-RAG sub-corpora")
-    parser.add_argument("--max-queries", type=int, help="LegalBench-RAG: first N mini queries per subset (debugging)")
+    parser.add_argument("--max-queries", type=int, help="LegalBench-RAG: first N queries per subset (debugging)")
+    parser.add_argument("--corpus", choices=("mini", "fresh"), default="mini",
+                        help="LegalBench-RAG: mini (72 documents, the round-4/5 tuning set), or fresh — the "
+                             "documents no mini query uses, split by --split (Decision 80); every corpus "
+                             "file is indexed")
+    parser.add_argument("--queries-per-document", type=int, default=data.FRESH_QUERIES_PER_DOCUMENT,
+                        help="LegalBench-RAG fresh: seeded sample of at most N queries per document (0: all)")
+    parser.add_argument("--unseal-fresh-test", action="store_true",
+                        help="LegalBench-RAG fresh: allow --split test (sealed for one later look)")
     parser.add_argument("--max-documents", type=int, help="FinanceBench: seeded sample of N filings")
     parser.add_argument("--documents", nargs="+", metavar="DOC_NAME", help="FinanceBench: exactly these filings")
     parser.add_argument("--split", choices=("dev", "test"),
@@ -1037,12 +1071,14 @@ def parse_args(argv=None):
     parser.add_argument("--retrieval-config", metavar="JSON",
                         help="LegalBench-RAG: overrides merged into the legal retrieval config, "
                              '(JSON), e.g. {"dense_weight": 0.6, "sparse_weight": 0.4}')
-    parser.add_argument("--split-seed", type=int, default=20261115, help="LegalBench-RAG split seed")
+    parser.add_argument("--split-seed", type=int,
+                        help="LegalBench-RAG split seed (default 20261115 for mini, "
+                             f"{data.FRESH_SPLIT_SEED} for fresh)")
     parser.add_argument("--store", metavar="DIR",
                         help="on-disk index (outside the repo), reused across runs; FinanceBench "
                              "ingests in batches into it")
     parser.add_argument("--max-new-documents", type=int, metavar="N",
-                        help="with --store: index at most N filings not yet in the store")
+                        help="with --store: index at most N documents not yet in the store")
     parser.add_argument("--ingest-only", action="store_true", help="with --store: stop after ingesting")
     parser.add_argument("--compare", metavar="RESULTS_JSON", help="paired before/after against a previous run")
     parser.add_argument("--output-dir", default=str(RESULTS_DIR))
@@ -1050,6 +1086,15 @@ def parse_args(argv=None):
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
     args.k = sorted(set(k for k in args.k if 1 <= k <= RANK_DEPTH))
+    if args.split_seed is None:
+        args.split_seed = data.FRESH_SPLIT_SEED if args.corpus == "fresh" else 20261115
+    if args.benchmark == "legalbench" and args.corpus == "fresh":
+        if not args.split and not args.ingest_only:
+            parser.error("--corpus fresh needs --split dev (or test): both halves together would "
+                         "measure the sealed half")
+        if args.split == "test" and not args.unseal_fresh_test:
+            parser.error("the fresh test half is sealed for one later look; pass --unseal-fresh-test "
+                         "only for that run")
     return args
 
 
