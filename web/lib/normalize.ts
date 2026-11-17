@@ -19,9 +19,12 @@ import type {
   FigureCheck,
   FigureStatus,
   IngestResult,
+  InjectionReview,
+  InjectionScreen,
   NodePerf,
   NodeTiming,
   Outcome,
+  PassageLocation,
   PlannedStage,
   QueryResponse,
   StageEvent,
@@ -131,6 +134,38 @@ function normalizeClaim(raw: unknown): ClaimCheck | null {
     absence: raw.absence === true || undefined,
     citation_mismatch: mismatch.length > 0 ? mismatch : undefined,
     cited_documents: mismatch.length > 0 ? stringList(raw.cited_documents) : undefined,
+    injection_suspect: raw.injection_suspect === true || undefined,
+  };
+}
+
+function normalizeLocation(raw: Bag): PassageLocation {
+  const page = numOrNull(raw.page_number);
+  return {
+    page_number: page !== null && page >= 1 ? page : null,
+    section_heading: str(raw.section_heading),
+    signals: stringList(raw.signals),
+  };
+}
+
+/** Normalises `injection_review`; absent (an older server) means none found. */
+function normalizeInjectionReview(raw: unknown): InjectionReview {
+  if (!isBag(raw)) return { flagged_passages: [], cited_flagged_passages: 0, tainted_figures: [] };
+  return {
+    flagged_passages: list(raw.flagged_passages)
+      .filter(isBag)
+      .map((p) => ({ source_file: str(p.source_file), ...normalizeLocation(p) })),
+    cited_flagged_passages: Math.max(0, Math.floor(num(raw.cited_flagged_passages))),
+    tainted_figures: stringList(raw.tainted_figures),
+  };
+}
+
+/** Normalises `injection_screen`; absent (an older server) means nothing flagged. */
+function normalizeInjectionScreen(raw: unknown): InjectionScreen {
+  if (!isBag(raw)) return { flagged_passages: 0, signals: [], locations: [] };
+  return {
+    flagged_passages: Math.max(0, Math.floor(num(raw.flagged_passages))),
+    signals: stringList(raw.signals),
+    locations: list(raw.locations).filter(isBag).map(normalizeLocation),
   };
 }
 
@@ -211,6 +246,7 @@ export function normalizeQueryResponse(raw: unknown): QueryResponse | null {
     node_timings: timings,
     llm_calls: num(raw.llm_calls, timings.reduce((n, t) => n + t.llm_calls, 0)),
     request_id: str(raw.request_id),
+    injection_review: normalizeInjectionReview(raw.injection_review),
   };
 }
 
@@ -233,6 +269,7 @@ export function normalizeIngestResult(raw: unknown): IngestResult | null {
       }))
       // A candidate the client cannot describe is dropped rather than guessed at.
       .filter((c): c is VersionCandidate => Boolean(c.relation && (c.source_file || c.doc_id))),
+    injection_screen: normalizeInjectionScreen(raw.injection_screen),
   };
 }
 

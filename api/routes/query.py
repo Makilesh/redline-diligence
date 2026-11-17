@@ -30,7 +30,7 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
 from api.models.request_models import QueryRequest
-from api.models.response_models import QueryResponse, Citation
+from api.models.response_models import Citation, FlaggedPassage, InjectionReview, QueryResponse
 from api.security import (
     ClientContext,
     acquire_pipeline_slot,
@@ -40,6 +40,7 @@ from api.security import (
     require_readable_deal,
     scrub_public,
 )
+from src.data_processing.injection_screen import flagged_locations
 from src.decisions.laya_client import LayaUnavailable
 from src.decisions.query_guard import BLOCKED_MESSAGE, check_query, query_guard_enabled
 from src.workflow.orchestrator import (
@@ -75,6 +76,44 @@ def _heartbeat_seconds() -> float:
         return max(0.0, float(os.getenv("SSE_HEARTBEAT_SECONDS", "15")))
     except ValueError:
         return 15.0
+
+
+def _injection_review(trace: list) -> InjectionReview:
+    """
+    The validator's injection findings for the final answer (Decision 82).
+
+    The flags already say what is wrong when the answer leans on
+    instruction-like text, but both consoles fold them behind the claim list,
+    and a flagged passage the answer does not cite is in the trace only. This
+    is the structured summary a console can show in one line: where such
+    passages are, how many the answer cites, which figures only they state.
+    Read from the last validator entry (the final answer's, after any
+    re-synthesis); locations only — the trace's excerpts and sentences are not
+    copied.
+
+    Args:
+        trace: The run's agent_trace, as the pipeline wrote it.
+
+    Returns:
+        The review; empty when the validator saw no flagged passage or did not run.
+    """
+    entry = next(
+        (t for t in reversed(trace or [])
+         if isinstance(t, dict) and t.get("agent") == "hallucination_validator"),
+        None,
+    )
+    if not entry or not entry.get("suspected_injection"):
+        return InjectionReview()
+    cited = entry.get("injection_cited_chunks")
+    return InjectionReview(
+        flagged_passages=[
+            FlaggedPassage(**loc) for loc in flagged_locations(entry["suspected_injection"])
+        ],
+        cited_flagged_passages=cited if isinstance(cited, int) and cited > 0 else 0,
+        tainted_figures=list(dict.fromkeys(
+            f for f in entry.get("injection_tainted_figures") or [] if isinstance(f, str) and f
+        )),
+    )
 
 
 def _build_response(
@@ -145,6 +184,7 @@ def _build_response(
         node_timings=timings,
         llm_calls=sum(row["llm_calls"] for row in timings),
         request_id=request_id,
+        injection_review=_injection_review(result.get("agent_trace", [])),
     )
 
 

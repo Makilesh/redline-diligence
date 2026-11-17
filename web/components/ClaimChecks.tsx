@@ -11,6 +11,7 @@ import {
   countClaims,
   evidenceLocation,
   figureView,
+  injectionMarker,
   needsReview,
   sortClaimsForReview,
   type ClaimMarker,
@@ -40,7 +41,7 @@ const TONE_RULE: Record<Tone, string> = {
 
 function ClaimRow({ check }: { check: ClaimCheck }) {
   const view = claimView(check);
-  const markers = [claimMarker(check), citationMarker(check)].filter(
+  const markers = [claimMarker(check), citationMarker(check), injectionMarker(check)].filter(
     (m): m is ClaimMarker => m !== null,
   );
   const location = evidenceLocation(check);
@@ -145,6 +146,7 @@ export default function ClaimChecks({ checks }: ClaimChecksProps) {
   const ordered = sortClaimsForReview(checks);
   // A supported claim whose citation does not hold its figure is not folded
   // away with the rest: the reader would open the wrong source (Decision 78).
+  // Nor is one whose figure only instruction-like text states (Decision 76).
   const attention = ordered.filter(needsReview);
   const supported = ordered.filter((c) => !needsReview(c));
 

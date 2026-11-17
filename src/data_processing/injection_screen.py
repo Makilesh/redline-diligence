@@ -231,3 +231,63 @@ def instruction_spans(text: str) -> list[tuple[int, int, list[str]]]:
         else:
             spans.append((start, end, [hit.signal]))
     return spans
+
+
+# How much of a section heading is kept to say where a flagged passage is, and
+# how many distinct places are listed (the number of flagged passages is
+# reported in full alongside).
+_HEADING_CHARS = 80
+LOCATION_LIMIT = 10
+
+
+def flagged_locations(items, limit: int = LOCATION_LIMIT) -> list[dict]:
+    """
+    Where flagged passages are, without what they say — for API responses.
+
+    The flagged text itself never goes into a response summary: Decision 76
+    keeps it out of the validator's flags (they can be fed back to a model),
+    and Decision 82 keeps it out of the ingest and answer summaries built from
+    these locations. A location is the file, page and section heading. A
+    heading that itself screens as instruction-like is the flagged text, not a
+    locator, so it is dropped; the rest are whitespace-collapsed and cut to 80
+    characters.
+
+    Args:
+        items: Flagged-passage dicts with any of source_file, page_number,
+            section_heading and signals (ingest_pipeline's suspected_injection,
+            the validator trace's suspected_injection). Other keys — the
+            trace's excerpts — are ignored.
+        limit: Distinct locations kept, in first-seen order.
+
+    Returns:
+        [{source_file, page_number, section_heading, signals}], one per
+        distinct (source_file, page_number, section_heading), with the signals
+        of every passage there merged, in SIGNALS order.
+    """
+    merged: dict[tuple, dict] = {}
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        heading = " ".join(str(item.get("section_heading") or "").split())
+        if heading and screen_text(heading):
+            heading = ""
+        if len(heading) > _HEADING_CHARS:
+            heading = heading[: _HEADING_CHARS - 1] + "…"
+        page = item.get("page_number")
+        if isinstance(page, bool) or not isinstance(page, int) or page < 1:
+            page = None
+        key = (str(item.get("source_file") or ""), page, heading)
+        if key not in merged:
+            if len(merged) >= limit:
+                continue
+            merged[key] = {
+                "source_file": key[0], "page_number": page, "section_heading": heading,
+                "signals": set(),
+            }
+        merged[key]["signals"].update(
+            s for s in item.get("signals") or [] if isinstance(s, str) and s in SIGNALS
+        )
+    return [
+        {**entry, "signals": [s for s in SIGNALS if s in entry["signals"]]}
+        for entry in merged.values()
+    ]

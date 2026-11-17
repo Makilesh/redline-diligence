@@ -2,9 +2,12 @@
 Document uploader component — file upload with category override and version controls.
 """
 
+import re
+
 import streamlit as st
 import requests
 
+from app.components.verification import passage_location, signal_labels
 from src.utils.admin_client import admin_headers
 
 
@@ -28,6 +31,39 @@ _RELATION = {
 }
 
 
+def _md_escape(text: str) -> str:
+    """Backslash-escapes ASCII punctuation so document text renders as plain text."""
+    return re.sub(r"([!-/:-@\[-`{-~])", r"\\\1", text)
+
+
+def _describe_injection_screen(screen) -> str:
+    """
+    A markdown line for passages the ingest screen flagged (Decision 82); "" if none.
+
+    Says how many passages, what kind of wording and where, and that the file
+    was indexed as written. Locations only — the API never sends the text —
+    and escaped, since a section heading is the document's own words.
+    """
+    if not isinstance(screen, dict):
+        return ""
+    count = screen.get("flagged_passages")
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        return ""
+    where = "; ".join(
+        _md_escape(loc)
+        for loc in (passage_location(x, with_file=False) for x in screen.get("locations") or [])
+        if loc
+    )
+    labels = signal_labels(screen.get("signals"))
+    return (
+        f"  - ⚠️ {count} passage(s) read like instructions to an AI model"
+        + (f" ({labels})" if labels else "")
+        + (f": {where}" if where else "")
+        + ". The file was indexed as written; an answer that cites these passages, or takes "
+        "a figure only from them, is never shown as verified."
+    )
+
+
 def _describe_ingest(filename: str, result: dict) -> list[str]:
     """
     Markdown lines reporting one ingestion: partial status, the server's notices,
@@ -40,6 +76,9 @@ def _describe_ingest(filename: str, result: dict) -> list[str]:
         f"({result.get('document_category', '')})" + (" — partly indexed" if partial else "")
     ]
     lines += [f"  - {n}" for n in result.get("notices") or [] if isinstance(n, str)]
+    screen_line = _describe_injection_screen(result.get("injection_screen"))
+    if screen_line:
+        lines.append(screen_line)
     for c in result.get("version_candidates") or []:
         relation = _RELATION.get(c.get("relation", "")) if isinstance(c, dict) else None
         if relation:

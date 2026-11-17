@@ -77,6 +77,90 @@ def is_miscited(check: dict) -> bool:
     return any(isinstance(m, dict) and m.get("figure") for m in check.get("citation_mismatch") or [])
 
 
+# Beside a claim with a figure that only instruction-like document text states
+# (Decision 76: the figure is "in the documents", so it can still read as supported).
+INJECTION_SUSPECT = "figure only in instruction-like text"
+
+# The ingest screen's signals (src/data_processing/injection_screen.py), in words.
+SIGNAL_LABELS = {
+    "instruction_override": "an instruction to ignore earlier instructions",
+    "model_address": "text addressed to an AI model",
+    "role_marker": "chat-role labels such as SYSTEM:",
+    "forged_marker": "imitation citation or calculation markers",
+    "supersession_claim": "a claim that other documents are out of date",
+    "invisible_text": "invisible characters",
+}
+
+
+def signal_labels(signals) -> str:
+    """The known signals in words, comma-separated; unknown names are left out."""
+    return ", ".join(SIGNAL_LABELS[s] for s in SIGNAL_LABELS if s in (signals or []))
+
+
+def passage_location(loc: dict, with_file: bool = True) -> str:
+    """'memo.pdf, p. 3 · Fees' — where a flagged passage is; "" when nothing is known."""
+    if not isinstance(loc, dict):
+        return ""
+    source = str(loc.get("source_file") or "") if with_file else ""
+    page = loc.get("page_number")
+    page_text = f"p. {page}" if isinstance(page, int) and not isinstance(page, bool) else ""
+    head = ", ".join(p for p in (source, page_text) if p)
+    return " · ".join(p for p in (head, str(loc.get("section_heading") or "")) if p)
+
+
+def _review(result: dict) -> dict:
+    review = result.get("injection_review")
+    return review if isinstance(review, dict) else {}
+
+
+def _tainted(review: dict) -> list[str]:
+    return [f for f in review.get("tainted_figures") or [] if isinstance(f, str) and f]
+
+
+def _cited_flagged(review: dict) -> int:
+    n = review.get("cited_flagged_passages")
+    return n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else 0
+
+
+def injection_note(review: dict | None) -> tuple[str, str] | None:
+    """
+    One line on instruction-like text behind an answer (Decision 82), or None.
+
+    The flags say the same thing but fold away behind the claim list, and a
+    flagged passage the answer does not cite is otherwise only in the trace.
+    Locations only — the API never sends the flagged text.
+
+    Returns:
+        (text, variant) — "warn" when the answer cites such a passage or takes a
+        figure only from one, "muted" when it was retrieved and not used.
+    """
+    review = review if isinstance(review, dict) else {}
+    passages = [p for p in review.get("flagged_passages") or [] if isinstance(p, dict)]
+    if not passages:
+        return None
+    where = "; ".join(loc for loc in map(passage_location, passages) if loc)
+    where = where or "a retrieved document"
+    labels = signal_labels({s for p in passages for s in p.get("signals") or []})
+    labelled = f" ({labels})" if labels else ""
+    tainted = _tainted(review)
+    if tainted or _cited_flagged(review):
+        extra = (
+            f" — {', '.join(tainted)} {'is' if len(tainted) == 1 else 'are'} stated nowhere else"
+            if tainted else ""
+        )
+        return (
+            f"This answer relies on text that reads like instructions to an AI model{labelled} "
+            f"in {where}{extra}. Check those statements against the document itself.",
+            "warn",
+        )
+    verb = "contains" if len(passages) == 1 else "contain"
+    return (
+        f"Retrieved but not cited: {where} {verb} text that reads like instructions to an AI "
+        f"model{labelled}.",
+        "muted",
+    )
+
+
 def citation_note(check: dict) -> str:
     """Where the claim's miscited figures are stated, in a sentence; "" when none."""
     items = [m for m in check.get("citation_mismatch") or [] if isinstance(m, dict) and m.get("figure")]
@@ -110,6 +194,8 @@ def answer_verdict(result: dict) -> tuple[str, str, str]:
     miscited = sum(1 for c in checks if is_miscited(c))
     status = result.get("validation_status")
     cut = result.get("answer_truncated") is True
+    tainted = _tainted(_review(result))
+    cites_flagged = _cited_flagged(_review(result)) > 0
 
     if result_outcome(result) == "answered_unverified" or status == "failed":
         return (
@@ -122,7 +208,10 @@ def answer_verdict(result: dict) -> tuple[str, str, str]:
                 else "The answer did not pass verification, even after a revision."
             ) + (f" Also, {_CUT_OFF}" if cut else ""),
         )
-    if status == "warning" or (status == "passed" and (not_confirmed or cut or miscited)):
+    injected = bool(tainted) or cites_flagged
+    if status == "warning" or (
+        status == "passed" and (not_confirmed or cut or miscited or injected)
+    ):
         # A cut answer is downgraded to "warning" with every claim possibly
         # supported; "0 could not be confirmed" would hide the real reason.
         if cut and not not_confirmed:
@@ -131,11 +220,23 @@ def answer_verdict(result: dict) -> tuple[str, str, str]:
                 if total
                 else f"Nothing in it could be checked, and {_CUT_OFF}"
             )
-        elif miscited and not not_confirmed:
-            # Downgraded for a citation that does not hold its figure.
+        elif total and (miscited or injected) and not not_confirmed:
+            # Downgraded for a citation that does not hold its figure
+            # (Decision 78), or for leaning on instruction-like text
+            # (Decision 76) — every statement checked out, so say which.
+            reasons = []
+            if miscited:
+                reasons.append(f"{miscited} cite(s) a document that does not state the figure")
+            if tainted:
+                reasons.append(
+                    f"{', '.join(tainted)} {'rests' if len(tainted) == 1 else 'rest'} only on "
+                    "text that reads like instructions to an AI model"
+                )
+            elif cites_flagged:
+                reasons.append("it cites a passage that reads like instructions to an AI model")
             detail = (
-                f"All {total} statement(s) matched to the documents, but {miscited} cite(s) a "
-                "document that does not state the figure."
+                f"All {total} statement(s) matched to the documents, but "
+                + ", and ".join(reasons) + "."
             )
         else:
             detail = (
@@ -193,6 +294,15 @@ def _figure_note(fig: dict) -> str:
     return "found"
 
 
+def needs_review(check: dict) -> bool:
+    """Whether a claim is listed before the fold rather than with the supported ones."""
+    return (
+        check.get("status") != "supported"
+        or is_miscited(check)
+        or check.get("injection_suspect") is True
+    )
+
+
 def _rank(check: dict) -> int:
     label, _ = claim_label(check)
     return {"CONTRADICTED": 0, "UNSUPPORTED": 1, "NOT CHECKED": 3, "SUPPORTED": 4}.get(label, 2)
@@ -219,9 +329,10 @@ def render_claim_checks(checks: list[dict]) -> None:
 
     ordered = sorted(checks, key=_rank)
     # A supported claim whose citation does not hold its figure is not folded
-    # away: the reader would open the wrong source (Decision 78).
-    attention = [c for c in ordered if c.get("status") != "supported" or is_miscited(c)]
-    supported = [c for c in ordered if c.get("status") == "supported" and not is_miscited(c)]
+    # away: the reader would open the wrong source (Decision 78). Nor is one
+    # whose figure only instruction-like text states (Decision 76).
+    attention = [c for c in ordered if needs_review(c)]
+    supported = [c for c in ordered if not needs_review(c)]
 
     for c in attention:
         _render_claim(c)
@@ -241,6 +352,8 @@ def _render_claim(check: dict) -> None:
         header += f"<span class='dd-cite-meta'>· {DOUBTED_WORDING}</span>"
     if is_miscited(check):
         header += f"<span class='dd-cite-meta'>· {MISCITED}</span>"
+    if check.get("injection_suspect") is True:
+        header += f"<span class='dd-cite-meta'>· {INJECTION_SUSPECT}</span>"
     st.markdown(header, unsafe_allow_html=True)
     st.markdown(escape_currency(html.escape(check.get("claim") or "")))
     note = citation_note(check)
