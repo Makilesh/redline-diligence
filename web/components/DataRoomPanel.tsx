@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
   FileText,
+  FileWarning,
   History,
   ShieldAlert,
   TriangleAlert,
@@ -12,6 +13,7 @@ import {
 
 import { prettyFilename } from "@/lib/citations";
 import type { DocumentRecord, RiskSignal, Severity } from "@/lib/types";
+import { signalLabels } from "@/lib/verification";
 
 interface DataRoomPanelProps {
   documents: DocumentRecord[];
@@ -115,6 +117,25 @@ function DocumentList({ documents }: { documents: DocumentRecord[] }) {
                   <span className="text-violet">redlined</span>
                 )}
               </div>
+
+              {(doc.instruction_like_passages ?? 0) > 0 && (
+                // The upload's screen result, kept with the document (Decision 82):
+                // a label only — the file is searched as usual, and an answer
+                // resting on these passages is never shown as Verified.
+                <div
+                  className="mt-1.5 flex items-start gap-1 text-[0.66rem] leading-snug text-warn"
+                  title="Text that reads like instructions to an AI model. The file is searched as usual; an answer resting on these passages is never shown as Verified."
+                >
+                  <FileWarning size={10} className="mt-0.5 shrink-0" aria-hidden />
+                  <span>
+                    {doc.instruction_like_passages}{" "}
+                    {doc.instruction_like_passages === 1 ? "passage reads" : "passages read"} like
+                    instructions to an AI model
+                    {signalLabels(doc.instruction_signals ?? []) &&
+                      ` (${signalLabels(doc.instruction_signals ?? [])})`}
+                  </span>
+                </div>
+              )}
 
               {!doc.is_current_version && (
                 <div className="mt-1.5 inline-flex items-center gap-1 rounded bg-bad/10 px-1.5 py-0.5 text-[0.62rem] font-semibold uppercase tracking-wider text-bad">
