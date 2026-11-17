@@ -281,7 +281,14 @@ async def ingest_document(
         shutil.rmtree(temp_dir, ignore_errors=True)
 
     doc_id = result["doc_id"]
-    notices: list[str] = []
+    # The pipeline's warnings are what make an upload "partial" (failed or
+    # hidden sheets, pages without a text layer, tables not extracted, a
+    # superseded re-upload). They are written for the uploader and name only
+    # parts of the uploaded file, so they are shown as the reason; without
+    # them the consoles could only say "Partly indexed".
+    notices: list[str] = list(
+        dict.fromkeys(w for w in result.get("warnings") or [] if isinstance(w, str) and w)
+    )
 
     # Retire the superseded document's chunks so retrieval's is_current_version=1
     # filter stops returning them, and any citation that does surface them
