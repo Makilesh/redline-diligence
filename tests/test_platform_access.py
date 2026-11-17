@@ -367,6 +367,34 @@ def test_version_candidates_are_proposed_not_applied(client, stub_indexing, monk
     assert deals._documents[DEMO_DEAL][0]["supersedes_doc_id"] == ""
 
 
+def test_partial_ingest_says_why(client, stub_indexing, monkeypatch):
+    # The pipeline's warnings make an upload "partial"; the uploader has to be
+    # told which sheets or pages were affected, not just "Partly indexed".
+    warnings = [
+        "Sheet 'Q3' is hidden in the workbook; it was indexed and is marked hidden",
+        "Page(s) 4-5 of 9 have no text layer (likely scanned images) and were not indexed",
+        "Sheet 'Q3' is hidden in the workbook; it was indexed and is marked hidden",
+        None,
+    ]
+    original = ingest_routes.index_document
+
+    async def with_warnings(*args, **kwargs):
+        return {**(await original(*args, **kwargs)), "warnings": warnings}
+
+    monkeypatch.setattr(ingest_routes, "index_document", with_warnings)
+
+    response = client.post(
+        "/api/v1/ingest",
+        headers=ADMIN,
+        data={"deal_id": DEMO_DEAL},
+        files={"file": ("model.txt", b"Revenue was $12.0 million.", "text/plain")},
+    )
+
+    body = response.json()
+    assert body["status"] == "partial"
+    assert body["notices"] == warnings[:2]
+
+
 def test_failed_supersession_is_partial_and_not_recorded(client, stub_indexing):
     deals.register_document(DEMO_DEAL, "doc-v1", "spa_v1.txt", "legal", 4, True, None)
     stub_indexing["result"] = {
