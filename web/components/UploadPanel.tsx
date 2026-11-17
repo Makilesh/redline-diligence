@@ -2,10 +2,11 @@
 
 import { useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { GitCompare, Loader2, ShieldCheck, Trash2, Upload } from "lucide-react";
+import { FileWarning, GitCompare, Loader2, ShieldCheck, Trash2, Upload } from "lucide-react";
 
 import type { Deal, VersionCandidate } from "@/lib/types";
 import type { LastUpload } from "@/lib/useSandbox";
+import { uploadScreenNote } from "@/lib/verification";
 
 interface UploadPanelProps {
   sandboxDeal: Deal | null;
@@ -32,6 +33,7 @@ const RELATION: Record<VersionCandidate["relation"], string> = {
 function UploadOutcome({ upload }: { upload: LastUpload }) {
   const { filename, result } = upload;
   const partial = result.status === "partial";
+  const screen = uploadScreenNote(result.injection_screen);
 
   return (
     <div className="space-y-2 border-t border-line px-4 py-3 text-left" role="status">
@@ -49,6 +51,18 @@ function UploadOutcome({ upload }: { upload: LastUpload }) {
             </li>
           ))}
         </ul>
+      )}
+
+      {screen && (
+        // The uploader is the one best placed to open a seller-supplied file
+        // and look (Decision 82). A label, not a failure: the file is indexed.
+        <div className="rounded-md border border-warn/30 bg-warn/[0.05] px-2.5 py-2">
+          <p className="flex items-start gap-1.5 text-[0.7rem] leading-snug text-warn">
+            <FileWarning size={11} className="mt-0.5 shrink-0" aria-hidden />
+            <span>{screen.finding}</span>
+          </p>
+          <p className="mt-1.5 text-[0.66rem] leading-snug text-ash-500">{screen.consequence}</p>
+        </div>
       )}
 
       {result.version_candidates.length > 0 && (

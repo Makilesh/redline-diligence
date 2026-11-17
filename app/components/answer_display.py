@@ -6,7 +6,7 @@ import html
 
 import streamlit as st
 
-from app.components.verification import answer_verdict, render_claim_checks
+from app.components.verification import answer_verdict, injection_note, render_claim_checks
 from app.styles import escape_currency, pill, stat_row
 
 _VERDICT_PILL = {
@@ -29,6 +29,7 @@ def render_answer(
     claim_checks: list[dict] | None = None,
     outcome: str = "",
     answer_truncated: bool = False,
+    injection_review: dict | None = None,
 ) -> None:
     """
     Renders the main answer with confidence badge, validation status, the
@@ -46,6 +47,8 @@ def render_answer(
         claim_checks: Per-claim verification results.
         outcome: The run's outcome (answered | answered_unverified).
         answer_truncated: The answer stopped at the model's output limit.
+        injection_review: QueryResponse.injection_review — retrieved passages
+            with instruction-like text, by location (Decision 82).
     """
     claim_checks = claim_checks or []
     # Header metrics. A compact strip rather than st.metric cards: these are
@@ -74,6 +77,7 @@ def render_answer(
             "outcome": outcome,
             "answer": answer,
             "answer_truncated": answer_truncated,
+            "injection_review": injection_review or {},
         }
     )
     icon, variant = _VERDICT_PILL[key]
@@ -81,6 +85,16 @@ def render_answer(
         pill(f"{icon} {label}", variant) + f"<span class='dd-cite-meta'>{html.escape(detail)}</span>",
         unsafe_allow_html=True,
     )
+    # Where instruction-like text sits behind this answer. Its flags fold away
+    # below the claim list, so the location is stated up front, in one line.
+    note = injection_note(injection_review)
+    if note:
+        text, note_variant = note
+        st.markdown(
+            pill("INSTRUCTION-LIKE TEXT", note_variant)
+            + f"<span class='dd-cite-meta'>{escape_currency(html.escape(text))}</span>",
+            unsafe_allow_html=True,
+        )
 
     # Answer body — a bordered container rather than raw HTML, so the model's
     # markdown (lists, tables, emphasis) still renders correctly.

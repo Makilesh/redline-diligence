@@ -16,7 +16,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
 from api.models.request_models import DEAL_ID_PATTERN
-from api.models.response_models import IngestResponse
+from api.models.response_models import IngestResponse, InjectionScreen, PassageLocation
 from api.routes.deals import register_document
 from api.security import (
     ClientContext,
@@ -33,6 +33,7 @@ from src.data_processing.ingest_pipeline import (
     mark_superseded,
     sanitize_filename,
 )
+from src.data_processing.injection_screen import SIGNALS, flagged_locations
 from src.utils import audit_log, metrics
 from src.utils.logger import setup_logger
 
@@ -97,6 +98,36 @@ def _reject_archive_bomb(path: str, extension: str) -> None:
             status_code=413,
             detail="The document expands to more data than this service will process.",
         )
+
+
+def _injection_screen(result: dict) -> InjectionScreen:
+    """
+    The ingest screen's findings for the uploader (Decision 82).
+
+    index_document labels passages whose text reads like instructions to an AI
+    model and indexes them unchanged (Decision 76); the person who uploaded a
+    seller-supplied file is the one best placed to open it and look, so the
+    response says how many passages, which signals, and where. Locations only:
+    no document text is echoed.
+
+    Args:
+        result: index_document's result.
+
+    Returns:
+        The screen summary; empty when nothing was flagged.
+    """
+    flagged = [f for f in result.get("suspected_injection") or [] if isinstance(f, dict)]
+    if not flagged:
+        return InjectionScreen()
+    locations = flagged_locations(flagged)
+    return InjectionScreen(
+        flagged_passages=len(flagged),
+        signals=[s for s in SIGNALS if any(s in (f.get("signals") or []) for f in flagged)],
+        locations=[
+            PassageLocation(**{k: v for k, v in loc.items() if k != "source_file"})
+            for loc in locations
+        ],
+    )
 
 
 async def _save_upload(file: UploadFile, dest_path: str, max_bytes: int) -> int:
@@ -297,6 +328,8 @@ async def ingest_document(
 
     partial = bool(result["warnings"]) or not retired
     metrics.INGESTS.inc(outcome="partial" if partial else "indexed")
+    # A label, not a failure: it never makes the upload "partial".
+    screen = _injection_screen(result)
 
     audit_log.record(
         "document_ingested",
@@ -311,6 +344,8 @@ async def ingest_document(
             "previously_indexed": result["previously_indexed"],
             "warnings": result["warnings"],
             "risk_signal_types": [s["signal_type"] for s in result["risk_signals"]],
+            "suspected_injection_passages": screen.flagged_passages,
+            "injection_signals": screen.signals,
             "supersedes_doc_id": supersedes_doc_id or "",
             "supersession_applied": retired if supersedes_doc_id else None,
         },
@@ -327,4 +362,5 @@ async def ingest_document(
         notices=notices,
         # Passed through, never acted on: superseding stays an explicit choice.
         version_candidates=result.get("version_candidates") or [],
+        injection_screen=screen,
     )

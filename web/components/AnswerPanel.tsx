@@ -8,6 +8,7 @@ import {
   BadgeCheck,
   CircleDashed,
   Clock,
+  FileWarning,
   Gauge,
   Loader2,
   RefreshCw,
@@ -21,7 +22,7 @@ import ClaimChecks from "./ClaimChecks";
 import CitationPill from "./CitationPill";
 import { parseAnswer, type ParsedCitation } from "@/lib/citations";
 import type { QueryResponse } from "@/lib/types";
-import { answerVerdict, type AnswerVerdict } from "@/lib/verification";
+import { answerVerdict, injectionNote, type AnswerVerdict } from "@/lib/verification";
 
 interface AnswerPanelProps {
   /** The validated answer. Null while the answer is still being written. */
@@ -119,6 +120,7 @@ export default function AnswerPanel({
       })()
     : { ...DRAFT_VERDICT, key: "draft" as const };
   const VerdictIcon = verdict.icon;
+  const injection = result ? injectionNote(result.injection_review) : null;
 
   const confidence = Math.round((result?.confidence_score ?? 0) * 100);
   const confidenceTone =
@@ -184,6 +186,21 @@ export default function AnswerPanel({
           }`}
         >
           {verdict.detail}
+        </p>
+      )}
+
+      {/* Where instruction-like text sits behind this answer (Decision 82).
+          Its flags fold away below the claim list, so the location is stated
+          here, before the text — locations only, never the flagged words. */}
+      {injection && (
+        <p
+          role="note"
+          className={`flex items-start gap-2 border-b border-line px-6 py-2.5 text-[0.78rem] leading-snug ${
+            injection.tone === "warn" ? "bg-warn/[0.06] text-warn" : "text-ash-300"
+          }`}
+        >
+          <FileWarning size={13} className="mt-0.5 shrink-0" aria-hidden />
+          <span>{injection.text}</span>
         </p>
       )}
 

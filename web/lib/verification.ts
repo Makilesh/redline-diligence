@@ -8,7 +8,15 @@
  * that disagrees with the summary — lands on the less favourable reading.
  */
 
-import type { ClaimCheck, FigureCheck, QueryResponse } from "./types";
+import type {
+  ClaimCheck,
+  FigureCheck,
+  InjectionReview,
+  InjectionScreen,
+  InjectionSignal,
+  PassageLocation,
+  QueryResponse,
+} from "./types";
 
 export type Tone = "ok" | "warn" | "bad" | "neutral";
 
@@ -84,6 +92,9 @@ export function answerVerdict(result: QueryResponse): AnswerVerdict {
   const problems = counts.contradicted + counts.unsupported;
   const notConfirmed = problems + counts.unverified;
   const miscited = result.claim_checks.filter(isMiscited).length;
+  const tainted = result.injection_review.tainted_figures;
+  const citesFlagged = result.injection_review.cited_flagged_passages > 0;
+  const injected = tainted.length > 0 || citesFlagged;
 
   if (result.outcome === "answered_unverified" || result.validation_status === "failed") {
     return {
@@ -103,7 +114,8 @@ export function answerVerdict(result: QueryResponse): AnswerVerdict {
   // confirmed" would leave the reader looking for a problem that is not there.
   if (
     result.validation_status === "warning" ||
-    (result.validation_status === "passed" && (notConfirmed > 0 || result.answer_truncated || miscited > 0))
+    (result.validation_status === "passed" &&
+      (notConfirmed > 0 || result.answer_truncated || miscited > 0 || injected))
   ) {
     let detail: string;
     if (result.answer_truncated && notConfirmed === 0) {
@@ -111,12 +123,26 @@ export function answerVerdict(result: QueryResponse): AnswerVerdict {
         counts.total > 0
           ? `All ${plural(counts.total, "statement")} matched to the documents, but ${CUT_OFF}`
           : `Nothing in it could be checked, and ${CUT_OFF}`;
-    } else if (notConfirmed === 0 && miscited > 0) {
-      // Downgraded for a citation that does not hold its figure (Decision 78):
-      // every statement checked out, so say what is wrong instead.
-      detail = `All ${plural(counts.total, "statement")} matched to the documents, but ${miscited} ${
-        miscited === 1 ? "cites a document that does not state its figures" : "cite documents that do not state their figures"
-      }.`;
+    } else if (notConfirmed === 0 && counts.total > 0 && (miscited > 0 || injected)) {
+      // Downgraded for a citation that does not hold its figure (Decision 78)
+      // or for leaning on instruction-like text (Decision 76): every statement
+      // checked out, so say what is wrong instead.
+      const reasons: string[] = [];
+      if (miscited > 0) {
+        reasons.push(
+          `${miscited} ${
+            miscited === 1 ? "cites a document that does not state its figures" : "cite documents that do not state their figures"
+          }`,
+        );
+      }
+      if (tainted.length > 0) {
+        reasons.push(
+          `${tainted.join(", ")} ${tainted.length === 1 ? "rests" : "rest"} only on text that reads like instructions to an AI model`,
+        );
+      } else if (citesFlagged) {
+        reasons.push("it cites a passage that reads like instructions to an AI model");
+      }
+      detail = `All ${plural(counts.total, "statement")} matched to the documents, but ${reasons.join(", and ")}.`;
     } else {
       detail =
         (counts.total > 0
@@ -276,9 +302,112 @@ export function citationMarker(c: ClaimCheck): ClaimMarker | null {
   };
 }
 
+/**
+ * A note beside a claim with a figure that only instruction-like document
+ * text states (Decision 76). The figure is in the documents, so the verdict
+ * may be "Supported"; the note says where it comes from.
+ */
+export function injectionMarker(c: ClaimCheck): ClaimMarker | null {
+  if (!c.injection_suspect) return null;
+  return {
+    label: "Figure from instruction-like text",
+    title:
+      "A figure in it is stated only by document text that reads like an instruction to an " +
+      "AI model (possible prompt injection). Check it against the document itself.",
+  };
+}
+
 /** Whether a claim belongs in the list a reader sees first, not the folded one. */
 export function needsReview(c: ClaimCheck): boolean {
-  return c.status !== "supported" || isMiscited(c);
+  return c.status !== "supported" || isMiscited(c) || c.injection_suspect === true;
+}
+
+/** The ingest screen's signals, in words. */
+const SIGNAL_LABEL: Record<InjectionSignal, string> = {
+  instruction_override: "an instruction to ignore earlier instructions",
+  model_address: "text addressed to an AI model",
+  role_marker: "chat-role labels such as SYSTEM:",
+  forged_marker: "imitation citation or calculation markers",
+  supersession_claim: "a claim that other documents are out of date",
+  invisible_text: "invisible characters",
+};
+
+/** The known signals in words, comma-separated; an unknown name is left out. */
+export function signalLabels(signals: Iterable<string>): string {
+  const present = new Set(signals);
+  return (Object.keys(SIGNAL_LABEL) as InjectionSignal[])
+    .filter((s) => present.has(s))
+    .map((s) => SIGNAL_LABEL[s])
+    .join(", ");
+}
+
+/** "memo.pdf, p. 3 · Fees" — where a flagged passage is; "" when nothing is known. */
+export function passageLocation(loc: PassageLocation & { source_file?: string }): string {
+  const head = [loc.source_file ?? "", loc.page_number !== null ? `p. ${loc.page_number}` : ""]
+    .filter(Boolean)
+    .join(", ");
+  return [head, loc.section_heading].filter(Boolean).join(" · ");
+}
+
+export interface Note {
+  text: string;
+  tone: Tone;
+}
+
+/**
+ * One line on instruction-like text behind an answer (Decision 82), or null.
+ *
+ * The validator's flags say what it found, but they fold away behind the claim
+ * list, and a flagged passage the answer does not cite was only in the trace.
+ * Warn when the answer cites such a passage or takes a figure only from one;
+ * neutral when the passage was retrieved and not used.
+ */
+export function injectionNote(review: InjectionReview): Note | null {
+  const passages = review.flagged_passages;
+  if (passages.length === 0) return null;
+  const where = passages.map(passageLocation).filter(Boolean).join("; ") || "a retrieved document";
+  const labels = signalLabels(passages.flatMap((p) => p.signals));
+  const labelled = labels ? ` (${labels})` : "";
+  const tainted = review.tainted_figures;
+  if (tainted.length > 0 || review.cited_flagged_passages > 0) {
+    const extra =
+      tainted.length > 0
+        ? ` — ${tainted.join(", ")} ${tainted.length === 1 ? "is" : "are"} stated nowhere else`
+        : "";
+    return {
+      text:
+        `This answer relies on text that reads like instructions to an AI model${labelled} ` +
+        `in ${where}${extra}. Check those statements against the document itself.`,
+      tone: "warn",
+    };
+  }
+  return {
+    text:
+      `Retrieved but not cited: ${where} ${passages.length === 1 ? "contains" : "contain"} ` +
+      `text that reads like instructions to an AI model${labelled}.`,
+    tone: "neutral",
+  };
+}
+
+/**
+ * What the ingest screen found in an upload, in two sentences, or null when
+ * nothing was flagged. Factual, not alarming: the file was indexed as written,
+ * and the consequence for answers is stated as it is.
+ */
+export function uploadScreenNote(screen: InjectionScreen): { finding: string; consequence: string } | null {
+  const n = screen.flagged_passages;
+  if (n <= 0) return null;
+  const labels = signalLabels(screen.signals);
+  const where = screen.locations.map(passageLocation).filter(Boolean).join("; ");
+  return {
+    finding:
+      `${plural(n, "passage")} ${n === 1 ? "reads" : "read"} like instructions to an AI model` +
+      (labels ? ` (${labels})` : "") +
+      (where ? `: ${where}.` : "."),
+    consequence:
+      "The file was indexed as written. An answer that cites these passages, or takes a figure " +
+      "only from them, is never shown as Verified.",
+  };
 }
 
 /** Problems first, so the statements that need a reader's attention lead. */
