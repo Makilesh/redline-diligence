@@ -66,7 +66,10 @@ Two consequences worth stating plainly:
   Six Apache-2.0 alternatives were measured on the same emulated host
   (Decision 77). Only `ettin-reranker-68m-v1` beat it on LegalBench-RAG's dev
   documents (84.1% against 78.6%, matching bge on a GPU), at 306 ms a pair
-  against 74 ms — about 8 s more per legal question. `ettin-reranker-17m-v1`
+  against 74 ms — about 8 s more per legal question. Its own int8 ONNX build
+  (the ARM file, timed on x86) is 2.2× faster but still adds 2.5 s per legal
+  question at p50, twice the budget, and reorders the top passage of a third of
+  queries against full precision (Decision 81). `ettin-reranker-17m-v1`
   is faster than MiniLM (40 ms a pair) but no better. The Ettin models are
   saved in sentence-transformers 5's format and load *silently wrong* (random
   classification head) under this repository's pinned 2.x; do not point
