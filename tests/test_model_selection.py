@@ -42,6 +42,19 @@ def _reload_reranker(monkeypatch, **env):
 
 
 @pytest.fixture(autouse=True)
+def _models_not_cached(monkeypatch):
+    """
+    These tests pin what reaches the constructor for a model fetched by Hub id.
+    A model already in the local cache is passed as its snapshot directory
+    instead (src/utils/model_cache.py; tests/test_model_cache.py), which would
+    make the outcome depend on the machine's cache.
+    """
+    import src.utils.model_cache as model_cache
+
+    monkeypatch.setattr(model_cache, "cached_snapshot", lambda repo_id, revision=None: None)
+
+
+@pytest.fixture(autouse=True)
 def _restore_module():
     """Leaves the module in its default state for every other test in the run."""
     yield

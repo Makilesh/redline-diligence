@@ -21,6 +21,7 @@ import torch
 from sentence_transformers import SentenceTransformer, CrossEncoder
 
 from src.utils.logger import setup_logger
+from src.utils.model_cache import load_cached_first
 
 logger = setup_logger(__name__)
 
@@ -104,9 +105,12 @@ def _get_embedding_model() -> SentenceTransformer:
     if _embedding_model is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         logger.info(f"Loading {EMBEDDING_MODEL_NAME} embedding model to {device.upper()}")
-        _embedding_model = SentenceTransformer(
+        # From the cache when present: loading by Hub id makes transformers
+        # call the Hub for this tokenizer, and fail when it is unreachable
+        # (src/utils/model_cache.py, Decision 84).
+        _embedding_model = load_cached_first(
+            lambda source: SentenceTransformer(source, device=device),
             EMBEDDING_MODEL_NAME,
-            device=device,
         )
         logger.info(
             f"{EMBEDDING_MODEL_NAME} embedding model loaded successfully on {device.upper()}"
@@ -151,11 +155,16 @@ def _get_reranker_model() -> CrossEncoder:
             f"Loading {RERANKER_MODEL_NAME} to {device.upper()}",
             extra={"max_length": RERANKER_MAX_LENGTH},
         )
-        model = CrossEncoder(
+        # The calibration profile is looked up by RERANKER_MODEL_NAME below,
+        # never by the path the weights came from.
+        model = load_cached_first(
+            lambda source: CrossEncoder(
+                source,
+                max_length=RERANKER_MAX_LENGTH,
+                device=device,
+                default_activation_function=torch.nn.Sigmoid(),  # ← MANDATORY for [0,1] scores
+            ),
             RERANKER_MODEL_NAME,
-            max_length=RERANKER_MAX_LENGTH,
-            device=device,
-            default_activation_function=torch.nn.Sigmoid(),  # ← MANDATORY for [0,1] scores
         )
         limit = _model_max_length(model)
         max_length = RERANKER_MAX_LENGTH if limit is None else min(RERANKER_MAX_LENGTH, limit)
