@@ -344,6 +344,7 @@ def register_document(
     is_current_version: bool,
     supersedes_doc_id: str | None,
     risk_signals: list[dict] | None = None,
+    injection_screen: dict | None = None,
 ) -> None:
     """
     Records an ingested document against its deal.
@@ -362,8 +363,12 @@ def register_document(
         is_current_version: Whether this upload is the current version.
         supersedes_doc_id: Doc ID this version replaces, if any.
         risk_signals: Risk signal dicts detected during ingestion.
+        injection_screen: The ingest screen's summary ({flagged_passages,
+            signals}), so the document list can say a file was flagged long
+            after the upload response is gone (Decision 82).
     """
     records = _documents.setdefault(deal_id, [])
+    screen = injection_screen or {}
 
     # doc_id is derived from the file's content, so re-uploading identical bytes
     # yields the same id and ingestion replaces the points in place. The registry
@@ -383,6 +388,8 @@ def register_document(
             "upload_date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "risk_signals": risk_signals or [],
             "has_redline": False,  # set once redline indexing is wired in ingest
+            "instruction_like_passages": int(screen.get("flagged_passages") or 0),
+            "instruction_signals": list(screen.get("signals") or []),
         }
     )
 
@@ -470,6 +477,8 @@ async def _reconstruct_documents(deal_id: str) -> list[dict]:
             "supersedes_doc_id",
             "superseded_by",
             "risk_signals",
+            "suspected_injection",
+            "injection_signals",
         ],
     )
 
@@ -490,9 +499,18 @@ async def _reconstruct_documents(deal_id: str) -> list[dict]:
                 "upload_date": "",
                 "risk_signals": [],
                 "has_redline": False,
+                "instruction_like_passages": 0,
+                "instruction_signals": [],
             },
         )
         record["chunks_created"] += 1
+        # The ingest screen's label, written on each flagged child chunk — the
+        # same chunks the upload response counted (Decision 82).
+        if p.get("suspected_injection"):
+            record["instruction_like_passages"] += 1
+            for signal in p.get("injection_signals") or []:
+                if isinstance(signal, str) and signal not in record["instruction_signals"]:
+                    record["instruction_signals"].append(signal)
 
         # Risk signals are stored per chunk; collapse them to one entry per
         # (document, signal type) so the dashboard counts documents at risk
@@ -522,6 +540,12 @@ async def _reconstruct_documents(deal_id: str) -> list[dict]:
                     "match_count", 0
                 )
 
+    from src.data_processing.injection_screen import SIGNALS
+
+    for record in by_doc.values():
+        record["instruction_signals"] = [
+            s for s in SIGNALS if s in record["instruction_signals"]
+        ]
     return list(by_doc.values())
 
 
@@ -562,6 +586,8 @@ async def list_deal_documents(
             supersedes_doc_id=r["supersedes_doc_id"],
             superseded_by=r["superseded_by"],
             has_redline=r["has_redline"],
+            instruction_like_passages=r.get("instruction_like_passages", 0),
+            instruction_signals=r.get("instruction_signals") or [],
         )
         for i, r in enumerate(ordered)
     ]

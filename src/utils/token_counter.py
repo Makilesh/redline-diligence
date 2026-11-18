@@ -14,6 +14,7 @@ from functools import lru_cache
 from transformers import AutoTokenizer
 
 from src.utils.logger import setup_logger
+from src.utils.model_cache import load_cached_first
 
 logger = setup_logger(__name__)
 
@@ -31,7 +32,9 @@ def get_tokenizer() -> AutoTokenizer:
         OSError: If the model cannot be downloaded or loaded.
     """
     logger.info("Loading BAAI/bge-m3 tokenizer (first call only)")
-    tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-m3")
+    # From the cache when present: by Hub id this tokenizer's load calls the
+    # Hub and fails when it is unreachable (src/utils/model_cache.py).
+    tokenizer = load_cached_first(AutoTokenizer.from_pretrained, "BAAI/bge-m3")
     logger.info("Tokenizer loaded successfully")
     return tokenizer
 

@@ -49,6 +49,7 @@ import time
 from dataclasses import dataclass
 
 from src.utils.logger import setup_logger
+from src.utils.model_cache import load_cached_first
 
 logger = setup_logger(__name__)
 
@@ -156,19 +157,27 @@ class _Checker:
 
         spec = _CHECKERS[name]
         revision = spec["revision"]
-        config = AutoConfig.from_pretrained(
-            name, revision=revision, num_labels=2, finetuning_task="text-classification"
-        )
-        config.problem_type = "single_label_classification"
-        tokenizer = AutoTokenizer.from_pretrained(name, revision=revision, use_fast=True)
-        tokenizer.pad_token = tokenizer.eos_token
         # fp16 on CUDA only: on the benchmark it moves scores by at most 0.002,
         # changes no decision and halves latency (60 -> 31 ms per claim). CPU
         # half precision was not measured.
         dtype = torch.float16 if device == "cuda" and _checker_half_precision() else torch.float32
-        model = AutoModelForSequenceClassification.from_pretrained(
-            name, revision=revision, config=config, torch_dtype=dtype
-        )
+
+        def load(source: str):
+            config = AutoConfig.from_pretrained(
+                source, revision=revision, num_labels=2, finetuning_task="text-classification"
+            )
+            config.problem_type = "single_label_classification"
+            tokenizer = AutoTokenizer.from_pretrained(source, revision=revision, use_fast=True)
+            model = AutoModelForSequenceClassification.from_pretrained(
+                source, revision=revision, config=config, torch_dtype=dtype
+            )
+            return tokenizer, model
+
+        # The pinned commit from the cache when present: by Hub id the
+        # tokenizer load calls the Hub and fails when it is unreachable
+        # (src/utils/model_cache.py, Decision 84).
+        tokenizer, model = load_cached_first(load, name, revision)
+        tokenizer.pad_token = tokenizer.eos_token
         self.model = model.to(device).eval()
         self.tokenizer = tokenizer
         self.device = device
@@ -219,7 +228,9 @@ def _load(name: str) -> None:
 
     from sentence_transformers import CrossEncoder
 
-    model = CrossEncoder(name, max_length=MAX_SEQ_LENGTH, device=device)
+    model = load_cached_first(
+        lambda source: CrossEncoder(source, max_length=MAX_SEQ_LENGTH, device=device), name
+    )
     id2label = getattr(model.config, "id2label", None) or {}
     labels = {str(v).lower(): int(k) for k, v in id2label.items()}
     required = {"entailment", "contradiction", "neutral"}
