@@ -11,6 +11,7 @@ import time
 from src.vector_db.reranker import embed_texts_async, get_embed_executor, rerank_pairs_async
 from src.vector_db.hybrid_search import compute_sparse_bm25, dense_search, hybrid_search
 from src.vector_db.filing_period import prefer_named_period
+from src.vector_db.named_document import name_document
 from src.vector_db.representation_cap import cap_table_representations
 from src.vector_db.rrf_fusion import leading_document, reciprocal_rank_fusion
 from src.vector_db.parent_child_retrieval import expand_context
@@ -114,6 +115,22 @@ async def _candidates_for_query(
         doc_id, _share = leading_document(
             fused, {cid: p.get("doc_id") for cid, p in payloads.items()}
         )
+        # Among near-identical contracts the fused score leans to the wrong
+        # one, and the question usually says which it means ("the Northwind
+        # NDA", "the merger agreement between Parent X and Target Y"). A
+        # document the question names, by the title and parties read from its
+        # opening at ingest, is searched instead; when nothing is named the
+        # fused choice stands (named_document.py, Decision 86).
+        named = name_document(query, payloads.values())
+        if named.document and named.document != doc_id:
+            logger.info(
+                "Document focus: the question names another document",
+                extra={"named": named.source_file, "matched": named.matched,
+                       "score": named.score, "runner_up": named.runner_up,
+                       "fused_choice": next((p.get("source_file") for p in payloads.values()
+                                             if p.get("doc_id") == doc_id), None)},
+            )
+            doc_id = named.document
         if doc_id:
             in_document = await dense_search(
                 query_vector=query_vector,
