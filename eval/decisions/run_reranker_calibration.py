@@ -4,6 +4,7 @@ in src/decisions/reranker_calibration.py come from.
 
     python -m eval.decisions.run_reranker_calibration
     python -m eval.decisions.run_reranker_calibration --target cross-encoder/ms-marco-MiniLM-L-6-v2
+    python -m eval.decisions.run_reranker_calibration --target <model or directory> --target-focus-k 10
     python -m eval.decisions.run_reranker_calibration --from-cache <dir>/reranker_calibration_pairs.json
 
 The context gate's thresholds were measured on BAAI/bge-reranker-v2-m3's score
@@ -37,8 +38,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import bisect
+import contextlib
 import json
 import logging
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -132,7 +135,59 @@ async def _collect_one(questions: list[dict]) -> dict:
     return {"pairs": scored, "contexts": contexts}
 
 
-async def collect(questions: list[dict], target: str, target_fp16: str) -> dict:
+PLACEHOLDER_PROFILE = "uncalibrated-target"
+
+
+@contextlib.contextmanager
+def collection_profile(model: str, focus_k: int | None):
+    """
+    The profile the target is collected under — a placeholder when it has none yet.
+
+    Loading a reranker with no profile raises UncalibratedReranker, whose message
+    sends the operator here, and this harness then failed the same way: Decisions
+    77 and 87 had to register a profile by hand before they could derive one.
+    Collection records raw scores and contexts only, so an identity placeholder,
+    asserted through RERANKER_PROFILE for the target's collection and removed
+    afterwards, is all it needs. Its document-focus depth decides which in-document
+    passages reach the legal dev questions' contexts, so it is the caller's to
+    state (None: the query type's own depth). A target that has a profile keeps it.
+
+    Args:
+        model: The target's id or directory.
+        focus_k: The placeholder's document_focus_k.
+
+    Yields:
+        The profile the target loads with.
+    """
+    from src.decisions import reranker_calibration as rc
+
+    try:
+        existing = rc.resolve_profile(model)
+    except rc.UncalibratedReranker:
+        existing = None
+    if existing is not None:
+        yield existing
+        return
+    placeholder = rc.RerankerProfile(
+        name=PLACEHOLDER_PROFILE, model=model,
+        max_length=0,  # not checked: the profile is asserted through RERANKER_PROFILE
+        document_focus_k=focus_k,
+        derivation="identity placeholder: raw scores are collected under it, nothing is gated")
+    profiles, asserted = rc.PROFILES, os.environ.get("RERANKER_PROFILE")
+    rc.PROFILES = profiles + (placeholder,)
+    os.environ["RERANKER_PROFILE"] = placeholder.name
+    try:
+        yield placeholder
+    finally:
+        rc.PROFILES = profiles
+        if asserted is None:
+            os.environ.pop("RERANKER_PROFILE", None)
+        else:
+            os.environ["RERANKER_PROFILE"] = asserted
+
+
+async def collect(questions: list[dict], target: str, target_fp16: str,
+                  target_focus_k: int | None = None) -> dict:
     """Scored pairs and final contexts for the reference and the target reranker."""
     from src.vector_db.reranker import warm_models
 
@@ -141,11 +196,17 @@ async def collect(questions: list[dict], target: str, target_fp16: str) -> dict:
     with use_client(client):
         for name, spec in (("reference", REFERENCE),
                            ("target", {"model": target, "max_length": None, "fp16": target_fp16})):
-            _configure_reranker(spec["model"], spec["max_length"], spec["fp16"])
-            await warm_models()
-            started = time.perf_counter()
-            out[name] = {"model": spec["model"], **await _collect_one(questions)}
-            out[name]["seconds"] = round(time.perf_counter() - started, 1)
+            scope = (collection_profile(target, target_focus_k) if name == "target"
+                     else contextlib.nullcontext())
+            with scope as profile:
+                _configure_reranker(spec["model"], spec["max_length"], spec["fp16"])
+                await warm_models()
+                started = time.perf_counter()
+                out[name] = {"model": spec["model"], **await _collect_one(questions)}
+                out[name]["seconds"] = round(time.perf_counter() - started, 1)
+            if profile is not None:
+                out[name]["collected_under"] = {"profile": profile.name,
+                                                "document_focus_k": profile.document_focus_k}
             print(f"[calibration] {name} {spec['model']}: {len(out[name]['pairs'])} pairs",
                   file=sys.stderr)
     return out
@@ -458,6 +519,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--target", default=DEFAULT_TARGET)
     parser.add_argument("--target-fp16", default="0",
                         help="RERANKER_FP16 for the target (default 0: fp32, as on the CPU host)")
+    parser.add_argument("--target-focus-k", type=int, default=None,
+                        help="legal document-focus depth for a target with no profile yet "
+                             "(default: the query type's own; a profiled target uses its profile's)")
     parser.add_argument("--from-cache", help="reuse a reranker_calibration_pairs.json")
     parser.add_argument("--output-dir", default=str(RESULTS_DIR))
     return parser.parse_args(argv)
@@ -474,7 +538,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.from_cache:
         data = json.loads(Path(args.from_cache).read_text(encoding="utf-8"))
     else:
-        data = asyncio.run(collect(questions, args.target, args.target_fp16))
+        data = asyncio.run(collect(questions, args.target, args.target_fp16, args.target_focus_k))
         (out / "reranker_calibration_pairs.json").write_text(
             json.dumps(data, ensure_ascii=False) + "\n", encoding="utf-8")
     report = {
