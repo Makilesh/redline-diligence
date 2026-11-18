@@ -355,6 +355,16 @@ ERROR as `DEGRADED_MODE` and listed by reason in `/health` and, with an
 explanation, in `/ready`. In production `REQUIRE_DURABLE_CHECKPOINTS=1` turns
 the most common one — Postgres unreachable — into a failed start instead.
 
+**Models load from the image, not the Hub.** The image bakes every model into
+its Hugging Face cache, and the app loads a cached model from that snapshot
+without contacting the Hub. Before Decision 84 it loaded them by Hub id, and
+transformers then called the Hub for four of them on every start: with the Hub
+unreachable (an outage, a DNS failure, a host without egress) the API could not
+embed a question or check an answer. A model that is not cached is still
+downloaded. The cache is therefore what runs: to move a model to a newer
+revision, rebuild the image (or clear that model from the cache) — an upstream
+change is no longer picked up on restart.
+
 **Per-query timings.** Every response carries `node_timings` (one row per
 node: `duration_ms`, `llm_calls`, tokens, models) and `llm_calls`; each node
 also logs a `Node completed` line. To compare two builds, run the same
