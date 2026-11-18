@@ -91,9 +91,10 @@ Two consequences worth stating plainly:
 - **A distilled MiniLM is measured, not deployed (Decision 87).** MiniLM-L6
   fine-tuned to imitate bge on LegalBench-RAG costs the same 84 ms a pair. On
   held-out contracts at focus 30 it recalls 74.0%, against MiniLM's 63.0% at 10
-  and bge's 74.6%. It refuses one more golden answerable question and gains
-  nothing on FinanceBench, so it is not the CPU host's reranker. Its checkpoint
-  is kept outside the repository and was never published.
+  and bge's 74.6% (measured before Decision 86). It refuses one more golden
+  answerable question and gains nothing on FinanceBench, so it is not the CPU
+  host's reranker. Its checkpoint is kept outside the repository and was never
+  published.
 - **Keep `QDRANT_MODE=local` for development.** The embedded index searches
   exactly but slowly: with FinanceBench's 84 filings (45K chunks) indexed, a
   filing question's retrieval took 9.8 s at p50 in local mode against 0.6 s on
