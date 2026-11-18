@@ -25,9 +25,11 @@ Payload fields written per child chunk (see _child_payload):
     redline_base_doc_id), plus, for a public filing only, filing_form,
     filing_period_end / filing_date, filing_fiscal_years, filing_fiscal_quarter,
     filing_entity_keys and filing_company (filing_metadata.py; read from the
-    cover page), plus, only on a chunk whose text reads like instructions to a
-    model, suspected_injection=1 and injection_signals (injection_screen.py;
-    parents are screened too).
+    cover page), plus, when the opening states them, doc_title and doc_parties
+    (document_identity.py; the same on every child of a document), plus, only
+    on a chunk whose text reads like instructions to a model,
+    suspected_injection=1 and injection_signals (injection_screen.py; parents
+    are screened too).
 
 `text` is always the exact source text. `context_header` ("Document: ... /
 Section: ...", see chunk_context.py; written only when CHUNK_CONTEXT_HEADERS
@@ -62,6 +64,7 @@ from src.data_processing.chunk_context import (
     embedding_text,
 )
 from src.data_processing.document_classifier import DocumentClassifier
+from src.data_processing.document_identity import extract_document_identity
 from src.data_processing.errors import (  # noqa: F401  (re-exported)
     DocumentExtractionError,
     IngestionError,
@@ -942,6 +945,15 @@ def extract_and_chunk(
         )
         _mark_injection(payload, doc)
         doc.chunks.append(payload)
+
+    # Which agreement this is and who its parties are, read from the opening
+    # chunks just built and written on every one of them, so a question that
+    # names the document can be matched to it (document_identity.py; read by
+    # named_document.py, Decision 86). `python -m src.vector_db.identity_backfill`
+    # computes the same fields from an existing index's payloads.
+    identity = extract_document_identity(doc.chunks)
+    for payload in doc.chunks:
+        payload.update(identity)
 
     for j, parent in enumerate(parents):
         parent_payload = {
