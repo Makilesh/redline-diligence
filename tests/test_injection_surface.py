@@ -14,6 +14,7 @@ tests/test_injection_surface_pipeline.py.
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -70,6 +71,50 @@ def test_long_headings_are_cut_and_places_are_capped():
     assert len(loc["section_heading"]) == 80 and loc["section_heading"].endswith("…")
     many = flagged_locations([{"page_number": p} for p in range(1, 40)])
     assert len(many) == LOCATION_LIMIT
+
+
+# ==============================================================================
+# The document list keeps the label after the upload response is gone
+# ==============================================================================
+
+
+def test_the_document_list_says_which_files_were_flagged(client, monkeypatch):
+    _stub_index(monkeypatch, [
+        {"chunk_id": "c1", "page_number": 3, "section_heading": "Fees", "signals": ["role_marker"]},
+        {"chunk_id": "c2", "page_number": 4, "section_heading": "", "signals": ["model_address"]},
+    ])
+    assert _upload(client).status_code == 200
+
+    [doc] = client.get(f"/api/v1/deals/{DEMO_DEAL}/documents", headers=ADMIN).json()
+
+    assert doc["instruction_like_passages"] == 2
+    assert doc["instruction_signals"] == ["model_address", "role_marker"]
+    assert INJECTED not in json.dumps(doc)
+
+
+def test_the_label_survives_a_restart(monkeypatch):
+    # The registry is process-local; after a restart it is rebuilt from the
+    # chunk payloads, which carry the screen's label on each flagged chunk.
+    async def payloads(deal_id, fields):
+        assert {"suspected_injection", "injection_signals"} <= set(fields)
+        base = {"doc_id": "doc-1", "source_file": "memo.pdf", "document_category": "legal",
+                "is_current_version": 1}
+        return [
+            {**base, "suspected_injection": 1, "injection_signals": ["role_marker"]},
+            {**base, "suspected_injection": 1,
+             "injection_signals": ["model_address", "role_marker", 7]},
+            base,
+            {**base, "doc_id": "doc-2", "source_file": "clean.pdf"},
+        ]
+
+    monkeypatch.setattr(deals, "_scroll_deal_payloads", payloads)
+    records = {r["doc_id"]: r for r in asyncio.run(deals._reconstruct_documents("deal-x"))}
+
+    assert records["doc-1"]["instruction_like_passages"] == 2
+    assert records["doc-1"]["instruction_signals"] == ["model_address", "role_marker"]
+    assert records["doc-1"]["chunks_created"] == 3
+    assert records["doc-2"]["instruction_like_passages"] == 0
+    assert records["doc-2"]["instruction_signals"] == []
 
 
 # ==============================================================================

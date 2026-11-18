@@ -245,6 +245,9 @@ export interface DocumentRecord {
   supersedes_doc_id: string;
   superseded_by: string;
   has_redline: boolean;
+  /** Passages whose text reads like instructions to an AI model (Decision 82). Absent from older servers. */
+  instruction_like_passages?: number;
+  instruction_signals?: string[];
 }
 
 export type Severity = "high" | "medium" | "low";

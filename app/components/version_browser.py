@@ -4,6 +4,7 @@ Version browser component — document version history viewer.
 
 import streamlit as st
 
+from app.components.verification import signal_labels
 from app.styles import pill
 
 
@@ -20,7 +21,9 @@ def render_version_browser(version_chain: list[dict]) -> None:
         version_chain: Document records from GET /deals/{id}/documents,
             ordered newest-first. Each dict has: doc_id, filename,
             document_category, chunks_created, version_label, upload_date,
-            is_current_version, supersedes_doc_id, superseded_by, has_redline.
+            is_current_version, supersedes_doc_id, superseded_by, has_redline,
+            and (from servers since Decision 82) instruction_like_passages and
+            instruction_signals.
     """
     if not version_chain:
         st.info("No documents ingested for this deal yet.")
@@ -50,6 +53,7 @@ def render_version_browser(version_chain: list[dict]) -> None:
         supersedes = version.get("supersedes_doc_id", "")
         superseded_by = version.get("superseded_by", "")
         has_redline = version.get("has_redline", False)
+        flagged = version.get("instruction_like_passages") or 0
 
         badge = "🟢 CURRENT" if is_current else "🔴 SUPERSEDED"
 
@@ -59,6 +63,8 @@ def render_version_browser(version_chain: list[dict]) -> None:
                 flags += pill(category.upper(), "muted")
             if has_redline:
                 flags += pill("📝 REDLINE", "warn")
+            if flagged:
+                flags += pill("INSTRUCTION-LIKE TEXT", "warn")
             st.markdown(flags, unsafe_allow_html=True)
 
             col1, col2, col3 = st.columns(3)
@@ -73,6 +79,14 @@ def render_version_browser(version_chain: list[dict]) -> None:
                 st.caption(f"↳ Supersedes `{supersedes[:12]}…`")
             if superseded_by:
                 st.caption(f"↳ Superseded by `{superseded_by[:12]}…`")
+            if flagged:
+                kinds = signal_labels(version.get("instruction_signals") or [])
+                st.caption(
+                    f"⚠️ {flagged} passage{'s read' if flagged != 1 else ' reads'} like "
+                    f"instructions to an AI model{f' ({kinds})' if kinds else ''}. The file is "
+                    "searched as usual; an answer resting on these passages is never shown as "
+                    "Verified."
+                )
 
             if not is_current:
                 st.warning(

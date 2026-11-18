@@ -319,6 +319,9 @@ async def ingest_document(
                 },
             )
 
+    # A label, not a failure: it never makes the upload "partial".
+    screen = _injection_screen(result)
+
     # The registry records a supersession only when the index applied it.
     # Recording one that did not happen would make the version browser show the
     # older document as retired while retrieval still serves it as current.
@@ -331,12 +334,11 @@ async def ingest_document(
         is_current_version=is_current_version,
         supersedes_doc_id=supersedes_doc_id if retired else None,
         risk_signals=result["risk_signals"],
+        injection_screen={"flagged_passages": screen.flagged_passages, "signals": screen.signals},
     )
 
     partial = bool(result["warnings"]) or not retired
     metrics.INGESTS.inc(outcome="partial" if partial else "indexed")
-    # A label, not a failure: it never makes the upload "partial".
-    screen = _injection_screen(result)
 
     audit_log.record(
         "document_ingested",
