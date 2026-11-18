@@ -62,6 +62,20 @@ Two consequences worth stating plainly:
   30), so the MiniLM calibration profile caps the depth at 10, at about +0.3 s per
   legal question on two cores. `DOCUMENT_FOCUS_K` overrides it (0–30) if you run
   a different reranker or host (Decision 71).
+- **Backfill document identity on an index built before Decision 86.** A legal
+  question that names its agreement ("the Northwind NDA") now focuses on it, by
+  the title and parties ingestion reads from each document's opening — with
+  MiniLM at depth 10, +1.5 points of final-context recall [+0.5, +2.7] on
+  LegalBench-RAG's sealed held-out documents (ranked on a GPU, as before). An
+  existing index has neither field and keeps the old behaviour until you run,
+  once, `python -m src.vector_db.identity_backfill` (`--dry-run` counts first,
+  `--deal <id>` limits it to one deal). It reads the chunks already in Qdrant —
+  the files are not needed — and writes exactly what re-ingesting them would; on
+  the 714-file benchmark index (49,559 chunks, local mode) it took 135 s, and
+  35 s to re-run when most documents were already up to date. The
+  choice itself adds no search and no rerank pairs: it is Python over the
+  retrieved payloads, about 17 ms per legal question on the development laptop
+  (two ARM cores not measured). `NAMED_DOCUMENT_FOCUS=0` turns it off.
 - **MiniLM is still the best fit for two cores, not the best small reranker.**
   Six Apache-2.0 alternatives were measured on the same emulated host
   (Decision 77). Only `ettin-reranker-68m-v1` beat it on LegalBench-RAG's dev

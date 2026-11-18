@@ -882,6 +882,79 @@ All architecture decisions that deviated from or resolved ambiguities in p4.md a
 - **Not verified**: whether the effect grows further past 714 documents; real data rooms, where several versions and drafts of one agreement are the likelier near-duplicates (the version resolver's current/superseded flag already removes superseded versions from default retrieval); the CPU host itself (MiniLM's ranking was measured on the GPU; device does not change it).
 - **Impact**: README.md, DECISIONS_LOG.md (measurement only)
 
+## Decision 86: Focus a legal question on the agreement it names, by the parties and title read from the agreement itself
+- **Date**: Session 17
+- **Context**: with all 714 LegalBench-RAG files indexed, document focus (Decision 67) searches inside the wrong agreement far more often than on mini's 72 files, and mini-dev's final-context recall fell 83.3 → 77.2% with bge@30 (Decision 85): the top document was wrong for 41 of 94 ContractNLI and 11 of 102 MAUD dev questions, among dozens of near-identical NDAs. Focus searches whichever document holds the most fused score. Yet the questions name their agreement and its parties ("Consider the Acquisition Agreement between Parent X and Target Y; ..."), as a deal team does ("the Northwind NDA", "the SPA with Atlas"), and nothing used that.
+- **Design**:
+  - *Identity at ingest* (`src/data_processing/document_identity.py`). From the opening of each document — the text of its first child chunks in order, PII-flagged chunks skipped, 4,000 characters — regexes read `doc_title` (the first heading-like line naming a kind of document, else "THIS ... AGREEMENT") and `doc_parties` (the names in the first "between / by and among" clause, each cut at its description, with the short names it defines; parties introduced as "X, a Dutch corporation" or 'X ("Company")'; organisation names with a legal form near the top). Role words, template blanks, addresses and sentences are not names; in an all-capitals clause only names ending in a legal form count. Never the file name: in a data room it says little ("NDA_final_v3.pdf"), and in this benchmark it is where many questions' names came from. Both fields are optional and written on every child chunk.
+  - *Backfill* (`python -m src.vector_db.identity_backfill`): an index written before has neither field; the backfill reads each document's chunks back from Qdrant and computes the identity with the same function from the same payloads. On all 359 dev documents, ingestion and the backfill wrote identical fields.
+  - *Query time* (`src/vector_db/named_document.py`, inside the focus step only). The words the question writes with a capital — names are proper nouns — and a title's acronym only in capitals ("NDA"), are matched against each retrieved document's title and parties. A word counts by its rarity among the documents the first search retrieved, in their retrieved text as well as their identities: ln(1 + (N − df + 0.5)/(df + 0.5)). A party name sits in one of them; the question's topic words ("Confidential Information") sit in most and count for almost nothing. A document is named when it scores at least 1.0 and at least 1.5 times any other, and it is then searched instead of the fused leader; nothing is removed from the rerank pool. When no retrieved document has an identity, nothing capitalised matches, or two documents are named about equally, the fused choice stands. `NAMED_DOCUMENT_FOCUS=0` turns it off.
+- **Method** (rule written before any measurement, in the scratch notes):
+  - Index: a copy of the full 714-file store, identity backfilled by the shipped backfill. Dev: mini-dev (420 queries, 37 documents) and fresh-dev (942 queries, 322 documents; Decision 80).
+  - Runs: first the pools — each query's first-search dense and sparse lists, through the real `_candidates_for_query`. Then the real `retrieval_executor_node` for P and for every document a candidate chose, with bge-reranker-v2-m3 at focus 30 and MiniLM-L6 at focus 10 (ranked on the GPU, as in Decisions 80 and 85). Searches were memoised within a query; the reranker never was. Where a candidate keeps P's document, its result is P's. P reproduced the stored round-6/7 production runs on all 870 (query, reranker) pairs re-run.
+  - Candidates:
+    - C1 and C2: named focus with margin 1.0 and 0.5, replacing the fused choice.
+    - C3: C2, searching both documents.
+    - C4: a rescue search for named documents missing from the pool, run only if the pools showed headroom on ≥ 2% of dev queries.
+    - C5: the rule as first written — party words only, rarity among identities, the title only as a tie-break.
+    - For information only: ORACLE (focus on the ground-truth document) and FNAME (C2 plus the file name's words — the trap).
+  - Rule (dev): a candidate is eligible iff, on pooled dev with bge@30, the paired interval of final-context recall clears zero; the gain is ≥ 0 on each dev set; MRR@10 and doc_hit@1 lose at most 1 point; MiniLM@10's recall gain is ≥ 0; and no sub-corpus loses more than 1 point. The largest pooled gain wins, and an earlier candidate (order C1, C2, C5, C3, C4) within 0.5 point of it is preferred.
+  - Rule (test, once): ship iff the fresh-test interval of bge@30 recall clears zero, MRR@10 loses at most 1 point, MiniLM@10's interval does not lie below zero, and the golden and answerability gates hold.
+  - Changed on dev before any recall was measured, each recorded with its reason:
+    - Rarity is weighed over the retrieved text, not only over identities, and the title counts. Templates are named by their title, and the word "information" in one NDA's title would otherwise name that NDA for every question about confidential information.
+    - A "unique word" condition was dropped: it blocked "the Northwind NDA" when the Northwind MSA was also retrieved.
+    - The focus choices on mini-dev's pools — the only signal used — gave every wrong naming one of two causes, and three fixes followed. Acronyms count only in capitals ("Agreement for Prospective Purchasers" had become "app", matched by "does this app sell…"). All-capitals sentences are not read as names ('ANY INFORMATION', 'BE CONFIDENTIAL'). Only capitalised question words name a document ("does the document *state* that…" had matched a party "State …").
+    - Fresh-dev's pools, read only after those fixes, show no wrong naming.
+  - Contamination, stated: while a dev pool was inspected, the extracted identity of one fresh-test document was seen; it was there as a distractor. No fresh-test query or result was looked at before the test run.
+- **Measured, dev** (final-context character recall, bge@30 unless stated; paired, documents resampled):
+
+  | Set | P | C1 | **C2** | C3 | C5 | FNAME | ORACLE |
+  |---|---|---|---|---|---|---|---|
+  | Pooled (1,362 q, 359 docs) | 77.5 | +3.1 [+2.0, +4.4] | **+3.6 [+2.4, +5.1]** (55 up, 0 down) | +3.6 | +3.2 | +4.7 | +5.5 [+3.7, +7.8] |
+  | Mini-dev | 77.2 | +2.5 | **+2.5 [+0.4, +5.1]** | +2.5 | +2.5 | +4.9 | +5.1 |
+  | Fresh-dev | 77.6 | +3.3 | **+4.1 [+2.5, +5.8]** | +4.1 | +3.5 | +4.6 | +5.7 |
+  | MiniLM@10, pooled | 70.1 | +2.2 | **+2.5 [+1.5, +3.8]** (41 up, 1 down) | +2.5 | +2.2 | +3.6 | +4.5 |
+
+  - C2, pooled: MRR@10 +2.5 [+1.6, +3.6], doc_hit@1 +0.7 [+0.2, +1.3], recall@10 +5.5 [+3.8, +7.4].
+  - C2 by sub-corpus, bge@30 (MiniLM@10): ContractNLI 75.2 +3.1 (+1.9), CUAD 83.7 +4.0 (+2.9), MAUD 56.1 +4.2 (+2.9), PrivacyQA 99.0 +0.0 (+0.0).
+  - Rank-1 chunk from another document: ContractNLI 93 → 90, MAUD 41 → 35, CUAD 13 → 13. The gain is the right agreement's clauses reaching the context; the reranker still often ranks another NDA's near-identical clause first.
+  - Focus choice: the fused leader was the right document for 1,148 of 1,362 queries, C2's choice for 1,291. C2 switched 146 times: 143 to the right document, 0 away from a right one, 3 between wrong ones. The right document was in the pool for 1,348 queries, and none of the other 14 would have been named had it been added, so C4 had no headroom and was not run. C5 switched 284 times, 113 of them away from the right document: its identity-only rarity named words like "privacy" and "considered".
+  - The file-name variant adds 1.1 points more (many of ContractNLI's names come from file names: "CopAcc", "VELCO"); the oracle adds 1.9 more.
+  - Selection: all four measured candidates are eligible. C2 and C3 tie at +3.58. C1's +3.07 lies 0.51 below, just outside the 0.5-point window, so C2 is chosen (C3 needs one more search and up to 30 more pairs for no gain).
+- **Measured, fresh-test, once** (Decision 80's sealed half: 935 queries, 320 documents; the shipped code against P on the same index, P run wherever the node named another document):
+
+  | Metric | P | Shipped | Paired change |
+  |---|---|---|---|
+  | bge@30 recall@context | 74.6 [71.0, 78.1] | 77.2 [73.7, 80.4] | **+2.6 [+1.3, +4.1]** (28 up, 2 down) |
+  | bge@30 MRR@10 | 43.5 | 45.6 | +2.1 [+1.1, +3.2] |
+  | bge@30 doc_hit@1 | 89.2 | 90.5 | +1.3 [+0.5, +2.2] |
+  | MiniLM@10 recall@context | 63.0 [58.9, 67.0] | 64.5 [60.4, 68.4] | **+1.5 [+0.5, +2.7]** (18 up, 3 down) |
+
+  - By sub-corpus, bge@30: ContractNLI 61.9 → 64.6, CUAD 83.4 → 84.5, MAUD 53.8 → 61.4. Wrong top document: ContractNLI 53 → 49, CUAD 21 → 21, MAUD 27 → 19.
+  - Focus choice: right 776 → 854 times. Of 85 switches, 81 went to the right document, 1 between wrong ones, and 3 — all MAUD — away from a right one. Those 3 are both bge losses; they are not investigated, so that the test half stays untouched.
+  - The refusal gate admits 935/935 either way. T1, T2 and T3 pass.
+- **Gates**:
+  - Golden set `--baseline`: PASS. Production fact coverage@10 94.3 / @context 97.1 / recall@10 78.7 / MRR 77.2 / nDCG 73.8, identical to main. All 15 golden queries that ran focus kept their document: the sample deal's questions name "Vertex" or "Aurora", which every retrieved document mentions.
+  - Answerability dev set: identical, question by question, to the same run with `NAMED_DOCUMENT_FOCUS=0` (0/27 false vetoes, 11/28 unanswerable caught, AUC 0.801). One unanswerable question's focus moved — DataFlow Systems' settlement, to the IP and litigation schedule — with no change to its verdict or score.
+  - Offline suite: 1,815 → 1,850 passed. Ruff clean.
+- **Cost**:
+  - No extra search: the one focus search runs on another document. On switched queries the rerank pool is smaller: on dev, bge@30 averaged 40.9 → 33.3 pairs and MiniLM@10 26.5 → 25.1; on test, 39.4 → 35.2 and 26.2 → 24.8. The named agreement's passages overlap the fused candidates more.
+  - The choice is Python over the retrieved payloads: p50 17 ms, p95 22 ms per legal pass on the development laptop, most of it tokenising the retrieved text. It returns before that when no retrieved document has an identity (an index not yet backfilled) or nothing capitalised matches.
+  - Ingest: regexes over 4,000 characters. Backfill of the 714-file store (49,559 chunks, local mode): 135 s writing all 712 documents.
+- **Resolution**: shipped as C2. Ingestion writes the identity; existing indexes need the backfill once and behave exactly as before until they get it. DEPLOYMENT.md says so. Focus stays legal-only.
+- **Not verified**:
+  - Real data rooms: several drafts or versions of one agreement (the version resolver already hides superseded ones), file names that do name the parties (deliberately not read), and agreements whose opening names no party.
+  - PDF and DOCX openings, beyond fixtures; non-English contracts.
+  - Questions that write names in lower case: they name nothing and keep the fused choice.
+  - Multi-document and decomposed questions: LegalBench-RAG has none. A question naming two documents keeps the fused choice by construction.
+  - The CPU host itself (MiniLM was ranked on the GPU) and the selection step's time on two ARM cores.
+  - Why the 3 MAUD test questions switched away from the right merger agreement.
+  - The rule and the extractor were refined on mini-dev's pools before any recall was measured; fresh-dev and the test half were not used for that.
+- **Guarded by**:
+  - `tests/test_document_identity.py`: titles; parties from clauses, covers, templates and descriptions; roles, blanks, addresses and capitalised sentences rejected; tokens and acronyms; the opening's order, PII skip and lifted headings; identity on every ingested chunk and never from the file name; the backfill equal to ingestion, idempotent, deal-scoped, removing stale fields, and its command line.
+  - `tests/test_named_document_focus.py`: the party a question names; a title's short form deciding between two agreements with one counterparty; a title's short form that is also a legal form ("SPA", as for an S.p.A.) weighed through the capitals, where it once raised KeyError (found in integration review; no measured query reached it); topic words in a title, lower-case words and lower-case acronyms naming nothing; two documents named, no identity, one document, the switch; and, through the retrieval executor, focus searching the named document while keeping every candidate, with the fused choice kept otherwise.
+- **Impact**: src/data_processing/{document_identity,ingest_pipeline}.py, src/vector_db/{named_document,identity_backfill}.py, src/agents/retrieval_executor.py, .env.example, tests/test_{document_identity,named_document_focus}.py, README.md, DEPLOYMENT.md
+
 ## Decision 87: A MiniLM distilled from bge closes most of the CPU host's legal-retrieval gap at the same cost per pair, and is not adopted: it refuses one more golden answerable
 - **Date**: Session 17
 - **Context**: the CPU host reranks with `ms-marco-MiniLM-L-6-v2` at focus depth 10 (Decision 71). On LegalBench-RAG's fresh-dev documents, with all 714 files indexed, it puts 68.9% of the ground truth into the final context against bge-reranker-v2-m3@30's 77.6% on the GPU (−8.7, Decision 80). Larger or quantised small rerankers cost too much on two cores (Decisions 77, 81). Question: does a MiniLM-L6 with the same architecture (same tokenizer and 512 tokens, so the same cost per pair), fine-tuned to imitate bge (knowledge distillation) on in-domain question–passage pairs, close part of the gap without hurting anything else?
