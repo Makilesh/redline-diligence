@@ -850,6 +850,7 @@ All architecture decisions that deviated from or resolved ambiguities in p4.md a
 - **Context**: Decision 80 measured production retrieval on 322 LegalBench-RAG documents nothing was tuned on, with all 714 files indexed: 77.6% final-context recall against 85.3% on mini's test half (72 files indexed). Its open question: is the gap the 10× larger index or harder documents?
 - **Method**: mini's 420 dev queries (Decision 67's document split) run through the real `retrieval_executor_node` twice under production settings — bge-reranker-v2-m3 at focus 30 (the GPU host) and MiniLM-L6 at focus 10 (the CPU host, ranking measured on the GPU) — once against the 72 mini documents and once against all 714, both indexes built with current code. Same queries, so the comparison is paired; intervals resample documents. No setting was chosen; nothing was tuned. A network outage killed one batch while loading the reranker (the bug Decision 84 fixes); it was re-run.
 - **Measured** (final-context character recall, mini dev):
+
   | Reranker | 72-document index | 714-document index | Paired change |
   |---|---|---|---|
   | bge@30 (GPU) | 83.3 [75.4, 90.0] | 77.2 [67.5, 85.4] | **−6.1 [−12.1, −2.3]** (1 up, 27 down) |
