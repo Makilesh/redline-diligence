@@ -31,7 +31,7 @@ from collections import defaultdict
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-from src.data_processing.document_identity import extract_document_identity
+from src.data_processing.document_identity import OPENING_FIELDS, extract_document_identity
 from src.vector_db.constants import COLLECTION_NAME
 from src.utils.logger import setup_logger
 
@@ -42,8 +42,9 @@ IDENTITY_FIELDS = ("doc_title", "doc_parties")
 # merger agreement's cover can be split into a dozen tiny chunks before it.
 _OPENING_CHUNKS = 64
 _PAGE = 1_000
-_READ_FIELDS = ["deal_id", "doc_id", "chunk_index", "text", "section_heading", "contains_pii",
-                *IDENTITY_FIELDS]
+# Every field the opening is read from, as ingestion reads it (a clause_id
+# left out put a legal PDF's clause number back above its title).
+_READ_FIELDS = ["deal_id", "doc_id", *OPENING_FIELDS, *IDENTITY_FIELDS]
 
 
 def _canonical(identity: dict) -> str:

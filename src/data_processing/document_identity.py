@@ -278,6 +278,13 @@ def title_acronyms(title: str) -> set[str]:
     return out
 
 
+# The payload fields document_opening reads. Whatever rebuilds a stored
+# document's opening (identity_backfill, the startup check) fetches exactly
+# these: leaving one out, such as clause_id, gives it another opening than
+# ingestion read, and so another identity (Decision 89).
+OPENING_FIELDS = ("chunk_index", "text", "section_heading", "clause_id", "contains_pii")
+
+
 def document_opening(payloads: list[dict], max_chars: int = OPENING_CHARS) -> str:
     """
     The opening of a document from its child chunk payloads.
@@ -288,8 +295,8 @@ def document_opening(payloads: list[dict], max_chars: int = OPENING_CHARS) -> st
     the file.
 
     Args:
-        payloads: The document's child payloads, any order (reads chunk_index,
-            text, section_heading, contains_pii).
+        payloads: The document's child payloads, any order (reads the
+            OPENING_FIELDS).
         max_chars: Characters of chunk text to read.
 
     Returns:

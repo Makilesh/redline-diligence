@@ -11,13 +11,24 @@ benchmark document is copied.
 
 from __future__ import annotations
 
+import inspect
+import re
+
+import pytest
+from qdrant_client import AsyncQdrantClient
+from qdrant_client.models import PointStruct, SparseVector
+
 from src.data_processing.document_identity import (
+    OPENING_FIELDS,
     document_opening,
     extract_document_identity,
     extract_parties,
     extract_title,
     name_tokens,
 )
+from src.vector_db.collection_manager import setup_collections
+from src.vector_db.constants import COLLECTION_NAME, VECTOR_SIZE
+from src.vector_db.identity_backfill import backfill_document_identity
 
 NBSP = "\u00a0"
 
@@ -121,3 +132,40 @@ def test_clause_numbers_are_not_put_back_as_headings():
     # A heading the document printed is still put back.
     assert "FEES\nPayment is due within 30 days." in opening
     assert extract_document_identity(payloads)["doc_title"] == "SERVICES AGREEMENT"
+
+
+def test_the_opening_fields_are_every_field_document_opening_reads():
+    # The backfill and the startup check rebuild an opening from stored
+    # payloads, fetching OPENING_FIELDS: a field read here and not fetched
+    # there gives them another opening than ingestion read.
+    read = set(re.findall(r'\.get\("(\w+)"', inspect.getsource(document_opening)))
+    assert read and read <= set(OPENING_FIELDS)
+
+
+@pytest.mark.asyncio
+async def test_the_backfill_reads_the_opening_ingestion_read():
+    # A clause-segmented PDF: the title centred over two lines, in the section
+    # the segmenter headed by its clause number. Put back above the title, the
+    # number would be read as part of it ("PREAMBLE MASTER SERVICES AGREEMENT").
+    payloads = [
+        {"chunk_id": "d_c_0000", "deal_id": "d", "doc_id": "c", "chunk_index": 0, "contains_pii": 0,
+         "text": "MASTER SERVICES\nAGREEMENT\nThis Agreement is made by and between Orrin Data, Inc. "
+                 "and Velde Systems GmbH.",
+         "section_heading": "PREAMBLE", "clause_id": "PREAMBLE"},
+        {"chunk_id": "d_c_0001", "deal_id": "d", "doc_id": "c", "chunk_index": 1, "contains_pii": 0,
+         "text": "(a) Services means the services in Schedule 1.", "section_heading": "1(a)", "clause_id": "1(a)"},
+    ]
+    ingested = extract_document_identity(payloads)
+    assert ingested["doc_title"] == "MASTER SERVICES AGREEMENT"
+    client = AsyncQdrantClient(location=":memory:")
+    await setup_collections(client)
+    vector = {"dense": [1.0] + [0.0] * (VECTOR_SIZE - 1), "sparse": SparseVector(indices=[1], values=[1.0])}
+    await client.upsert(COLLECTION_NAME, points=[
+        PointStruct(id=i, vector=vector, payload=p) for i, p in enumerate(payloads)])
+
+    stats = await backfill_document_identity(client)
+    records, _ = await client.scroll(COLLECTION_NAME, limit=10, with_payload=True)
+
+    assert stats["updated"] == 1
+    assert {r.payload.get("doc_title") for r in records} == {ingested["doc_title"]}
+    assert {tuple(r.payload.get("doc_parties") or ()) for r in records} == {tuple(ingested["doc_parties"])}
