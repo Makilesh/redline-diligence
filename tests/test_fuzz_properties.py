@@ -21,9 +21,10 @@ import math
 import re
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
+from eval.question_forms import question_form
 from src.data_processing import document_identity as di
 from src.data_processing.ingest_pipeline import UnsupportedFileTypeError, sanitize_filename
 from src.data_processing.injection_screen import (
@@ -37,9 +38,10 @@ from src.data_processing.pii_detector import PIIDetector
 from src.utils.numerical_registry import NumericalRegistry, normalize_metric_label, normalize_period
 from src.vector_db.filing_period import question_fiscal_period
 from src.vector_db.hybrid_search import normalize_for_bm25
-from src.vector_db.named_document import NamedDocument, name_document
+from src.vector_db.named_document import NamedDocument, caseless, name_document, party_runs, written_case
 from src.verification.claims import resolve_cited_chunks, split_claims
-from src.verification.numeric_grounding import extract_numbers, ground_answer_numbers
+from src.verification.numeric_grounding import ContextIndex, extract_numbers, ground_answer_numbers
+from src.verification.table_context import headed_window, joined_window
 from tests.fixtures.fuzz import CASE_LOOKALIKES, RUN_LENGTHS, domain_text, lookalike
 
 _ASCII_TOKEN = re.compile(r"[a-z0-9]+")
@@ -169,6 +171,35 @@ class TestNamedDocument:
         rng.shuffle(shuffled)
         assert name_document(query, consistent) == name_document(query, shuffled)
 
+    @given(domain_text(15))
+    def test_a_question_in_one_case_is_caseless(self, query):
+        # Decision 91: lower case marks no name; nor do ASCII capitals throughout.
+        assert caseless(query.lower())
+        if query.isascii():
+            assert caseless(query.upper())
+
+    @given(_payloads(), domain_text(15))
+    def test_a_caseless_question_names_alike_in_either_case(self, payloads, query):
+        lower, upper = query.lower(), query.upper()
+        if caseless(upper) and di.name_tokens(lower) == di.name_tokens(upper):
+            assert name_document(lower, payloads) == name_document(upper, payloads)
+
+    @given(st.lists(st.one_of(st.none(), domain_text(30)), max_size=4))
+    def test_written_case(self, texts):
+        lower, capitals = written_case(texts)
+        assert all(re.fullmatch(r"[a-z]{2,}", w) for w in lower)
+        assert all(re.fullmatch(r"[a-z]{2,8}", w) for w in capitals)
+
+    @given(domain_text(15), st.lists(st.one_of(st.sampled_from(_PARTIES), domain_text(5)), max_size=4),
+           st.lists(st.sampled_from(["Gamma", "Atlas", "Kelvin", "Ünïcødé", "M5", "Inc."]), max_size=3))
+    def test_party_runs(self, query, parties, one_word_parties):
+        runs = party_runs(query, parties)
+        # Words of the question, each a word of some party's name.
+        assert runs <= di.name_tokens(query)
+        assert all(any(w in di.name_tokens(p) for p in parties) for w in runs)
+        # A run needs two words in a row of one name.
+        assert party_runs(query, one_word_parties) == set()
+
 
 # ---------------------------------------------------------------------------
 # Query parsing, BM25 text
@@ -194,6 +225,17 @@ class TestQueryParsing:
         assert out == out.lower() and "  " not in out and out == out.strip()
         assert all(re.fullmatch(r"\d+(?:\.\d+)*|[^\W\d_][^\W_]*", t) for t in out.split())
         assert normalize_for_bm25(out) == out
+
+    @given(st.one_of(domain_text(20), st.tuples(domain_text(4), domain_text(6), domain_text(6), domain_text(8)).map(
+        lambda p: f"Consider the {p[0]} between {p[1]} and {p[2]}; {p[3]}")), st.text(max_size=12))
+    def test_question_forms(self, question, query_id):
+        # Decision 91's rewrites (an eval tool, but it parses question text).
+        short = question_form(question, query_id, "short")
+        assert short == question_form(question, query_id, "short")          # seeded by the id alone
+        assert question_form(question, query_id, "short-lower") == short.lower()
+        assert question_form(question, query_id, "lower") == question.lower()
+        assert question_form(question, query_id, "upper") == question.upper()
+        assert not re.search(r"[ \t]{2,}", short)
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +414,25 @@ class TestCitations:
 _UNITS = st.sampled_from(["", "(in millions)", "(in mıllıons)", "in thouſands of", "(in thousands)",
                           "USD m", "($ in billions)", "(İN MİLLİONS)"])
 
+# Decision 92: the column headers and header blocks the tie-out reads periods from.
+_HEADER_WORDS = st.one_of(
+    st.sampled_from([
+        "Three Months Ended", "Six Months Ended", "Nine Months Ended", "Twelve Months Ended",
+        "13 Weeks Ended", "Fifty-Three Weeks Ended", "twenty-six weeks", "Year Ended", "Fiscal Year",
+        "Years Ended", "first quarter", "Fourth Quarter", "YTD", "half-year", "July 29,", "December 31,",
+        "Jan. 28", "31 March", "2023", "2022", "2024E", "2023A", "FY2023", "FY'22", "Q4 2023", "LTM", "TTM",
+        "| $ |", "|", "(In millions)", "vs.", "Budget", "Column 3", "Revenue", "$1,263", "(25)", "34.3 | %",
+    ]),
+    st.sampled_from(["Three Months Ended", "July 29,", "Fiscal Year", "Six Months Ended",
+                     "September 30,", "August 31, 2022"]).map(lookalike),
+    domain_text(2),
+)
+_HEADER_LINES = st.lists(_HEADER_WORDS, max_size=10).map("  ".join)
+_PERIOD_KEY = re.compile(
+    r"FY\d{4}E?|FY ending \d{4}-\d{2}|\d{4}-\d{2}-\d{2}|(?:3M|6M|9M|YTD) ending \d{4}-\d{2}-\d{2}"
+    r"|(?:Q[1-4]|H[12])\S*"
+)
+
 
 class TestFigures:
     @given(domain_text())
@@ -405,6 +466,45 @@ class TestFigures:
         assert re.fullmatch(r"(?:[a-z0-9%/&+]+(?: [a-z0-9%/&+]+)*)?", label)
         assert isinstance(normalize_period(text), str)
 
+    @given(_HEADER_LINES, st.lists(_HEADER_LINES, max_size=2))
+    def test_period_keys(self, line, context):
+        from src.utils.numerical_registry import _PERIOD, _header_keys, column_period
+
+        annual, interim = _header_keys(line, context, False), _header_keys(line, context, True)
+        assert len(annual) == len(interim) == len(_PERIOD.findall(line))
+        for key, interim_key in zip(annual, interim):
+            # A key is one of the documented forms, or None for a column that
+            # cannot be compared safely.
+            assert key is None or _PERIOD_KEY.fullmatch(key), key
+            # A 10-Q's reading only withdraws fiscal years: a bare year it
+            # cannot place, or a 31 December that is a balance date there.
+            assert interim_key == key or interim_key is None or (
+                re.fullmatch(r"\d{4}-\d{2}-\d{2}", interim_key) and re.fullmatch(r"FY\d{4}", key or "")
+            ), (key, interim_key)
+        assert column_period(line) is None or len(_PERIOD.findall(line)) == 1
+
+    @given(st.lists(st.fixed_dictionaries({
+        "source_file": st.sampled_from(["a.pdf", "b.pdf", "c.txt"]),
+        "text": st.lists(_HEADER_LINES, min_size=1, max_size=6).map("\n".join),
+        "chunk_index": st.integers(0, 3),
+        "is_table": st.sampled_from([0, 1]),
+        "table_id": st.sampled_from([None, "t1", "t2"]),
+        "filing_form": st.sampled_from([None, "10-K", "10-Q", "earnings_release"]),
+    }), max_size=5))
+    def test_tie_out(self, chunks):
+        registry, read = NumericalRegistry.from_documents(chunks)
+        result = registry.tie_out()
+        assert read == len({c["source_file"] for c in chunks})
+        statuses = [f.status for f in result.figures]
+        assert statuses == sorted(statuses, key=lambda s: s != "conflict")
+        for figure in result.figures:
+            assert figure.status in {"conflict", "agree"} and figure.kind in {"amount", "percent", "multiple"}
+            # One value per document, at least two documents, all of this period.
+            assert len({e.source_file for e in figure.entries}) == len(figure.entries) >= 2
+            assert {e.fiscal_year for e in figure.entries} == {figure.fiscal_year} != {""}
+            assert figure.max_deviation_pct >= 0
+            assert figure.status == "conflict" or figure.max_deviation_pct == 0
+
     @given(st.lists(st.one_of(domain_text(8), _MARKERS), max_size=8).map(" ".join),
            st.lists(st.fixed_dictionaries({"source_file": st.sampled_from(["a.pdf", "b.txt"]),
                                            "page_number": st.sampled_from([None, 3]),
@@ -414,6 +514,52 @@ class TestFigures:
         statuses = {"grounded", "derived", "derived_unverified", "unsupported"}
         for check in ground_answer_numbers(answer, chunks):
             assert check["status"] in statuses
+
+
+class TestTableRows:
+    """The row and header each figure is recorded with, and the window built
+    from them for the figure veto (Decision 90)."""
+
+    @given(st.tuples(_UNITS, domain_text(25)).map("\n".join))
+    # Found by the fuzz profile at round 10's integration: a figure read
+    # across a line break, "452,800,000" with the next line's "K".
+    @example("\nFY2023=452,800,000\nK\tAGREEMENT ")
+    def test_every_figure_knows_its_row(self, text):
+        index = ContextIndex([{"text": text, "source_file": "a.pdf"}])
+        for fig in index.figures:
+            start, end = fig.row_span
+            assert 0 <= start <= fig.mention.start < fig.mention.end <= end <= len(text)
+            # A header is recorded only where it named the figure's period.
+            assert not fig.header_line or (fig.period and fig.header_line in text)
+
+    @given(domain_text(30), st.data())
+    def test_a_headed_window(self, body, data):
+        start = data.draw(st.integers(-2, len(body) + 2))
+        end = data.draw(st.integers(-2, len(body) + 2))
+        header = data.draw(st.one_of(st.just(""), domain_text(4)))
+        window = headed_window(body, (start, end), header, data.draw(st.booleans()))
+        if window:
+            lines = window.split("\n")
+            assert 1 <= len(lines) <= 4 and len(set(lines)) == len(lines)
+            assert all(line and line == " ".join(line.split()) for line in lines)
+            assert " ".join(body[start:end].split()) in lines
+
+    @given(st.lists(domain_text(20), min_size=1, max_size=3), st.data())
+    def test_a_joined_window(self, bodies, data):
+        rows = []
+        for key, body in enumerate(bodies):
+            for _ in range(data.draw(st.integers(0, 3))):
+                start = data.draw(st.integers(0, len(body)))
+                end = data.draw(st.integers(start, len(body)))
+                rows.append((key, body, (start, end), data.draw(st.sampled_from(["", "FY2023  FY2022"])), True))
+        window = joined_window(rows)
+        lines = window.split("\n") if window else []
+        assert len(set(lines)) == len(lines)
+        assert all(line and line == " ".join(line.split()) for line in lines)
+        # Every row that is a table row of its text is in the window.
+        for _key, body, (start, end), _header, _ in rows:
+            if headed_window(body, (start, end)):
+                assert " ".join(body[start:end].split()) in lines
 
 
 # What a model's JSON may hold where a number belongs: JSON integers have no

@@ -84,6 +84,7 @@ from src.verification.numeric_grounding import (
     ground_texts,
     summarize_numeric,
 )
+from src.verification.table_context import headed_window, is_table_chunk, joined_window
 
 logger = setup_logger(__name__)
 
@@ -105,14 +106,23 @@ class FigureVeto:
     Attributes:
         line: Below this best support score the claim goes to the judge.
         evidence: "figure" — windows of the passage each figure was found in;
-            "claim" — the windows an unsettled claim gets; "union" — both.
+            "headed" — the same, except that a figure found in a table row is
+            shown as that row with its title, unit line and column header
+            (table_context.headed_window, Decision 90); "claim" — the windows
+            an unsettled claim gets; "union" — "figure" and "claim".
         cues_only: Only claims with wording the figure check cannot see
             (negation, a quantifier, a direction, a party).
+        rows: "headed" only — a claim whose figures sit in more than one table
+            row gets "each": a window per row; "joined": one window holding
+            all of them with their headers (table_context.joined_window);
+            "single": no veto at all, as without one. A claim within one row
+            reads the same window under all three.
     """
 
     line: float
     evidence: str = "figure"
     cues_only: bool = False
+    rows: str = "each"
 
 
 @dataclass(frozen=True)
@@ -146,9 +156,28 @@ MODEL_THRESHOLDS = {
     # 0.432 sits in a narrow gap on dev: a wrong claim scores 0.4305 and a
     # correct one 0.4326. fp16 moves scores by at most 0.002 on the benchmark
     # and changes no decision; a recalibration should start here.
+    # FactCG second-guesses every figure-confirmed claim, reading a table row
+    # with its title, unit line and column header ("headed", Decision 90), and
+    # a claim joining several rows against one window holding all of them
+    # (rows="joined"). Read one row at a time, the correct claims joining two
+    # rows were nearly all sent to the judge: 193 -> 22 of 408 passed locally
+    # on new FinanceBench claims. Evidence, scope and line were chosen on the
+    # benchmark's dev half by a rule fixed before any veto pair was scored
+    # (dev: wrong claims passed 7 -> 6, no correct claim lost; the line sits
+    # just above the one wrong dev catch), and confirmed on claims built from
+    # FinanceBench's dev-company filings, data no earlier round had seen:
+    # single-figure claims, wrong passed 408 -> 326 of 953 (-8.6pp
+    # [-14.7, -4.0], filings resampled), correct passed 614 -> 611 of 694;
+    # two-row claims, wrong passed 126 -> 96 of 604 (-5.0pp [-8.7, -2.2]),
+    # correct passed 193 -> 192 of 408; no false alarm on either. Nearly all
+    # its catches name another company than the one whose statement it is; a
+    # flipped direction ("rose" for "fell") still passes. On the benchmark's
+    # test half, read again (not an unbiased look): wrong claims passed
+    # 11 -> 6 of 165, correct ones passed locally 65 -> 63 of 101.
     nli.FACTCG: Thresholds(
         entail=0.432, contradiction=CONTRADICTION_THRESHOLD,
         clear_neutral_entail=0.2, clear_neutral_contradiction=CLEAR_NEUTRAL_MAX_CONTRADICTION,
+        figure_veto=FigureVeto(line=0.03643, evidence="headed", cues_only=False, rows="joined"),
     ),
     # The cross-encoders that still serve — -xsmall on CPU, -small when the
     # checker cannot load — recalibrated by the same rule on the same dev
@@ -162,9 +191,8 @@ MODEL_THRESHOLDS = {
     # were found in. Chosen on the dev half by a rule fixed before any of these
     # pairs was scored; on the test half wrong claims passed 18/165 -> 16/165
     # (both swapped parties), false alarms unchanged (1/101), one more correct
-    # claim sent to the judge. FactCG's veto failed the same rule (on test 11
-    # -> 7 wrong claims passed, but 3 fewer correct claims passed locally,
-    # mostly table rows read without their column headers), so it has none.
+    # claim sent to the judge. It reads the plain figure windows: header-aware
+    # rows were measured for FactCG only (Decision 90), not for -xsmall.
     "cross-encoder/nli-deberta-v3-xsmall": Thresholds(
         entail=0.858, contradiction=CONTRADICTION_THRESHOLD,
         clear_neutral_entail=0.002, clear_neutral_contradiction=CLEAR_NEUTRAL_MAX_CONTRADICTION,
@@ -427,10 +455,33 @@ def _claim_windows(
     return chosen
 
 
+def _headed_rows(
+    nums: list, bodies: dict[int, tuple[str, bool]]
+) -> list[tuple[int, tuple[int, int], str, str, bool]]:
+    """
+    The distinct table rows a claim's looked-up figures were found in, in the
+    order its figures reach them: (chunk index, row span, header line,
+    evidence text, is a table chunk). Only rows headed_window can show.
+    """
+    rows: dict[tuple[int, tuple[int, int]], tuple[int, tuple[int, int], str, str, bool]] = {}
+    for n in nums:
+        ci = n.evidence_chunk
+        if ci < 0 or ci not in bodies or not n.evidence_cell or not n.evidence_figure.strip():
+            continue
+        if not _looked_up(n):
+            continue
+        body, in_table = bodies[ci]
+        if headed_window(body, n.evidence_row, n.evidence_header, in_table):
+            rows.setdefault((ci, n.evidence_row), (ci, n.evidence_row, n.evidence_header, body, in_table))
+    return list(rows.values())
+
+
 def _figure_windows(
     claim_tokens: set[str],
     nums: list,
     windows: dict[int, list[tuple[str, set[str]]]],
+    bodies: dict[int, tuple[str, bool]] | None = None,
+    rows: str = "each",
 ) -> list[tuple[int, str, float]]:
     """
     The windows each of a claim's figures was found in.
@@ -439,6 +490,25 @@ def _figure_windows(
     it, in the chunk numeric grounding matched — the passage the number came
     from. Per figure, the best WINDOWS_PER_FIGURE by token overlap with the
     claim; at most FIGURE_WINDOWS_PER_CLAIM in all.
+
+    With `bodies` (the "headed" evidence), a figure grounding found in a table
+    row gets one window instead: the row with the table's title, unit line and
+    the column header its period was read from (table_context). A row window
+    cut from sentence-sized units carries none of those — Decision 64's vetoed
+    correct claims were such rows. A figure the claim's own arithmetic
+    confirms (a difference, a margin) came from no passage, so it adds none.
+    With rows="joined", a claim whose figures sit in several rows gets one
+    window holding all of them (at most FIGURE_WINDOWS_PER_CLAIM rows) in
+    place of the per-row windows; a claim within one row is unchanged.
+
+    Args:
+        claim_tokens: The claim's content tokens.
+        nums: The claim's NumericChecks.
+        windows: Premise windows per chunk (_build_windows).
+        bodies: For headed rows, (evidence text, is a table chunk) per chunk
+            index; None for the plain windows.
+        rows: FigureVeto.rows ("each" or "joined"; "single" is decided by the
+            caller, which scores no window at all for a claim of several rows).
 
     Returns:
         (chunk index, window text, overlap) tuples; empty when no window holds
@@ -451,6 +521,19 @@ def _figure_windows(
         ci = n.evidence_chunk
         if not printed or ci < 0:
             continue
+        if bodies is not None:
+            if not _looked_up(n):
+                continue
+            window = ""
+            if n.evidence_cell and ci in bodies:
+                body, in_table = bodies[ci]
+                window = headed_window(body, n.evidence_row, n.evidence_header, in_table)
+            if window:
+                if window not in seen:
+                    seen.add(window)
+                    overlap = len(claim_tokens & _tokens(window)) / max(len(claim_tokens), 1)
+                    chosen.append((ci, window, overlap))
+                continue
         # Not inside a longer number: "$452.8" must not match "$452.85".
         pattern = re.compile(r"(?<![\d.])" + re.escape(printed) + r"(?![\d])")
         scored = []
@@ -462,6 +545,19 @@ def _figure_windows(
         for entry in scored[:WINDOWS_PER_FIGURE]:
             seen.add(entry[1])
             chosen.append(entry)
+    if rows == "joined" and bodies is not None:
+        headed = _headed_rows(nums, bodies)
+        if len(headed) > 1:
+            per_row = {headed_window(body, span, header, in_table)
+                       for _ci, span, header, body, in_table in headed}
+            first = next(i for i, entry in enumerate(chosen) if entry[1] in per_row)
+            joined = joined_window([
+                (ci, body, span, header, in_table)
+                for ci, span, header, body, in_table in headed[:FIGURE_WINDOWS_PER_CLAIM]
+            ])
+            chosen = [entry for entry in chosen if entry[1] not in per_row]
+            overlap = len(claim_tokens & _tokens(joined)) / max(len(claim_tokens), 1)
+            chosen.insert(first, (headed[0][0], joined, overlap))
     return chosen[:FIGURE_WINDOWS_PER_CLAIM]
 
 
@@ -664,6 +760,14 @@ async def verify_answer(
             # Its own budget, so grounded padding cannot crowd out the others.
             if len(veto_claims) < MAX_CLAIMS:
                 veto_claims.add(claim.index)
+    # Headed rows are cut from the text numeric grounding parsed. A failure
+    # here is a failure of claim verification, a safety step (Decision 88): it
+    # raises, and the validator keeps the answer as a warning, never passed.
+    bodies: dict[int, tuple[str, bool]] | None = None
+    if veto_claims and planned_veto.evidence == "headed":
+        bodies = {
+            ci: (chunk_evidence_text(chunk), is_table_chunk(chunk)) for ci, chunk in enumerate(chunks)
+        }
 
     # (claim idx, chunk idx, cited, window, lexical overlap)
     pair_owner: list[tuple[int, int, bool, str, float]] = []
@@ -680,9 +784,20 @@ async def verify_answer(
         cited = resolve_cited_chunks(claim.markers, chunks)
         cited_by_claim[claim.index] = cited
         if claim.index in veto_claims:
+            if (
+                bodies is not None
+                and planned_veto.rows == "single"
+                and len(_headed_rows(numeric[claim.index], bodies)) > 1
+            ):
+                # A veto that reads one row at a time does not second-guess a
+                # claim joining several: it is passed on its figures, as with
+                # no veto at all.
+                continue
             chosen = []
-            if planned_veto.evidence in ("figure", "union"):
-                chosen = _figure_windows(toks, numeric[claim.index], windows)
+            if planned_veto.evidence in ("figure", "union", "headed"):
+                chosen = _figure_windows(
+                    toks, numeric[claim.index], windows, bodies, planned_veto.rows
+                )
             if planned_veto.evidence in ("claim", "union") or not chosen:
                 have = {w for _, w, _ in chosen}
                 chosen += [

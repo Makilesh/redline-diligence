@@ -69,12 +69,14 @@ import sys
 import tempfile
 import time
 from collections import Counter, defaultdict
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
 from eval import realdocs_data as data
 from eval import span_alignment as sa
 from eval.decisions import stats
+from eval.question_forms import FORMS, question_form
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RESULTS_DIR = PROJECT_ROOT / "eval" / "results"
@@ -450,6 +452,11 @@ async def run_legalbench(args) -> dict:
     if args.split and fresh is None:
         split = split_legalbench_documents(queries, args.split_seed)
         queries = [q for q in queries if split.get(q.document) == args.split]
+    if args.question_form != "original":
+        # Decision 91: the same questions as a deal team types them (lower
+        # case, capitals, dropped suffixes); ids and ground truth unchanged, so
+        # --compare against an original-form run pairs them.
+        queries = [replace(q, query=question_form(q.query, q.id, args.question_form)) for q in queries]
 
     started = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix="realdocs_") as tmp:
@@ -541,6 +548,7 @@ async def run_legalbench(args) -> dict:
             "licences": data.LEGALBENCH_LICENCES, "subsets": list(args.subsets),
             "queries": len(queries), "documents": len(documents),
             "characters": sum(len(t) for t in documents.values()),
+            "question_form": args.question_form,
             **({"split": args.split, "split_seed": args.split_seed,
                 "split_documents": sorted(d for d, s in split.items() if s == args.split)}
                if split else {}),
@@ -1060,6 +1068,10 @@ def parse_args(argv=None):
                         help="LegalBench-RAG fresh: seeded sample of at most N queries per document (0: all)")
     parser.add_argument("--unseal-fresh-test", action="store_true",
                         help="LegalBench-RAG fresh: allow --split test (sealed for one later look)")
+    parser.add_argument("--question-form", choices=FORMS, default="original",
+                        help="LegalBench-RAG: ask each question as a deal team might type it — lower, upper "
+                             "(ALL CAPS), short (legal suffixes and the 'between' clause dropped, one party "
+                             "named), short-lower (eval/question_forms.py, Decision 91)")
     parser.add_argument("--max-documents", type=int, help="FinanceBench: seeded sample of N filings")
     parser.add_argument("--documents", nargs="+", metavar="DOC_NAME", help="FinanceBench: exactly these filings")
     parser.add_argument("--split", choices=("dev", "test"),

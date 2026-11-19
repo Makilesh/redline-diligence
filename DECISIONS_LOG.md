@@ -1149,3 +1149,290 @@ All architecture decisions that deviated from or resolved ambiguities in p4.md a
   - Retrieval: all 84 filings indexed once with main's code and once with the integrated code, and the 73 dev questions (Decision 68's company split) asked of each with the same retrieval code, production ablation. Paired, filings resampled: evidence page in the final context 63.0 → 65.8 (+2.7 [−2.5, +8.5]; 3 questions up, 1 down); evidence tokens in the final context 67.0 → 68.4 (+1.4 [−0.2, +3.5]; 7 up, 7 down); page hit@10 50.7 → 53.4; page hit@1 23.3 on both; MRR@10 +1.0 [−2.9, +5.3]. **The rule passes: the frame rule applies to filings unchanged.** Test-company questions were not read.
 - **Guarded by**: `tests/test_identity_on_pdf_text.py` (no-break spaces; a wrapped article; "EXHIBIT A" above a name; titles over two and three lines; a lower-case continuation; version stamps and sentences not joined; section references; clause numbers not put back); `tests/test_pdf_contract_text.py` (a generated framed contract that pdfplumber reports as a table and the processor reads as clauses with parents and an identity; frame and non-frame grids; canonical characters normalised, compatibility characters kept).
 - **Impact**: src/data_processing/{pdf_processor,document_identity}.py, src/vector_db/{identity_backfill,collection_manager}.py, tests/test_{identity_on_pdf_text,pdf_contract_text,identity_startup_check}.py, README.md, DEPLOYMENT.md
+
+## Decision 90: The GPU checker second-guesses figure-only confirmations, reading table rows with their headers
+- **Date**: Session 19
+- **Context**: on GPU, every wrong benchmark claim that still passes is settled by the figure checks alone. The document's figure is correctly located, but the party, period or direction around it is wrong, so FactCG never reads it (Decision 63). Decision 64 let a model veto such figure-only confirmations. It was adopted on CPU (`-xsmall`, cue claims only) and rejected on GPU: FactCG's veto caught 4–5 of the 11 held-out false passes but sent 8.9pp / 3.0pp of correct claims to the judge, past the pre-registered bounds. The correct claims it vetoed were mostly table rows read without their column headers. Prepending the header line cut its dev cost from −4 to −1 correct claims, but only in a dev look after the test run: a lead that needed data no round had seen.
+- **What the veto read**: the sentence-sized windows of `nli.split_premises`.
+  - A fixed-width row more than two lines below its header was scored without it.
+  - The converter's markdown grid and row-by-row representation have no sentence end, so each was one window holding the whole table.
+  - The narrative representation is cut at its semicolons, which glues a row's second column to the next row's label.
+- **Change**: numeric grounding already knew, for every figure, the row it sits in and the column-header line it read the period from. It now records both: `ContextFigure.row_span` / `header_line`, carried as `NumericCheck.evidence_row` / `evidence_header` / `evidence_cell` (internal, never serialised). `src/verification/table_context.py` builds the row as a reader sees it:
+  - the chunk's title (a heading, not a table row or a sentence);
+  - the nearest unit line above the row;
+  - the header grounding used (from its first period on, when borrowed from another table of the file);
+  - the whole line(s) of the row.
+
+  Only table rows get it: a line in a chunk ingestion indexed as a table, or a line set in columns. A "Label: value" bullet in prose keeps the sentence windows that name its party, and a figure the claim's own arithmetic confirms adds no window. This is `FigureVeto(evidence="headed")`; the CPU veto keeps `"figure"`. Grounding's decisions are unchanged: on all 2,189 answers of both sets (2,175 figures), every `NumericCheck.to_dict()` is identical to main's (beae00c).
+- **Method**, written into the scratch notes before any candidate was scored. Amendments A1–A8 came before any model scored anything, from reading the windows the builder produced.
+  1. *Choose on dev*. Candidates: evidence {figure, headed} × scope {all figure-confirmed claims, cue claims only} × line (midpoints between consecutive dev scores), on the benchmark's dev half. Rule (Decision 64's rule B): fewest wrong claims passed, with at most 2 of 109 fewer correct claims passed locally and no more false alarms. Ties go to more correct claims passed, then cue before all, then figure before headed, then the higher line.
+  2. *Confirm on new data*: FinanceBench's dev companies (Decision 68's split), from the int9 store as main's ingestion wrote it. For every converter table on a dev evidence page, up to 16 seeded (row, year) cells give:
+     - supported claims: the figure as printed with its line item and period ("In fiscal 2017, goodwill was $5,821,561."; "Adobe reported goodwill of $5,821,561 in fiscal 2017."); the true direction against the prior year; the side of an "income (loss)" pair the printed sign selects;
+     - wrong claims by construction: another year's figure, the next row's figure, the direction or the sign flipped, another dev company named.
+
+     Each claim's context is every chunk the index holds for its page, shuffled per claim. The data is CC BY-NC, so it is generated under `D:/redline_data/veto10/`; the generator is `eval/figure_veto_set.py`.
+  3. *Adopt on GPU* only if, with the dev-chosen line unchanged: (a) wrong claims passed fall, with a paired 95% interval (filings resampled) entirely below zero — tightened from Decision 64's point estimate; (b) false alarms rise by at most 2pp; (c) correct claims passed locally fall by at most 2pp. The old test half is reported once, as a repeat look.
+- **The new set**: 85 converter tables touch the 84 dev evidence pages.
+  - 66 carry generic "Column N" headers (1,088 eligible rows) and yield no claims.
+  - 17 named tables in 14 filings give 1,647 claims: 694 supported (plain 271, company 271, direction 139, sign 13) and 953 wrong (company 271, neighbour 271, period 259, direction 139, sign 13). None was dropped as unfound.
+  - A hand check of 60 seeded claims agreed with all 60 labels.
+- **Dev pick** (`python -m eval.run_figure_veto_eval select`, dev half only): headed evidence, all figure-confirmed claims, line **0.03831**.
+  - Wrong claims passed 7 → 6 of 167, correct claims passed locally 73 → 73 of 109, false alarms 3. A full replay reproduces the fast count.
+  - The plain windows reach the same 6 only at the cost of one correct claim (line 0.0400, Decision 64's rule B pick reproduced), and neither form reaches 5 within the bound.
+  - The one dev catch is a party swap in a board-deck bullet. The next dev score above the line is a correct claim 0.0025 higher.
+- **Confirmed on FinanceBench** (`confirm`, dev-chosen configuration unchanged; production is FactCG without a veto). **The rule passes on all three counts.** This is the first form; the integration review below changed what ships.
+  - Wrong claims passed: 408 → 322 of 953 (42.8% → 33.8%, **−9.0pp [−15.1, −4.4]**) — rule (a).
+  - False alarms: 0 → 0 — rule (b).
+  - Correct claims passed locally: 614 → 609 of 694 (**−0.7pp [−1.8, 0.0]**) — rule (c).
+  - Judge load +5.5pp [+2.7, +9.2]. A full replay at the line reproduces every outcome.
+  - What it catches: 82 of the 243 passing claims that name another company, 2 of 17 passing period swaps and 2 of 125 flipped directions. What it costs: 4 correct company claims and 1 plain one.
+  - It works because the title line usually names the filer ("ADOBE SYSTEMS INCORPORATED", "SQUARE, INC."). The plain windows of converter tables are whole tables, on which FactCG supports almost anything: at the same line they would have caught none of the 408 (secondary, reported for comparison).
+- **The line is a sharp choice, stated plainly**. Looked at after the rule had decided and not used by it: at 0.05 the same set would lose 24 correct claims (3.5pp) for 113 catches, and at 0.03, 0 for 49.
+- **Benchmark test half, a repeat look** (read by Decisions 63–64; not part of the rule):
+  - Wrong claims passed: 11 → 6 of 165 (−3.0pp [−5.6, −0.7]).
+  - Correct claims passed locally: 65 → 60 of 101 (**−5.0pp [−9.3, −1.1]**). This is past the 2pp bound, had this been the deciding set.
+  - False alarms 3 → 3; judge load 35.3% → 39.1%. The plain windows at the same line: 11 → 7 wrong, −3.0pp correct.
+  - Three of the five correct claims lost combine two rows of one table ("Total assets were $560.4 million and total liabilities were $288.0 million"; EBIT plus D&A giving EBITDA; depreciation and amortization). The headed form gives each figure its own row, so no window holds the whole claim; a plain window of adjacent lines sometimes did.
+  - The FinanceBench set holds only single-figure claims, so it could not see this cost.
+- **Integration review: the shipped form reads a claim's rows together.**
+  - *Why.* The review would not ship a veto that loses 5 of 101 correct claims of the kind real answers write. That half is contaminated, but what it shows is a gap in what the confirmation set covered, not noise.
+  - *Change.* `FigureVeto.rows`:
+    - `"joined"`: a claim whose looked-up figures sit in more than one table row gets one window, `table_context.joined_window`. Per chunk, in the order its figures first reach it, the window holds the chunk's title, unit line and header line(s), then the claim's rows in document order. Every line appears once, with at most four rows. It replaces the per-row windows; prose figures keep their sentence windows.
+    - `"each"`: the per-row windows above.
+    - `"single"`: no veto for such a claim.
+
+    A claim within one row reads byte-identical windows in all three. Re-scored with the earlier scores as a cache, the single-figure set needed 0 new pairs, and every claim's veto scores are equal.
+  - *Method*, written into the scratch notes before any new scoring:
+    1. Re-run the dev pick with `joined` in place of per-row `headed`, otherwise unchanged.
+    2. New data: claims joining two rows of the same 17 tables for one year, built the same way. Supported claims state both rows' figures as printed (plain, or naming the filer). Wrong claims replace one of the two figures with its other-year or neighbouring-row figure, or name another dev company. That gives 1,012 claims: 408 supported, 604 wrong; 204 row pairs from 14 filings. A hand check agreed with 40 of 40 labels.
+    3. Adopt `joined` only if, on the two-row claims, correct claims passed locally fall by at most 2pp, false alarms rise by at most 2pp and wrong claims passed do not rise (point estimates; intervals resample filings), **and** Decision 90's rule still holds on the single-figure set. If the line moved, that is a second look at that set.
+    4. Otherwise ship the per-row veto for one-row claims only (`"single"`).
+  - *Dev pick*: `joined`, all figure-confirmed claims, line **0.03643**.
+    - Dev wrong claims passed 7 → 6; correct claims passed locally 73 → 73; full replay matches.
+    - The line moved from 0.03831: a correct dev claim joining two rows now scores just above the one wrong dev catch.
+    - Decision 90's candidate set, re-run on the same scores, reproduces its own pick.
+  - *Two-row claims*, against production FactCG — **the rule passes**:
+    - wrong claims passed: 126 → 96 of 604 (**−5.0pp [−8.7, −2.2]**);
+    - correct claims passed locally: 193 → 192 of 408 (**−0.25pp [−0.74, 0.0]**);
+    - false alarms 0 → 0; judge load +3.1pp.
+    - Read one row at a time (Decision 90's first form), the same claims would have gone 193 → 22. That is the coverage gap, measured on new data.
+  - *Single-figure claims, at the moved line* (a second look at that set) — **Decision 90's rule passes again**:
+    - wrong claims passed: 408 → 326 of 953 (−8.6pp [−14.7, −4.0]);
+    - correct claims passed locally: 614 → 611 of 694 (−0.4pp [−0.9, 0.0]);
+    - false alarms 0 → 0.
+  - **Shipped:** `FigureVeto(line=0.03643, evidence="headed", cues_only=False, rows="joined")`. Full replays reproduce every outcome on both sets.
+  - *Repeat look, benchmark test half*, for what ships (descriptive):
+    - Wrong claims passed: 11 → 6 of 165 (−3.0pp [−5.6, −0.7]).
+    - Correct claims passed locally: 65 → 63 of 101 (−2.0pp [−5.1, 0.0]). False alarms 3 → 3; judge load 35.3% → 38.0%.
+    - Recovered: the two-row claims "total assets … and total liabilities …" (support 0.031 → 0.618) and "depreciation … and amortization …" (0.032 → 0.467). The parachute total now passes because the line moved.
+    - Still lost: "EBIT plus $24.8 million of D&A gives EBITDA" (0.027 joined) and a prose claim no form passes.
+- **Cost on GPU** (FactCG fp16):
+  - Per figure-confirmed claim scored alone:
+    - single-figure claims: unchanged, 1.06 pairs and 39 ms mean / 27 ms p50 / 50 ms p95;
+    - two-row claims: 1.21 joined pairs against 2.07 per-row, 71 ms mean / 31 ms p50 (per-row 70 / 30);
+    - benchmark: 26 ms p50 / 48 ms p95 joined.
+  - Per answer, on 60 answers of nine single-figure table claims each, A/B interleaved with the real model: 2.1 → 10.6 pairs, median 10 → 47 ms (+36 ms paired). Joining changes no pair of these answers.
+
+  Production scores the pairs in the answer's single batched call, with the same 40-claim budget.
+- **Gates** (with the shipped `joined` veto):
+  - CI's verification gate (`--no-nli --baseline`) is identical to its baseline.
+  - The FactCG run of the benchmark, against main's FactCG run:
+
+    | | dev | test |
+    |---|---|---|
+    | wrong claims passed | 6/167 (main 7) | 6/165 (main 11) |
+    | correct claims passed locally | 73/109 (main 73) | 63/101 (main 65) |
+    | false alarms | 3 (main 3) | 3 (main 3) |
+    | judge load | 33.3% (main 33.0%) | 38.0% (main 35.3%) |
+  - Offline suite 2,078 passed, 1 xfailed (the pinned defect); `-m models` 7 passed; ruff clean.
+  - At integration, with Decisions 91 and 92 merged: offline suite 2,194 passed, 1 xfailed; `-m models` 7 passed; the `fuzz` profile 47 of 47; CI's verification gate identical to its baseline; the FactCG run identical to this branch's (wrong claims passed 6/167 and 6/165, false alarms 3/109 and 3/101).
+  - The `fuzz` profile, run at integration, found a figure read across a line break ("452,800,000" with the next line's "K") ending past the row recorded for it. The row now runs to the end of the last line its figures reach. No context the veto was measured on holds such a figure (34 FinanceBench page contexts, 542 benchmark contexts), so no measured window changes; the case is pinned as an example of the property.
+  - Two branches of this round read a FactCG run against `eval/verification_baseline.json` as main failing its gate. That file is recorded without a model (`"nli": "off"`), and CI runs the gate with `--no-nli`. The eval now refuses to compare a run with a baseline recorded with another checker (exit 2) and says which mode to run.
+- **Failure class**: building a headed row is part of claim verification, a safety step (Decision 88). It raises, and the validator keeps the answer as a warning, never passed.
+- **Found on the way, not changed**. Grounding's decisions were frozen this round, and the PDF processor is another territory.
+  - *Grounding confirms 29 of the set's wrong period and neighbour claims*, i.e. shows a wrong figure as verified with no model involved. Three causes, by inspection of all 29:
+    - *Several rows read as one sentence (14).* A row-by-row label that keeps the PDF's dot leaders ("Short-term investments ......: 2015=3,111,524 2014=2,622,091") is longer than the 60 characters `_LABEL_COLON_RE` allows, so the whole table is one prose paragraph. A neighbour's figure then sits in the same "sentence" as the claim's row label.
+    - *A row-by-row line read without a unique column header gives every figure its last column's year (8).* In "Operating income: 2019=7,207 2018=7,820", `figure_periods` breaks the tie between the period before a figure ("2019=") and the one after it (" 2018") in favour of the one after. So "Operating income was $7,207 in fiscal 2018" comes back bound — a wrong figure confirmed — and the correct 2019 claim is a conflict. The markdown sibling's header fixes it when it is the file's only header of that width. Pinned as a strict xfail in `tests/test_figure_veto.py`.
+    - *A single-figure row whose period nothing states (5)* binds to any year a claim names (the "undated" rule), for example when a grid's header reads "For the Years Ended December 31, 2018", which `_column_header` does not read as periods.
+    - The other 2 are bound with a header and were not traced further.
+  - *The converter's unit note cannot be read by grounding when the currency is unknown.* "Values are as stated in the source, in millions." matches none of `SCALE_HINT_RE`'s forms, so a correct "$1,488.4 million" fails against those tables. Of the 696 row-by-row chunks of the dev filings whose table states a scale, 631 carry a unit note grounding cannot read. The set's claims therefore print figures the way the table does, without a scale word.
+  - *Generic headers*: of the 66 tables, 15 could take the header of a named table of the same width above them; the rest sit under a period row the borderless detector did not reach. Seen causes: a balance sheet's liabilities half split from its assets, and "$" cells breaking the run between header and figures ("Net income  $  5,070 $  6,046").
+- **Not verified**:
+  - Answers as a model writes them; these claims are single sentences built from statement tables (one or two rows each).
+  - Claims joining more than four rows (the window holds the first four), or rows of different tables of one chunk, beyond the unit tests.
+  - Statements whose titles do not name the company. Most catches rest on the title line.
+  - Contracts and other prose-heavy documents, where the headed rows do not apply.
+  - The CPU host: `-xsmall` was not measured with headed rows, and its veto is unchanged.
+  - A held-out FinanceBench split: the set uses the dev companies only, and the test companies' questions and labels were not read.
+- **Impact**: src/verification/{numeric_grounding,table_context,claim_checker}.py, eval/{figure_veto_set,run_figure_veto_eval}.py, tests/{test_figure_veto,test_figure_veto_eval,test_fuzz_properties}.py, README.md
+
+## Decision 91: Read a question's names without capital letters, by how the retrieved text writes each word — rejected by its first rule, adopted on integration review against production's own standard, on questions built from held-out documents
+- **Date**: Session 19
+- **Context**: Decision 86 focuses a legal question on the agreement it names, by the words the question writes with a capital, matched against the title and parties ingestion reads from each agreement. LegalBench-RAG writes every question formally ("Consider the Acquisition Agreement between Parent X and Target Y; ..."); a deal team types "does the nda with northwind have a non-solicit?" or "change of control in the atlas spa", or pastes a name in capitals. By the code, a lower-case question names nothing, so focus keeps the fused leader, and an ALL CAPS question has every word read as a name and every short word as a title's short form.
+- **Method** (the rule was written into the scratch notes before any rewritten question was generated):
+  - *Data*, dev only: mini-dev and fresh-dev (Decisions 67 and 80), 1,362 questions about 359 documents, all 714 files indexed. The store is Decision 86's, with identities backfilled by main's extractor: 6 documents change (Decision 89's corrections), and no dev question's focus choice does.
+  - *Question forms* (`eval/question_forms.py`, seeded by the question id, so a question's form depends on nothing else):
+    - O, the original;
+    - L, lower case;
+    - U, ALL CAPS;
+    - C, short: legal suffixes dropped, one party named without "between" ("the Hydron Technologies Sponsorship Agreement", "the NDA with IGC"), "Non-Disclosure Agreement" written "NDA";
+    - CL, short in lower case.
+  - *Runs*: the real `_candidates_for_query` recorded each question's first-search pool once per form. Matchers were applied to the recorded pools offline, with main's matcher frozen as the baseline, C0. The real retrieval node then ran with the focus document forced wherever a matcher's document differed from C0's: bge-reranker-v2-m3 at focus 30 and MiniLM-L6 at focus 10, ranked on the GPU as in Decisions 80, 85 and 86. Elsewhere a matcher's result is C0's.
+  - *Measurement speed-ups*: three changes to local mode served the measurement only. Filter masks were computed with numpy and checked against local mode's own; sparse products went through a CSR matrix; the scroll order was cached. Together they reproduced local mode exactly: 40 of 40 searches, and 24 of 24 node runs, which also equal round 8's stored runs. A hybrid search took 0.26 s instead of 1.94 s.
+  - *Candidates* were designed on mini-dev's pools only (focus choices, no recall) and frozen before fresh-dev's pools were read.
+    - K1: a question whose capitals mark no name — lower case, a capital only where a sentence starts, or ALL CAPS — is *caseless*. Its words count when no retrieved text writes them in lower case: "state", "general" and "document" are ordinary words there, "northwind" and "bankshares" are not. A word counts as a title's short form when the retrieved text also writes it in capitals ("NDA"). Any other question is read as before.
+    - K2: K1, and a mixed-case question's lower-case words counted the same way.
+    - K3: K1, and a run of two or more question words that is also a run of a retrieved party's name counts whatever the text does with the words ("community bankers trust", "product development experts": names made only of ordinary words, which K1 lost on mini-dev).
+  - *Rule*, pooled dev; every condition must hold:
+    - on the four rewritten forms, right-document focus does not fall, and it rises on L;
+    - bge@30 final-context recall's paired interval (documents resampled) is not entirely below zero on any rewritten form, and its point change on L is at least +1.0;
+    - on the original questions, the focus choice is unchanged for at least 99%, and recall's interval is not entirely below zero;
+    - **wrong documents named do not rise on any form**;
+    - MiniLM@10's recall interval is not entirely below zero on any form;
+    - the golden and answerability gates are identical to main.
+- **Measured — naming** (pooled dev, 1,362 questions; named right / wrong; and the focus document right, where the fused leader is the right one for O 1,148, L 1,146, U 1,137, C 908, CL 909):
+
+  | Form | C0 | K1 | K3 |
+  |---|---|---|---|
+  | O | 1,050 / 4; focus 1,291 | = C0 | = C0 |
+  | L | 0 / 0; focus 1,146 | 1,021 / 4; 1,279 | 1,072 / **2**; 1,293 |
+  | U | 1,067 / **11**; 1,278 | 1,024 / 3; 1,266 | 1,073 / 1; 1,278 |
+  | C | 958 / 20; 1,176 | = C0 | = C0 |
+  | CL | 0 / 0; 909 | 842 / 6; 1,131 | 942 / **5**; 1,176 |
+
+  - K2 equals K1 on the caseless forms. It names 6 more agreements on O (MAUD) and 8 more on C, none wrong.
+  - PrivacyQA, whose policies carry no party identity, is named 0 times by every candidate on every form. C0 names 2 wrong PrivacyQA documents on U.
+- **Measured — recall** (paired against C0 on the same form, documents resampled; bge@30 final-context character recall, then MiniLM@10):
+
+  | Form | K1 | K3 | T: O's naming carried over | ORACLE |
+  |---|---|---|---|---|
+  | L | +3.35 [+2.11, +4.78] (51 up, 0 down); +2.39 | **+3.63 [+2.36, +5.05]** (56 up, 0 down); +2.69 [+1.57, +3.86] | +3.41 [+2.20, +4.73] | +5.68 |
+  | U | −0.38 [−0.73, −0.11] (0 up, 7 down); −0.15 | +0.04 [−0.24, +0.42] (2 up, 2 down); +0.07 | 0.00 | +2.10 |
+  | C | 0 | 0 | +2.34 [+1.41, +3.42] | +5.23 |
+  | CL | +5.18 [+3.56, +7.12] (76 up, 0 down); +4.44 | **+6.37 [+4.62, +8.43]** (95 up, 0 down); +5.52 [+4.03, +7.23] | +9.12 | +12.27 |
+
+  - Typed in lower case, a question loses the naming it had when capitalised. That costs 3.4 points of final-context recall (T), and K3 recovers all of it: +3.63, with doc_hit@1 +1.03 [+0.50, +1.64]. By half: mini-dev +1.67 [+0.23, +3.66], fresh-dev +4.50 [+2.85, +6.36].
+  - Levels: C0 was run on every lower-case question.
+    - Lower-casing the 1,362 questions moves bge@30 final-context recall from 81.1 [77.5, 84.1] to 78.0 [74.3, 81.4], a paired change of −3.0 [−4.7, −1.3].
+    - MiniLM@10 moves from 72.6 to 69.4 (−3.2 [−4.6, −1.9]).
+    - bge's doc_hit@1 rises from 89.8 to 92.5.
+    - The naming accounts for the whole loss: 78.0 + 3.4 (T) is level with 81.1, so the cased embedder and reranker lose nothing measurable on lower-case questions.
+  - On the original questions every candidate is identical to C0 (1,362 of 1,362 focus choices; K2 differs only in naming a document that was already the fused one).
+- **Result under the rule written first: not adopted.**
+  - K3 meets every condition but one. It names a wrong document for 2 lower-case and 5 short lower-case questions, where C0 names none.
+  - K1 also lowers ALL CAPS recall: its interval lies below zero, and right focus falls 1,278 → 1,266.
+  - `src/vector_db/named_document.py` was left unchanged at this point.
+  - The rule compared each candidate with C0 on the same form, and on a caseless form C0 names nothing. Against the capitalised originals the comparison runs the other way: K3 names a wrong document 2 times on L against C0's 4 on O, 5 times on CL against 20 on C, and once on U. Its 7 wrong namings cost no question any recall with either reranker. The one MiniLM question that lost recall on L had its right agreement named. That comparison was not the rule, and is recorded, not acted on.
+- **Where the wrong namings come from** (fresh-dev; read after the counts had fixed the verdict). In every one, the asked-about agreement's identity cannot match the name the question uses:
+  - no identity at all: Southern Star Energy's affiliate agreement;
+  - no parties: the Burger King franchise agreement, filed by International Fast Food;
+  - parties that miss the name: General Finance and "UR Merger Sub" for United Rentals; NFLA and Food For Athletes for Gridiron BioNutrients;
+  - not retrieved: Nuance and Microsoft.
+  
+  What remains is a distinctive word of another agreement's party: "southern" for Southern Racing Promotions, "king" for King Pharmaceuticals, "rentals" for Herc Rentals, "microsoft" for an Inktomi agreement, "gridiron bionutrients" for Gridiron's supply agreement. In the capitalised question, the generic capitalised words (the title's) also matched other documents and left the choice ambiguous. The case-evidence rule drops them, and the one remaining match decides. So the failure is identity coverage that a case-free reading exposes. No wrong naming came from an ordinary word of the question read as a name; each matched a word of the name the question used ("king" of Burger King) to the same word in another company's name.
+- **ALL CAPS**: C0 reads every word of an ALL CAPS question as a name. It names a wrong document 11 times on U (7 ContractNLI, 2 CUAD, 2 PrivacyQA); K3 names one, with the same right-focus count (1,278) and recall change +0.04 [−0.24, +0.42]. The rule's fallback, "a correction to the ALL CAPS behaviour only if it passes on its own", cannot be met by a change that leaves lower-case questions alone, since the L conditions apply. So it is recorded here as a measured weakness for a later decision with its own rule.
+- **Integration review** (Session 19; the rule and the question set were written into the scratch notes before anything new was built or scored):
+  - *The reference was wrong.* On a caseless form C0 names nothing, so "wrong namings do not rise on any form" let a caseless matcher pass only if it was perfect. The reference for a question's naming is production's standard on the same question written with capitals: C0 on O for L, C0 on C for CL, and C0 on U for U.
+  - *New questions, built by construction* from fresh-test's documents. No fresh-test query was loaded or read.
+    - Names come from the file names, independent of the identity extractor: a CUAD file's CamelCase company field split into words ("SouthernStarEnergyInc" → "Southern Star Energy, Inc.") with its title field, and a MAUD file's "<Target>_<Acquirer>".
+    - Templates follow LegalBench-RAG's prefix style: "Consider Rae Systems, Inc.'s Co-Branding Agreement; ...", 'Consider the Merger Agreement between "Viasat, Inc." and "RigNet, Inc."; ...'.
+    - Each document gets two generic questions from fixed lists. 60 more questions name no document.
+    - The set has 232 named questions, from 77 CUAD and 39 MAUD documents, plus the 60 no-name questions, each in all five forms. The rule left out 166 documents whose file names give no word boundaries.
+  - *Rule*, all four conditions required:
+    - K3's wrong namings are at most C0's on the cased form of the same questions (L against O, CL against C, U against U), with no tolerance;
+    - K3 is identical to C0 on every O and C question;
+    - K3 names nothing on any no-name question in a caseless form;
+    - the dev results above still stand.
+    
+    A fallback restricted to ALL CAPS questions was fixed in advance, for use only if K3 failed.
+  - *Measured*, naming only, from the real first-search pools (named right / wrong / none):
+
+    | Form | C0 | K3 |
+    |---|---|---|
+    | O | 172 / 4 / 56 | = C0 |
+    | L | 0 / 0 / 232 | 169 / 1 / 62 |
+    | U | 175 / 7 / 50 | 170 / 2 / 60 |
+    | C | 159 / 6 / 67 | = C0 |
+    | CL | 0 / 0 / 232 | 151 / 5 / 76 |
+
+    - On the no-name questions, K3 names nothing on L, U or CL. C0 names one on O and on C (the same question, "Information about the Closing Condition ...", which matches "information" in an identity) and two on U.
+  - *Verdict: K3 passes*: 1 ≤ 4, 5 ≤ 6 and 2 ≤ 7; identical to C0 on O and C; no naming on any no-name question.
+    - The margin on CL is one naming.
+    - Its wrong namings are the kind seen on dev: one word shared with another company's name ("hf enterprises", "midwest", "american securities").
+    - Three of them are "investment group" questions, which C0 also gets wrong on C.
+- **Resolution**: K3 is in `src/vector_db/named_document.py` (`caseless`, `written_case`, `party_runs`). A question that capitalises its names is read exactly as before.
+  - Replayed on every recorded pool, the src code equals the evaluated K3 on all 6,810 dev (question, form) pairs and all 1,460 new ones: document, reason, matched words and scores.
+  - The measurement ships too. `eval/question_forms.py` with `python -m eval.run_realdocs_eval legalbench --question-form lower|upper|short|short-lower` runs the production node on the rewritten questions. Ids and ground truth are unchanged, so `--compare` against an original-form run pairs them. The generator reproduces all 6,810 question texts measured here.
+  - At integration, with Decisions 90 and 92 merged: the golden set is identical to main's (production: fact_cov@5 93.3, @10 94.3, @context 97.1; recall@5 72.4, @10 78.7; MRR@10 77.2; nDCG@10 73.8), the answerability dev set identical question by question (58 of 58), and the offline suite 2,194 passed.
+- **Not verified**:
+  - Questions that write some names with capitals and others without ("Does the NDA with northwind ..."): K2's case. They are read as capitalised, so "northwind" does not count. No form here writes them.
+  - Real deal-team questions, rather than rewrites of the benchmark's. The new set's names come from file names, and two thirds of CUAD's file names had no word boundaries.
+  - Recall on the new set. Only naming was measured there; recall was measured on dev.
+  - The CPU host itself; MiniLM was ranked on the GPU.
+- **Next**:
+  - The wrong namings point at identity coverage — agreements with no identity, or parties that miss the name in use — more than at the reading of case. On the store measured here, 9 of 712 documents have no identity and 26 have no parties.
+  - One guard to try is to never switch a caseless question away from a fused leader that has no party identity of its own. Another is to search both documents in that case (Decision 86's C3), so that a wrong name costs one focus search rather than the right agreement.
+  - Either needs a rule fixed in advance and data no round has used. fresh-test's documents have now been used for naming.
+- **Guarded by**:
+  - `tests/test_named_document_case.py`:
+    - which questions are caseless;
+    - how retrieved text writes its words: URLs, e-mail addresses and dotted abbreviations skipped, compounds read as pieces and joined, accents folded;
+    - party runs: in order, within one name, never from a title;
+    - lower case and ALL CAPS naming the party, and naming alike;
+    - ordinary words naming nothing, while the whole name still names;
+    - a name made of ordinary words naming by its run;
+    - short forms counting only when the text writes them in capitals ("app" is no short form);
+    - questions that name nothing;
+    - capitalised questions read as before.
+  - `tests/test_named_document_focus.py`: the lower-case-word test restated for both kinds of question.
+  - `tests/test_fuzz_properties.py`:
+    - a question in one case is caseless;
+    - a caseless question names alike in lower case and in capitals;
+    - written-case invariants;
+    - party-run invariants;
+    - question forms are deterministic.
+  - `tests/test_question_forms.py`.
+- **Impact**: src/vector_db/named_document.py, eval/question_forms.py (new), eval/run_realdocs_eval.py (`--question-form`), tests/test_named_document_case.py (new), tests/test_named_document_focus.py, tests/test_question_forms.py (new), tests/test_fuzz_properties.py, README.md, DECISIONS_LOG.md
+
+## Decision 92: A deal-level figure tie-out, where two figures share a period only when they cover the same time
+- **Date**: Session 19
+- **Context**: tying out figures — the revenue, EBITDA, debt or headcount a CIM, a QoE report or a set of statements states, checked against every other document that states it — is a standard step of diligence, and the roadmap's "deal-level figure tie-out report". The cross-source registry (`src/utils/numerical_registry.py`) already compared figures, but only inside one question's retrieved context, for the financial verifier. Run over whole filings it misfired. On FinanceBench dev filings (Decision 68's company split; the store `D:/redline_data/int9/fb_int9` read through its payloads only): American Water Works' three consecutive 10-Ks gave 125 comparisons and 11 "inconsistent"; JPMorgan's 10-K and three 10-Qs 189 and 181; Best Buy's three 10-Ks and a 10-Q 147 and 118.
+- **Why** (read on the filings):
+  - a line of prose naming a year was taken for a period header: "As of February 16, 2022, one state, New Jersey, continues …" headed a balance sheet as 2022, twice; "In November 2020, Cal Am refiled …" headed a rate-case table as 2020;
+  - a 10-Q's "Three Months Ended | Six Months Ended" over "July 29, 2023 | July 30, 2022 | …" was read as fiscal 2023 and 2022, so quarters, half-years and the 10-K's years were one period, and so were a 10-Q's balance-sheet dates; the converter's own `period` for "Six Months Ended" (no year) was "SIXMONTHSENDED", shared by every such column of every document;
+  - ingestion writes `scale_factor` 1 when a table states no unit ("the table gives no currency or scale"), and the registry took it for a stated unit: Best Buy's "Total rent expense 790" (millions, unstated) against "$790" million was a 100% conflict;
+  - maturity and lease schedules ("2024  2025  2026") are restated by every filing as of its own date, and a performance graph restarts at 100 in a different year in every filing;
+  - an unstated "0" agreed with anything up to half a billion: its rounding slack was rescaled with it while zero stayed zero;
+  - a footnote marker in a pipe row's label ("Other (2) | 180 | 83") was read as its first value, shifting the rest by a column.
+- **Resolution — the registry** (`numerical_registry.py`; the verifier reads periods the same way):
+  - *A header must read like one*: at most eight words outside parentheses (a unit caption in them is part of a header), no sentence break, no "vs" or "compared". A line of prose that names a year resets the header instead of becoming one.
+  - *Spans and dates* (`_header_keys`, `column_period`): the span heading a column — on the header line or the two header lines above it, dealt out in equal blocks when two spans head the columns — and its end date key the column: "3M ending 2023-07-29", "6M …", "9M …", "YTD …"; a year (twelve months, 52/53 weeks, "Year Ended") is "FY2023", or "FY ending 2023-01" when it ends in January–March (named for either year, Decision 70's problem). A date with no span is a balance date, "2023-07-29" (31 December in an annual document is that fiscal year). A bare year in a 10-Q, 8-K or earnings release is not a fiscal year (no key). "2024E" is "FY2024E"; LTM/TTM, budgets and forecasts get no key. Three or more different dates of one year across a header's balance-date columns are events — acquisitions — not periods.
+  - *Converted tables*: a structured cell's period is read from its column header the same way; the converter's own `period` counts only as its verdict that a column names none. A "$" printed in its own cell gives its column to the amount after it ("| $ | 1,263 |" under "2021 | Column 3"). A cell is scale-known only when the table stated a unit.
+  - *Not compared*: periods after the filing's own (its `filing_period_end`, else its latest fiscal year), rows that start at exactly 100 with three or more values (a rebased index, a common-size 100%), a whitespace row with a nil before its first value, and a row whose label names another period than its column.
+  - *Rows*: a pipe row's label is its first cell, and a "%" in a cell of its own makes the value before it a percentage. Footnote markers ("(a)", "(ii)", "(1)", "†") are dropped from labels, so one line item keeps one key across filings.
+  - *Zero*: a zero is zero in any unit; it is no longer rescaled with its slack.
+- **Resolution — the deal-level report**:
+  - `NumericalRegistry.from_documents` reads a data room document by document in `chunk_index` order: a table the chunker cut in two keeps its header (same `table_id`), and a table section with no header of its own reads the document's only header when the document prints exactly one, more than once, and is not a public filing (the sample financials' "KEY FINANCIAL METRICS" rows sit under the statements' "FY2023  FY2022").
+  - `NumericalRegistry.tie_out` lists every (label, period) that two or more documents state, one value per document: conflicts first, largest gap first, then agreements. Stricter than the verifier's check: a percentage, a multiple and an amount under one label are three figures; labels that name nothing alone ("Total", "Other, net", "Average", "Basic", "Balance at December 31") are counted, not compared; a document that states one label and period twice with different values (a segment table and the statement) has no single figure and is counted, not compared.
+  - `src/reports/tie_out.py` and `GET /deals/{deal_id}/tie-out`: the deal is read as a question reads it (`hybrid_search._build_filter`: deal, current version, no PII), minus the narrative and computed-summary representations (row-by-row and markdown carry every row), payload only. A facet lists documents with their chunk counts; documents are taken in name order while they fit the chunk cap (20,000, `TIE_OUT_MAX_CHUNKS`) and read whole or not at all, a page's worth of documents a request (2,048 chunks), until 60% of the time budget (20 s, `TIE_OUT_TIME_BUDGET_S`) is spent; the registry is built in a worker thread that stops at the budget's end — or, when the read ran over (a page is read whole once started), once the remaining 40% has passed since it ended, so the budget is exceeded by at most one page's read and nothing read is thrown away. When both bounds cut, the reason given is the budget. (A first version scrolled the deal in one pass; points come back in id order, not by document, so a cut left every document half read, and on a four-company store it returned nothing.) `truncated`, `truncation_reason` and `documents_not_read` say what was left out. Response bounds: 200 conflicts, 200 agreements, 10 documents a figure, labels 120 characters, values 40, names 200, sections 120. Builds run one at a time (30 s wait, then 503 with Retry-After) and are cached for five minutes under the deal's readable-chunk count, so an upload, a supersession or a purge is never answered from an older report; `purge_deal` drops the deal's cached report. Same `require_readable_deal` and `read_rate_limit` as the other deal reads.
+  - Decision 88's classes: the store read and the build are the route's required steps — a failure is a 503 with a request id, never an empty report, since "no conflicts" from a report that read nothing would be false. The report is optional for a page load: both consoles render the rest of the deal view and say the report could not be loaded.
+  - Consoles: a Tie-out tab in the web data room panel and a "Tie out the figures" link on the landing page, fetched when opened; a Tie-out tab in Streamlit beside Risk Signals and Versions, fetched once per deal every two minutes. Labels, figures, names and sections are document text: rendered as text (React; Streamlit tables), clipped again on arrival, escaped wherever Streamlit renders markdown.
+- **Measured — the sample data room** (`data/sample_deal`, 9 documents, 111 child chunks; every finding read in both documents): 10 conflicts, each a difference the documents really print, and 12 agreements, all correct. Conflicts: between the financial statements and the QoE report, EBITDA FY2022 ($74.0 against "Reported EBITDA" $74.2), EBITDA margin FY2022 (19.1% / 19.2%), Adjusted EBITDA FY2023 and FY2022 ($97.3 / $99.0, $74.0 / $73.8) and its FY2023 margin (21.5% / 21.9%); between the balance sheet and the QoE's working capital, accounts payable ($28.4 / $21.8, $24.6 / $19.4) and accrued liabilities ($34.7 / $34.2, $29.8 / $29.7); between the balance sheet and the credit agreement summary, cash at 31 December 2023 ($89.4 / $70.8). Agreements: net income, income tax, interest expense and restructuring charges (both years), EBITDA and its margin FY2023, the adjusted margin FY2022, net debt FY2023 (financials / credit agreement). Missed, by label: total debt ("Total Debt (Current + Non-Current)" $110.0 / "Total Debt" $91.4), receivables ("Accounts Receivable, net" / "Accounts Receivable"), deferred revenue ("(current)"), prepaid expenses ("and Other"); and figures stated only in prose (the revolver's $110M drawn in Note 7). The headerless "KEY FINANCIAL METRICS" table is read only through the document's one header; the verifier, reading chunks alone, still does not read it.
+- **Measured — FinanceBench** (dev companies only, 44 filings of 16 companies, 25,611 child chunks; the payloads read from the store's sqlite, read-only, into `D:/redline_data/tieout10/` — CC BY-NC, nothing in the repository; test companies never loaded). The precision rule was written before any report was read: a conflict is correct when the two filings really print different values for one line item and period, read on the PDF pages; an agreement when both values are that line item and period.
+  - *Rounds*: v1 read seven companies' conflicts (AWK, Adobe, General Mills, Nike, Verizon, Best Buy, CVS): 49, of which 37 real and 12 false (maturity schedules ×8, a rebased index ×2, an unstated unit, the label "Average"). v2 fixed those and was frozen; on the seven its 37 conflicts are all real. The other nine dev companies' conflicts were read only then, as a held-out check: PepsiCo gave 11, **none real** — its acquisitions table ("Acquisition date | March 23, 2020 | April 24, 2020 | June 1, 2020") was stitched to the charges table on the next page, whose columns are fiscal years, so both 10-Ks keyed the charges by acquisition date, one year apart (by year they agree). v2's clean held-out precision is therefore 0 of 11, and 37 of 48 overall. v3 adds the event-date rule (three or more dates of one year in a header are not periods) and, from the sample room, the parenthetical and named-period rules; on FinanceBench it removes exactly those 11 conflicts and 26 of PepsiCo's agreements (the same table's correctly keyed rows) and adds nothing.
+  - *Final (v3), in-sample*: 37 conflicts (AWK 9, Adobe 10, General Mills 14, Nike 2, Verizon 1, Best Buy 1) and 797 agreements. **37 of 37 conflicts are real**: General Mills' 2020 10-K "made certain changes in the classification of products and updated fiscal 2019 and fiscal 2018 net sales" (12) and its 2022 10-K reorganised its operating units (2); Adobe's 2016 10-K moved building improvements "previously misclassified as leasehold improvements" (2015: 247,535 → 98,315), its 2017 10-K split accrued media costs out of sales and marketing allowances (60,825 → 55,681 + 5,144), restated total assets for 2013–2016 and other assets by the same 9,868, the notes' carrying value and G&A; American Water Works' 2022 10-K folded the market-based businesses into "Other" (O&M 2020: 25 → 364 = 389 − 25), redefined working capital ((49) → (55)) and restated its rate-case tables; Nike's 2021 10-K recast the 2019 rate reconciliation; Verizon split out derivative collateral (2,287 → 2,266 + 21); Best Buy split out supply-chain capex (371 → 347). **40 of 40 agreements** drawn with `random.Random(92)` are the same line item and period in each filing (one by luck: Nike's "Federal" is the deferred-tax row in both because the current row's values were glued into its label).
+  - *Coverage*: of 49,063 figures read, 38,128 (78%) have no period, 6,374 line-item periods are stated by one filing only, 459 sit under generic labels and 131 are stated twice by one filing. PDF statements reach the index as "Column 2" grids or lose the span above their years, and the earnings releases' "Three/Twelve Months Ended" headers are gone, so Ulta's release and 10-K tie on nothing (main's registry made 28 comparisons there, 9 "inconsistent": quarters against years).
+- **Measured — the verifier (a correction, not a change of rule)**: the registry's entries changed, its comparison did not. Over each dev company's filings as one context, main's `find_inconsistencies` flagged 530 line-item periods, the branch 202 (the verifier still compares a document's own repeated labels and generic ones; the report does not). On realistic contexts — the 73 FinanceBench dev questions of int9's production run, every chunk on their top-10 pages (2,557 chunks; the run recorded pages, not chunk ids) — main handed the synthesizer 14 inconsistencies in 3 questions, the branch none: 14 removed, 0 added, all 14 false (Best Buy 10-Q balance dates read as fiscal years ×10; JPMorgan 10-Q year rows under year-less "THREEMONTHSENDEDJUNE30," keys ×4). The verification benchmark does not read the registry: on this branch and on main's tree (`git archive` of beae00c) its 542 claims get the same outcome and the same checks, claim by claim, in two runs. (The branch first read a FactCG run against `eval/verification_baseline.json` as main failing its baseline. That file is recorded without a model, and CI's `--no-nli` gate passes on both; see Decision 90's integration note.)
+- **Measured — time and memory** (`perf_build.py`, `perf_tie_out.py` in the scratch notes; one gated job at a time):
+  - *The comparison* (the registry and the report, on payloads in memory, three runs): the sample room 0.02–0.03 s; one company's three 10-Ks (1,817 chunks, 2.6 MB of text) 0.53–0.59 s, Python heap peak 1.1 MB; four companies' 14 filings (6,121 chunks) 1.7–1.8 s, 5.5 MB; all 44 dev filings (23,507 chunks, 26.6 MB) 6.2–6.6 s, 18.1 MB.
+  - *The route's whole path* (`build_tie_out` on local-mode copies of the store — facet, scroll, build): the sample room 0.27–0.28 s, a 12.7 KB response; American Water Works' store (1,903 points) 8.5–8.7 s, whole, 94 KB; the four-company store (6,717 points) at the default bounds 18.2–18.3 s, cut by the budget after 8 of 14 filings (3,544 chunks), 153 KB, and with room to finish (300 s) 36.5 s, whole (6,121 chunks), 196 KB; the dev store (25,611 points) at the default bounds 14.3 s, cut by the budget after 5 of 44 filings (1,878 chunks), and at the default cap with room to finish (400 s) 138.7 s, the 35 filings that fit 20,000 chunks (19,825) read whole and the 9 after them named (`chunk_cap`), 251 KB. (These stores hold every company under one deal id, so their conflict counts mix companies and measure nothing.) A local-mode store filters every point it holds in Python on every request and spends 4–7 ms a chunk read, so there the default budget reads 1,900–3,500 chunks (five to eight of these filings) and names the rest; its memory is the store's (a working set of 1.8–2.1 GB for the 25,611-point copy), the report's own heap peak 4–43 MB.
+- **Integration review** (round 10):
+  - The report reads a deal through `hybrid_search.deal_read_filter`, a public name for what a question may read (current versions, no PII-flagged passage), instead of importing the private `_build_filter`.
+  - The document facet lists at most 5,000 documents (`MAX_DEAL_DOCUMENTS`). A deal with more is reported as cut short (`chunk_cap`) instead of read in part as if whole.
+  - Recording a document (`deals.register_document`) drops the deal's cached report, so an upload, or a new version exactly as long as the old, is not answered from an older report in that process. Across processes the cache key (the deal's readable chunk count) still covers every change but that one, for at most the cache's five minutes.
+  - The synthesizer's flags on the sample data room are unchanged: over all 111 chunks, main's registry and this one flag the same 5 inconsistencies, and no pair of documents loses one.
+  - CI found what the local suite could not. The Tie-out tab is the first Streamlit view to draw a table, which loads pyarrow; a fresh install took pyarrow 26, which refuses to import beside numpy 1.x (pinned). `requirements.txt` now pins `pyarrow<25`, the build the suite passes with. The Streamlit image installs Streamlit alone and is unaffected.
+  - At integration, with Decisions 90 and 91 merged: offline suite 2,194 passed, 1 xfailed; the `fuzz` profile 47 of 47; web `tsc` clean, ESLint 0 errors, vitest 119 of 119; golden set and answerability dev set identical to main.
+- **Not verified**: a Qdrant server's read time (no server could be run here; the default cap and budget assume one); precision on filings the rules were not developed on after the last rule — v3's 37 of 37 conflicts and 40 of 40 sampled agreements are in-sample (95% Wilson lower bounds 90.6% and 91.2%), the only held-out read (v2) was 0 of 11, and the test companies stay unread by rule; what the verifier's 14 fewer false inconsistencies do to answers (no hosted LLM); the two consoles in a browser (vitest, the production build and Streamlit's AppTest only); several API workers (the cache and the one-build lock are per process).
+- **Guarded by**: `tests/test_tie_out_registry.py` (agreement, conflict, scale and printed rounding, single-source, kinds, generic labels, a document stating a label twice, prose that names a year, quarter and half-year columns, a 10-Q's bare years, balance dates, 31 December in an annual document, estimates, January year-ends, event dates, spans that cannot be dealt out, a footnote in the label cell, a "%" cell, a "$" cell, "Column N" headers, a caption in parentheses, a label naming another period, document-order headers, a stop between documents); `tests/test_tie_out_report.py` (what a question may read and nothing else — superseded, PII, another deal and the narrative representation all present in the store; payload only; the chunk cap reads whole documents and names the rest; the time budget, the documents read before it ran out kept whole, a read that ran past the budget still compared, and the budget named when it cut a read past the cap too; documents read a page's worth a request; a failing store raises; response bounds and display labels; the cache answers an unchanged deal and rebuilds after an upload; a held build slot; the route under public, private, sandbox and admin callers, the shared read limit, a malformed id, a 503 that leaks nothing, a busy slot's Retry-After, purge forgetting the cache); `tests/test_console_tie_out.py` (Streamlit: conflicts first with document and place, a partial report named, a report that does not say it is whole, document text never markup, the app's deal view with the API down); `web/tests/tieOut.test.tsx` (normalisation bounds and never upgrading a figure or a partial report; conflicts first with document and page or section; agreements on request; markup rendered as text; the partial notice; the empty and failed states and retry; fetched only when the tab opens); `tests/test_fuzz_properties.py` (`test_period_keys`: every key is one of the documented forms and a 10-Q's reading only withdraws fiscal years; `test_tie_out`: conflicts first, one value per document, at least two documents, all of the figure's period).
+- **Impact**: src/utils/numerical_registry.py, src/reports/{__init__,tie_out}.py, src/vector_db/hybrid_search.py, requirements.txt, api/routes/deals.py, api/models/response_models.py, app/components/tie_out.py, app/streamlit_app.py, web/{lib/types.ts,lib/normalize.ts,lib/api.ts,components/TieOutPanel.tsx,components/DataRoomPanel.tsx,app/page.tsx,tests/tieOut.test.tsx,tests/page.test.tsx}, tests/{test_tie_out_registry,test_tie_out_report,test_console_tie_out,test_fuzz_properties}.py, README.md

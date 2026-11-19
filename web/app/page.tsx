@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, MotionConfig, motion } from "framer-motion";
-import { CornerDownLeft, Layers, Sparkles } from "lucide-react";
+import { CornerDownLeft, Layers, Scale, Sparkles } from "lucide-react";
 
 import AnswerPanel from "@/components/AnswerPanel";
 import AskBar from "@/components/AskBar";
@@ -12,6 +12,7 @@ import Masthead from "@/components/Masthead";
 import PipelineTimeline from "@/components/PipelineTimeline";
 import RefusalPanel from "@/components/RefusalPanel";
 import SourcesRail from "@/components/SourcesRail";
+import TieOutPanel from "@/components/TieOutPanel";
 import UnavailablePanel from "@/components/UnavailablePanel";
 import UploadPanel from "@/components/UploadPanel";
 import { BRAND } from "@/lib/brand";
@@ -64,6 +65,8 @@ export default function Home() {
   // Answer text streamed while synthesis runs — an unverified draft, dropped
   // when the validated `result` arrives or the server sends `answer_reset`.
   const [draft, setDraft] = useState("");
+  // The landing page's figure tie-out, opened on request: it reads the whole deal.
+  const [showTieOut, setShowTieOut] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const lastAskedRef = useRef<AskedQuery | null>(null);
@@ -347,7 +350,25 @@ export default function Home() {
                     <CornerDownLeft size={11} />
                     Enter to ask
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowTieOut((v) => !v)}
+                    aria-expanded={showTieOut}
+                    aria-controls="landing-tieout"
+                    className="inline-flex items-center gap-1.5 font-medium text-gold-400 underline-offset-2 hover:underline"
+                  >
+                    <Scale size={11} />
+                    {showTieOut ? "Hide figure tie-out" : "Tie out the figures"}
+                  </button>
                 </motion.div>
+              )}
+
+              {showTieOut && activeDealId && (
+                // The deal-level tie-out (Decision 92), on request only: it
+                // reads the whole data room.
+                <div id="landing-tieout" className="panel mt-6 overflow-hidden text-left">
+                  <TieOutPanel dealId={activeDealId} />
+                </div>
               )}
             </motion.div>
           ) : (
@@ -411,7 +432,7 @@ export default function Home() {
                     />
                   )}
 
-                  <DataRoomPanel documents={documents} risks={risks} />
+                  <DataRoomPanel documents={documents} risks={risks} dealId={activeDealId} />
                 </aside>
               </div>
             </motion.div>

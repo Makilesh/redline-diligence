@@ -5,7 +5,7 @@ Verification benchmark — does the validator pass what it should, and only that
     python -m eval.run_verification_eval --split dev          # tuning runs: dev only
     python -m eval.run_verification_eval --no-nli             # deterministic stages alone (no model)
     python -m eval.run_verification_eval --nli-model cross-encoder/nli-deberta-v3-small  # another scorer
-    python -m eval.run_verification_eval --baseline eval/verification_baseline.json   # exit 1 on regression
+    python -m eval.run_verification_eval --no-nli --baseline eval/verification_baseline.json   # CI's gate: exit 1 on regression
     python -m eval.run_verification_eval --answers tests/e2e_validation_results.json  # recorded answers
 
 Every item of eval/verification_set.json is one claim about the sample data
@@ -417,6 +417,29 @@ def baseline_metrics(report: dict) -> dict:
     return out
 
 
+def baseline_mode_mismatch(baseline: dict, nli: str) -> str:
+    """
+    Why a run cannot be compared with `baseline`, or "" when it can.
+
+    A baseline records the checker it was measured with ("off": the
+    deterministic stages alone, as CI's gate runs them). A run with a model
+    flags supported claims the deterministic stages never flag, so compared
+    with an "off" baseline it reports regressions that are not there, and
+    the reverse comparison would hide real ones. Round 10 read FactCG runs
+    against the no-model file as main failing its gate.
+
+    Args:
+        baseline: The recorded baseline.
+        nli: This run's checker (report["nli"]).
+    """
+    recorded = baseline.get("nli")
+    if recorded is None or recorded == nli:
+        return ""
+    advice = ("run with --no-nli, as CI does" if recorded == "off"
+              else "run with the same checker, or record a baseline for this one")
+    return f"the baseline was recorded with NLI {recorded!r} and this run used {nli!r}: not comparable; {advice}"
+
+
 def compare_to_baseline(current: dict, baseline: dict, tolerance: float) -> list[str]:
     """
     Regressions against a recorded baseline.
@@ -613,6 +636,10 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(payload, indent=1) + "\n", encoding="utf-8")
     if args.baseline:
         baseline = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
+        mismatch = baseline_mode_mismatch(baseline, report["nli"])
+        if mismatch:
+            print(f"[verification] {mismatch}", file=sys.stderr)
+            return 2
         problems = compare_to_baseline(current, baseline, args.tolerance)
         for problem in problems:
             print(f"[verification] REGRESSION {problem}", file=sys.stderr)

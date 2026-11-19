@@ -605,6 +605,12 @@ class ContextFigure:
         column_unknown: True for a cell in a row of several like figures whose
             columns no retrieved header names: one of them is this period's
             figure, and nothing retrieved says which.
+        row_span: (start, end) of the whole line(s) the row or sentence sits
+            on, in the chunk's evidence text — what the claim checker shows a
+            model of a table row (claim_checker, the "headed" figure veto).
+        header_line: The column-header line `period` was read from, as the
+            document prints it — from this chunk, or the one borrowed from
+            another chunk of the same file; "" when no header named it.
     """
 
     mention: NumericMention
@@ -617,6 +623,8 @@ class ContextFigure:
     alias_tokens: frozenset = frozenset()
     period: str = ""
     column_unknown: bool = False
+    row_span: tuple[int, int] = (-1, -1)
+    header_line: str = ""
 
     def named_by(self, claim_tokens: set[str]) -> bool:
         """
@@ -714,6 +722,9 @@ class ContextIndex:
         parsed = []
         file_scales: dict[str, set[float]] = {}
         file_headers: dict[str, set[tuple[str, ...]]] = {}
+        # The line each header was first read from, per file: recorded on the
+        # figures whose period it names, so a model can be shown it too.
+        header_lines: dict[str, dict[tuple[str, ...], str]] = {}
         seen_bodies: set[str] = set()
         for ci, chunk in enumerate(chunks):
             body = chunk_evidence_text(chunk)
@@ -732,6 +743,9 @@ class ContextIndex:
             units = _body_units(body)
             file_scales.setdefault(source, set()).update(s for _, s in hints)
             file_headers.setdefault(source, set()).update(u[3] for u in units if u[3])
+            for start, end, _tabular, unit_header in units:
+                if unit_header:
+                    header_lines.setdefault(source, {}).setdefault(unit_header, body[start:end])
             parsed.append((ci, source, body, hints, units))
 
         for ci, source, body, hints, units in parsed:
@@ -739,10 +753,12 @@ class ContextIndex:
             declared = sorted(file_scales.get(source, ()))
             hint_positions = [pos for pos, _ in hints]
             header: tuple[str, ...] = ()
+            header_text = ""
             cursor = 0
             for start, end, tabular, unit_header in units:
                 if unit_header:
                     header = unit_header
+                    header_text = body[start:end]
                     continue
                 while cursor < len(mentions) and mentions[cursor].start < start:
                     cursor += 1
@@ -778,6 +794,7 @@ class ContextIndex:
                 # count: "Revenue  $452.8  $387.1" under "FY2023  FY2022", not
                 # "$189.6  41.9%".
                 columns: tuple[str, ...] = ()
+                column_line = ""
                 alike = tabular and len(in_unit) > 1 and len({m.kind for m in in_unit}) == 1
                 if alike:
                     options = [header] if header else sorted(
@@ -785,6 +802,22 @@ class ContextIndex:
                     )
                     if len(options) == 1 and len(options[0]) == len(in_unit):
                         columns = options[0]
+                        if header:
+                            column_line = header_text
+                        else:
+                            # Borrowed from another table of the file: its
+                            # periods, not its title ("ASSETS  FY2023  FY2022"
+                            # over a debt schedule would mislead).
+                            borrowed = header_lines.get(source, {}).get(columns, "")
+                            first = PERIOD_RE.search(borrowed)
+                            column_line = borrowed[first.start():] if first else ""
+                # The whole line(s) the unit sits on: a "Label: 2017: X; 2016: Y"
+                # line is cut into sentences above, but a reader needs all of it.
+                # A figure read across a line break ("452,800,000" over a "K"
+                # that starts the next line) takes that line too.
+                row_start = body.rfind("\n", 0, min([start, *(m.start for m in in_unit)])) + 1
+                row_end = body.find("\n", max([end, *(m.end for m in in_unit)]))
+                row_span = (row_start, len(body) if row_end < 0 else row_end)
 
                 for k, mention in enumerate(in_unit):
                     period = columns[k] if columns else stated[k]
@@ -802,6 +835,8 @@ class ContextIndex:
                         alias_tokens=alias,
                         period=period,
                         column_unknown=alike and not period,
+                        row_span=row_span,
+                        header_line=column_line,
                     ))
                     self.units[unit_id].figures.append(idx)
                     keyed.append((mention.value, idx, False))
@@ -1254,6 +1289,13 @@ class NumericCheck:
     # figure several documents state is attributed correctly to any of them
     # (claim_checker's citation check, Decision 78). Internal: not serialised.
     evidence_files: tuple[str, ...] = ()
+    # When that figure is a table cell: the line(s) of its row in the chunk's
+    # evidence text and the column-header line its period was read from
+    # (ContextFigure.row_span / header_line), so the figure veto can show a
+    # model the row with its headers (Decision 90). Internal: not serialised.
+    evidence_cell: bool = False
+    evidence_row: tuple[int, int] = (-1, -1)
+    evidence_header: str = ""
 
     @property
     def is_confirmed(self) -> bool:
@@ -1268,6 +1310,7 @@ class NumericCheck:
         """Serialisable form for AgentState."""
         out = asdict(self)
         del out["evidence_chunk"], out["evidence_figure"], out["evidence_files"]
+        del out["evidence_cell"], out["evidence_row"], out["evidence_header"]
         return out
 
 
@@ -2241,6 +2284,9 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
                     evidence_chunk=fig.chunk_index,
                     evidence_figure=fig.mention.raw,
                     evidence_files=tuple(dict.fromkeys(f.source_file for f in group if f.source_file)),
+                    evidence_cell=fig.cell,
+                    evidence_row=fig.row_span,
+                    evidence_header=fig.header_line,
                 )
                 if fig.mention.kind == "bps" and mention.kind == "percent":
                     # Found in the other notation: a conversion, shown as one.
@@ -2397,6 +2443,9 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
                 cur.evidence_chunk = prev.evidence_chunk
                 cur.evidence_figure = prev.evidence_figure
                 cur.evidence_files = prev.evidence_files
+                cur.evidence_cell = prev.evidence_cell
+                cur.evidence_row = prev.evidence_row
+                cur.evidence_header = prev.evidence_header
 
         results.append(checks)
 
