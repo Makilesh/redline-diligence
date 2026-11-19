@@ -98,7 +98,11 @@ Two consequences worth stating plainly:
   identity of 6 of its 712 distinct documents, each a correction. The backfill
   cannot repair a boxed PDF's chunks: only re-ingesting it does. Startup's
   identity check does not report these corrections: it looks only for
-  documents that carry no identity at all.
+  documents that carry no identity at all. Filings indexed before Decision 89
+  can stay as they are: the rule also rebuilds statements whose columns
+  pdfplumber had collapsed into one, but on FinanceBench's dev questions a
+  re-ingested index was level with the old one (evidence page in the final
+  context +2.7 points [−2.5, +8.5]).
 - **MiniLM is still the best fit for two cores, not the best small reranker.**
   Six Apache-2.0 alternatives were measured on the same emulated host
   (Decision 77). Only `ettin-reranker-68m-v1` beat it on LegalBench-RAG's dev
