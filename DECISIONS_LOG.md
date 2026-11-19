@@ -1149,3 +1149,116 @@ All architecture decisions that deviated from or resolved ambiguities in p4.md a
   - Retrieval: all 84 filings indexed once with main's code and once with the integrated code, and the 73 dev questions (Decision 68's company split) asked of each with the same retrieval code, production ablation. Paired, filings resampled: evidence page in the final context 63.0 → 65.8 (+2.7 [−2.5, +8.5]; 3 questions up, 1 down); evidence tokens in the final context 67.0 → 68.4 (+1.4 [−0.2, +3.5]; 7 up, 7 down); page hit@10 50.7 → 53.4; page hit@1 23.3 on both; MRR@10 +1.0 [−2.9, +5.3]. **The rule passes: the frame rule applies to filings unchanged.** Test-company questions were not read.
 - **Guarded by**: `tests/test_identity_on_pdf_text.py` (no-break spaces; a wrapped article; "EXHIBIT A" above a name; titles over two and three lines; a lower-case continuation; version stamps and sentences not joined; section references; clause numbers not put back); `tests/test_pdf_contract_text.py` (a generated framed contract that pdfplumber reports as a table and the processor reads as clauses with parents and an identity; frame and non-frame grids; canonical characters normalised, compatibility characters kept).
 - **Impact**: src/data_processing/{pdf_processor,document_identity}.py, src/vector_db/{identity_backfill,collection_manager}.py, tests/test_{identity_on_pdf_text,pdf_contract_text,identity_startup_check}.py, README.md, DEPLOYMENT.md
+
+## Decision 90: The GPU checker second-guesses figure-only confirmations, reading table rows with their headers
+- **Date**: Session 19
+- **Context**: on GPU, every wrong benchmark claim that still passes is settled by the figure checks alone. The document's figure is correctly located, but the party, period or direction around it is wrong, so FactCG never reads it (Decision 63). Decision 64 let a model veto such figure-only confirmations. It was adopted on CPU (`-xsmall`, cue claims only) and rejected on GPU: FactCG's veto caught 4–5 of the 11 held-out false passes but sent 8.9pp / 3.0pp of correct claims to the judge, past the pre-registered bounds. The correct claims it vetoed were mostly table rows read without their column headers. Prepending the header line cut its dev cost from −4 to −1 correct claims, but only in a dev look after the test run: a lead that needed data no round had seen.
+- **What the veto read**: the sentence-sized windows of `nli.split_premises`.
+  - A fixed-width row more than two lines below its header was scored without it.
+  - The converter's markdown grid and row-by-row representation have no sentence end, so each was one window holding the whole table.
+  - The narrative representation is cut at its semicolons, which glues a row's second column to the next row's label.
+- **Change**: numeric grounding already knew, for every figure, the row it sits in and the column-header line it read the period from. It now records both: `ContextFigure.row_span` / `header_line`, carried as `NumericCheck.evidence_row` / `evidence_header` / `evidence_cell` (internal, never serialised). `src/verification/table_context.py` builds the row as a reader sees it:
+  - the chunk's title (a heading, not a table row or a sentence);
+  - the nearest unit line above the row;
+  - the header grounding used (from its first period on, when borrowed from another table of the file);
+  - the whole line(s) of the row.
+
+  Only table rows get it: a line in a chunk ingestion indexed as a table, or a line set in columns. A "Label: value" bullet in prose keeps the sentence windows that name its party, and a figure the claim's own arithmetic confirms adds no window. This is `FigureVeto(evidence="headed")`; the CPU veto keeps `"figure"`. Grounding's decisions are unchanged: on all 2,189 answers of both sets (2,175 figures), every `NumericCheck.to_dict()` is identical to main's (beae00c).
+- **Method**, written into the scratch notes before any candidate was scored. Amendments A1–A8 came before any model scored anything, from reading the windows the builder produced.
+  1. *Choose on dev*. Candidates: evidence {figure, headed} × scope {all figure-confirmed claims, cue claims only} × line (midpoints between consecutive dev scores), on the benchmark's dev half. Rule (Decision 64's rule B): fewest wrong claims passed, with at most 2 of 109 fewer correct claims passed locally and no more false alarms. Ties go to more correct claims passed, then cue before all, then figure before headed, then the higher line.
+  2. *Confirm on new data*: FinanceBench's dev companies (Decision 68's split), from the int9 store as main's ingestion wrote it. For every converter table on a dev evidence page, up to 16 seeded (row, year) cells give:
+     - supported claims: the figure as printed with its line item and period ("In fiscal 2017, goodwill was $5,821,561."; "Adobe reported goodwill of $5,821,561 in fiscal 2017."); the true direction against the prior year; the side of an "income (loss)" pair the printed sign selects;
+     - wrong claims by construction: another year's figure, the next row's figure, the direction or the sign flipped, another dev company named.
+
+     Each claim's context is every chunk the index holds for its page, shuffled per claim. The data is CC BY-NC, so it is generated under `D:/redline_data/veto10/`; the generator is `eval/figure_veto_set.py`.
+  3. *Adopt on GPU* only if, with the dev-chosen line unchanged: (a) wrong claims passed fall, with a paired 95% interval (filings resampled) entirely below zero — tightened from Decision 64's point estimate; (b) false alarms rise by at most 2pp; (c) correct claims passed locally fall by at most 2pp. The old test half is reported once, as a repeat look.
+- **The new set**: 85 converter tables touch the 84 dev evidence pages.
+  - 66 carry generic "Column N" headers (1,088 eligible rows) and yield no claims.
+  - 17 named tables in 14 filings give 1,647 claims: 694 supported (plain 271, company 271, direction 139, sign 13) and 953 wrong (company 271, neighbour 271, period 259, direction 139, sign 13). None was dropped as unfound.
+  - A hand check of 60 seeded claims agreed with all 60 labels.
+- **Dev pick** (`python -m eval.run_figure_veto_eval select`, dev half only): headed evidence, all figure-confirmed claims, line **0.03831**.
+  - Wrong claims passed 7 → 6 of 167, correct claims passed locally 73 → 73 of 109, false alarms 3. A full replay reproduces the fast count.
+  - The plain windows reach the same 6 only at the cost of one correct claim (line 0.0400, Decision 64's rule B pick reproduced), and neither form reaches 5 within the bound.
+  - The one dev catch is a party swap in a board-deck bullet. The next dev score above the line is a correct claim 0.0025 higher.
+- **Confirmed on FinanceBench** (`confirm`, dev-chosen configuration unchanged; production is FactCG without a veto). **The rule passes on all three counts.** This is the first form; the integration review below changed what ships.
+  - Wrong claims passed: 408 → 322 of 953 (42.8% → 33.8%, **−9.0pp [−15.1, −4.4]**) — rule (a).
+  - False alarms: 0 → 0 — rule (b).
+  - Correct claims passed locally: 614 → 609 of 694 (**−0.7pp [−1.8, 0.0]**) — rule (c).
+  - Judge load +5.5pp [+2.7, +9.2]. A full replay at the line reproduces every outcome.
+  - What it catches: 82 of the 243 passing claims that name another company, 2 of 17 passing period swaps and 2 of 125 flipped directions. What it costs: 4 correct company claims and 1 plain one.
+  - It works because the title line usually names the filer ("ADOBE SYSTEMS INCORPORATED", "SQUARE, INC."). The plain windows of converter tables are whole tables, on which FactCG supports almost anything: at the same line they would have caught none of the 408 (secondary, reported for comparison).
+- **The line is a sharp choice, stated plainly**. Looked at after the rule had decided and not used by it: at 0.05 the same set would lose 24 correct claims (3.5pp) for 113 catches, and at 0.03, 0 for 49.
+- **Benchmark test half, a repeat look** (read by Decisions 63–64; not part of the rule):
+  - Wrong claims passed: 11 → 6 of 165 (−3.0pp [−5.6, −0.7]).
+  - Correct claims passed locally: 65 → 60 of 101 (**−5.0pp [−9.3, −1.1]**). This is past the 2pp bound, had this been the deciding set.
+  - False alarms 3 → 3; judge load 35.3% → 39.1%. The plain windows at the same line: 11 → 7 wrong, −3.0pp correct.
+  - Three of the five correct claims lost combine two rows of one table ("Total assets were $560.4 million and total liabilities were $288.0 million"; EBIT plus D&A giving EBITDA; depreciation and amortization). The headed form gives each figure its own row, so no window holds the whole claim; a plain window of adjacent lines sometimes did.
+  - The FinanceBench set holds only single-figure claims, so it could not see this cost.
+- **Integration review: the shipped form reads a claim's rows together.**
+  - *Why.* The review would not ship a veto that loses 5 of 101 correct claims of the kind real answers write. That half is contaminated, but what it shows is a gap in what the confirmation set covered, not noise.
+  - *Change.* `FigureVeto.rows`:
+    - `"joined"`: a claim whose looked-up figures sit in more than one table row gets one window, `table_context.joined_window`. Per chunk, in the order its figures first reach it, the window holds the chunk's title, unit line and header line(s), then the claim's rows in document order. Every line appears once, with at most four rows. It replaces the per-row windows; prose figures keep their sentence windows.
+    - `"each"`: the per-row windows above.
+    - `"single"`: no veto for such a claim.
+
+    A claim within one row reads byte-identical windows in all three. Re-scored with the earlier scores as a cache, the single-figure set needed 0 new pairs, and every claim's veto scores are equal.
+  - *Method*, written into the scratch notes before any new scoring:
+    1. Re-run the dev pick with `joined` in place of per-row `headed`, otherwise unchanged.
+    2. New data: claims joining two rows of the same 17 tables for one year, built the same way. Supported claims state both rows' figures as printed (plain, or naming the filer). Wrong claims replace one of the two figures with its other-year or neighbouring-row figure, or name another dev company. That gives 1,012 claims: 408 supported, 604 wrong; 204 row pairs from 14 filings. A hand check agreed with 40 of 40 labels.
+    3. Adopt `joined` only if, on the two-row claims, correct claims passed locally fall by at most 2pp, false alarms rise by at most 2pp and wrong claims passed do not rise (point estimates; intervals resample filings), **and** Decision 90's rule still holds on the single-figure set. If the line moved, that is a second look at that set.
+    4. Otherwise ship the per-row veto for one-row claims only (`"single"`).
+  - *Dev pick*: `joined`, all figure-confirmed claims, line **0.03643**.
+    - Dev wrong claims passed 7 → 6; correct claims passed locally 73 → 73; full replay matches.
+    - The line moved from 0.03831: a correct dev claim joining two rows now scores just above the one wrong dev catch.
+    - Decision 90's candidate set, re-run on the same scores, reproduces its own pick.
+  - *Two-row claims*, against production FactCG — **the rule passes**:
+    - wrong claims passed: 126 → 96 of 604 (**−5.0pp [−8.7, −2.2]**);
+    - correct claims passed locally: 193 → 192 of 408 (**−0.25pp [−0.74, 0.0]**);
+    - false alarms 0 → 0; judge load +3.1pp.
+    - Read one row at a time (Decision 90's first form), the same claims would have gone 193 → 22. That is the coverage gap, measured on new data.
+  - *Single-figure claims, at the moved line* (a second look at that set) — **Decision 90's rule passes again**:
+    - wrong claims passed: 408 → 326 of 953 (−8.6pp [−14.7, −4.0]);
+    - correct claims passed locally: 614 → 611 of 694 (−0.4pp [−0.9, 0.0]);
+    - false alarms 0 → 0.
+  - **Shipped:** `FigureVeto(line=0.03643, evidence="headed", cues_only=False, rows="joined")`. Full replays reproduce every outcome on both sets.
+  - *Repeat look, benchmark test half*, for what ships (descriptive):
+    - Wrong claims passed: 11 → 6 of 165 (−3.0pp [−5.6, −0.7]).
+    - Correct claims passed locally: 65 → 63 of 101 (−2.0pp [−5.1, 0.0]). False alarms 3 → 3; judge load 35.3% → 38.0%.
+    - Recovered: the two-row claims "total assets … and total liabilities …" (support 0.031 → 0.618) and "depreciation … and amortization …" (0.032 → 0.467). The parachute total now passes because the line moved.
+    - Still lost: "EBIT plus $24.8 million of D&A gives EBITDA" (0.027 joined) and a prose claim no form passes.
+- **Cost on GPU** (FactCG fp16):
+  - Per figure-confirmed claim scored alone:
+    - single-figure claims: unchanged, 1.06 pairs and 39 ms mean / 27 ms p50 / 50 ms p95;
+    - two-row claims: 1.21 joined pairs against 2.07 per-row, 71 ms mean / 31 ms p50 (per-row 70 / 30);
+    - benchmark: 26 ms p50 / 48 ms p95 joined.
+  - Per answer, on 60 answers of nine single-figure table claims each, A/B interleaved with the real model: 2.1 → 10.6 pairs, median 10 → 47 ms (+36 ms paired). Joining changes no pair of these answers.
+
+  Production scores the pairs in the answer's single batched call, with the same 40-claim budget.
+- **Gates** (with the shipped `joined` veto):
+  - CI's verification gate (`--no-nli --baseline`) is identical to its baseline.
+  - The FactCG run of the benchmark, against main's FactCG run:
+
+    | | dev | test |
+    |---|---|---|
+    | wrong claims passed | 6/167 (main 7) | 6/165 (main 11) |
+    | correct claims passed locally | 73/109 (main 73) | 63/101 (main 65) |
+    | false alarms | 3 (main 3) | 3 (main 3) |
+    | judge load | 33.3% (main 33.0%) | 38.0% (main 35.3%) |
+  - Offline suite 2,078 passed, 1 xfailed (the pinned defect); `-m models` 7 passed; ruff clean.
+- **Failure class**: building a headed row is part of claim verification, a safety step (Decision 88). It raises, and the validator keeps the answer as a warning, never passed.
+- **Found on the way, not changed**. Grounding's decisions were frozen this round, and the PDF processor is another territory.
+  - *Grounding confirms 29 of the set's wrong period and neighbour claims*, i.e. shows a wrong figure as verified with no model involved. Three causes, by inspection of all 29:
+    - *Several rows read as one sentence (14).* A row-by-row label that keeps the PDF's dot leaders ("Short-term investments ......: 2015=3,111,524 2014=2,622,091") is longer than the 60 characters `_LABEL_COLON_RE` allows, so the whole table is one prose paragraph. A neighbour's figure then sits in the same "sentence" as the claim's row label.
+    - *A row-by-row line read without a unique column header gives every figure its last column's year (8).* In "Operating income: 2019=7,207 2018=7,820", `figure_periods` breaks the tie between the period before a figure ("2019=") and the one after it (" 2018") in favour of the one after. So "Operating income was $7,207 in fiscal 2018" comes back bound — a wrong figure confirmed — and the correct 2019 claim is a conflict. The markdown sibling's header fixes it when it is the file's only header of that width. Pinned as a strict xfail in `tests/test_figure_veto.py`.
+    - *A single-figure row whose period nothing states (5)* binds to any year a claim names (the "undated" rule), for example when a grid's header reads "For the Years Ended December 31, 2018", which `_column_header` does not read as periods.
+    - The other 2 are bound with a header and were not traced further.
+  - *The converter's unit note cannot be read by grounding when the currency is unknown.* "Values are as stated in the source, in millions." matches none of `SCALE_HINT_RE`'s forms, so a correct "$1,488.4 million" fails against those tables. Of the 696 row-by-row chunks of the dev filings whose table states a scale, 631 carry a unit note grounding cannot read. The set's claims therefore print figures the way the table does, without a scale word.
+  - *Generic headers*: of the 66 tables, 15 could take the header of a named table of the same width above them; the rest sit under a period row the borderless detector did not reach. Seen causes: a balance sheet's liabilities half split from its assets, and "$" cells breaking the run between header and figures ("Net income  $  5,070 $  6,046").
+- **Not verified**:
+  - Answers as a model writes them; these claims are single sentences built from statement tables (one or two rows each).
+  - Claims joining more than four rows (the window holds the first four), or rows of different tables of one chunk, beyond the unit tests.
+  - Statements whose titles do not name the company. Most catches rest on the title line.
+  - Contracts and other prose-heavy documents, where the headed rows do not apply.
+  - The CPU host: `-xsmall` was not measured with headed rows, and its veto is unchanged.
+  - A held-out FinanceBench split: the set uses the dev companies only, and the test companies' questions and labels were not read.
+- **Impact**: src/verification/{numeric_grounding,table_context,claim_checker}.py, eval/{figure_veto_set,run_figure_veto_eval}.py, tests/{test_figure_veto,test_figure_veto_eval,test_fuzz_properties}.py, README.md
