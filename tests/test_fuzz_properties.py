@@ -21,7 +21,7 @@ import math
 import re
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from eval.question_forms import question_form
@@ -521,6 +521,9 @@ class TestTableRows:
     from them for the figure veto (Decision 90)."""
 
     @given(st.tuples(_UNITS, domain_text(25)).map("\n".join))
+    # Found by the fuzz profile at round 10's integration: a figure read
+    # across a line break, "452,800,000" with the next line's "K".
+    @example("\nFY2023=452,800,000\nK\tAGREEMENT ")
     def test_every_figure_knows_its_row(self, text):
         index = ContextIndex([{"text": text, "source_file": "a.pdf"}])
         for fig in index.figures:

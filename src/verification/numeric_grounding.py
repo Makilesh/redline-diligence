@@ -813,8 +813,10 @@ class ContextIndex:
                             column_line = borrowed[first.start():] if first else ""
                 # The whole line(s) the unit sits on: a "Label: 2017: X; 2016: Y"
                 # line is cut into sentences above, but a reader needs all of it.
-                row_start = body.rfind("\n", 0, start) + 1
-                row_end = body.find("\n", end)
+                # A figure read across a line break ("452,800,000" over a "K"
+                # that starts the next line) takes that line too.
+                row_start = body.rfind("\n", 0, min([start, *(m.start for m in in_unit)])) + 1
+                row_end = body.find("\n", max([end, *(m.end for m in in_unit)]))
                 row_span = (row_start, len(body) if row_end < 0 else row_end)
 
                 for k, mention in enumerate(in_unit):
