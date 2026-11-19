@@ -17,6 +17,7 @@ import {
   normalizePlannedStages,
   normalizeQueryResponse,
   normalizeStageEvent,
+  normalizeTieOut,
 } from "./normalize";
 import { SseParser } from "./sse";
 import type {
@@ -28,6 +29,7 @@ import type {
   QueryResponse,
   RiskSignal,
   StageEvent,
+  TieOutReport,
 } from "./types";
 
 export const API_BASE = (
@@ -108,6 +110,18 @@ export const listRiskSignals = (dealId: string) =>
   getJson<RiskSignal[]>(`/deals/${encodeURIComponent(dealId)}/risk-signals`);
 
 export const getBudget = () => getJson<BudgetStatus>("/budget");
+
+/**
+ * The deal's figure tie-out report (Decision 92), or null when it cannot be
+ * had. Optional for the page like every panel: a failure leaves the rest of
+ * the deal view as it is, and the panel says the report could not be loaded.
+ * The server reads the whole data room within a 20 s budget, hence the
+ * longer timeout.
+ */
+export async function getTieOut(dealId: string): Promise<TieOutReport | null> {
+  const raw = await getJson<unknown>(`/deals/${encodeURIComponent(dealId)}/tie-out`, 45_000);
+  return raw === null ? null : normalizeTieOut(raw);
+}
 
 /**
  * Creates a deal.
