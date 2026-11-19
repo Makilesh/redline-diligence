@@ -1263,6 +1263,134 @@ All architecture decisions that deviated from or resolved ambiguities in p4.md a
   - A held-out FinanceBench split: the set uses the dev companies only, and the test companies' questions and labels were not read.
 - **Impact**: src/verification/{numeric_grounding,table_context,claim_checker}.py, eval/{figure_veto_set,run_figure_veto_eval}.py, tests/{test_figure_veto,test_figure_veto_eval,test_fuzz_properties}.py, README.md
 
+## Decision 91: Read a question's names without capital letters, by how the retrieved text writes each word — rejected by its first rule, adopted on integration review against production's own standard, on questions built from held-out documents
+- **Date**: Session 19
+- **Context**: Decision 86 focuses a legal question on the agreement it names, by the words the question writes with a capital, matched against the title and parties ingestion reads from each agreement. LegalBench-RAG writes every question formally ("Consider the Acquisition Agreement between Parent X and Target Y; ..."); a deal team types "does the nda with northwind have a non-solicit?" or "change of control in the atlas spa", or pastes a name in capitals. By the code, a lower-case question names nothing, so focus keeps the fused leader, and an ALL CAPS question has every word read as a name and every short word as a title's short form.
+- **Method** (the rule was written into the scratch notes before any rewritten question was generated):
+  - *Data*, dev only: mini-dev and fresh-dev (Decisions 67 and 80), 1,362 questions about 359 documents, all 714 files indexed. The store is Decision 86's, with identities backfilled by main's extractor: 6 documents change (Decision 89's corrections), and no dev question's focus choice does.
+  - *Question forms* (`eval/question_forms.py`, seeded by the question id, so a question's form depends on nothing else):
+    - O, the original;
+    - L, lower case;
+    - U, ALL CAPS;
+    - C, short: legal suffixes dropped, one party named without "between" ("the Hydron Technologies Sponsorship Agreement", "the NDA with IGC"), "Non-Disclosure Agreement" written "NDA";
+    - CL, short in lower case.
+  - *Runs*: the real `_candidates_for_query` recorded each question's first-search pool once per form. Matchers were applied to the recorded pools offline, with main's matcher frozen as the baseline, C0. The real retrieval node then ran with the focus document forced wherever a matcher's document differed from C0's: bge-reranker-v2-m3 at focus 30 and MiniLM-L6 at focus 10, ranked on the GPU as in Decisions 80, 85 and 86. Elsewhere a matcher's result is C0's.
+  - *Measurement speed-ups*: three changes to local mode served the measurement only. Filter masks were computed with numpy and checked against local mode's own; sparse products went through a CSR matrix; the scroll order was cached. Together they reproduced local mode exactly: 40 of 40 searches, and 24 of 24 node runs, which also equal round 8's stored runs. A hybrid search took 0.26 s instead of 1.94 s.
+  - *Candidates* were designed on mini-dev's pools only (focus choices, no recall) and frozen before fresh-dev's pools were read.
+    - K1: a question whose capitals mark no name — lower case, a capital only where a sentence starts, or ALL CAPS — is *caseless*. Its words count when no retrieved text writes them in lower case: "state", "general" and "document" are ordinary words there, "northwind" and "bankshares" are not. A word counts as a title's short form when the retrieved text also writes it in capitals ("NDA"). Any other question is read as before.
+    - K2: K1, and a mixed-case question's lower-case words counted the same way.
+    - K3: K1, and a run of two or more question words that is also a run of a retrieved party's name counts whatever the text does with the words ("community bankers trust", "product development experts": names made only of ordinary words, which K1 lost on mini-dev).
+  - *Rule*, pooled dev; every condition must hold:
+    - on the four rewritten forms, right-document focus does not fall, and it rises on L;
+    - bge@30 final-context recall's paired interval (documents resampled) is not entirely below zero on any rewritten form, and its point change on L is at least +1.0;
+    - on the original questions, the focus choice is unchanged for at least 99%, and recall's interval is not entirely below zero;
+    - **wrong documents named do not rise on any form**;
+    - MiniLM@10's recall interval is not entirely below zero on any form;
+    - the golden and answerability gates are identical to main.
+- **Measured — naming** (pooled dev, 1,362 questions; named right / wrong; and the focus document right, where the fused leader is the right one for O 1,148, L 1,146, U 1,137, C 908, CL 909):
+
+  | Form | C0 | K1 | K3 |
+  |---|---|---|---|
+  | O | 1,050 / 4; focus 1,291 | = C0 | = C0 |
+  | L | 0 / 0; focus 1,146 | 1,021 / 4; 1,279 | 1,072 / **2**; 1,293 |
+  | U | 1,067 / **11**; 1,278 | 1,024 / 3; 1,266 | 1,073 / 1; 1,278 |
+  | C | 958 / 20; 1,176 | = C0 | = C0 |
+  | CL | 0 / 0; 909 | 842 / 6; 1,131 | 942 / **5**; 1,176 |
+
+  - K2 equals K1 on the caseless forms. It names 6 more agreements on O (MAUD) and 8 more on C, none wrong.
+  - PrivacyQA, whose policies carry no party identity, is named 0 times by every candidate on every form. C0 names 2 wrong PrivacyQA documents on U.
+- **Measured — recall** (paired against C0 on the same form, documents resampled; bge@30 final-context character recall, then MiniLM@10):
+
+  | Form | K1 | K3 | T: O's naming carried over | ORACLE |
+  |---|---|---|---|---|
+  | L | +3.35 [+2.11, +4.78] (51 up, 0 down); +2.39 | **+3.63 [+2.36, +5.05]** (56 up, 0 down); +2.69 [+1.57, +3.86] | +3.41 [+2.20, +4.73] | +5.68 |
+  | U | −0.38 [−0.73, −0.11] (0 up, 7 down); −0.15 | +0.04 [−0.24, +0.42] (2 up, 2 down); +0.07 | 0.00 | +2.10 |
+  | C | 0 | 0 | +2.34 [+1.41, +3.42] | +5.23 |
+  | CL | +5.18 [+3.56, +7.12] (76 up, 0 down); +4.44 | **+6.37 [+4.62, +8.43]** (95 up, 0 down); +5.52 [+4.03, +7.23] | +9.12 | +12.27 |
+
+  - Typed in lower case, a question loses the naming it had when capitalised. That costs 3.4 points of final-context recall (T), and K3 recovers all of it: +3.63, with doc_hit@1 +1.03 [+0.50, +1.64]. By half: mini-dev +1.67 [+0.23, +3.66], fresh-dev +4.50 [+2.85, +6.36].
+  - Levels: C0 was run on every lower-case question.
+    - Lower-casing the 1,362 questions moves bge@30 final-context recall from 81.1 [77.5, 84.1] to 78.0 [74.3, 81.4], a paired change of −3.0 [−4.7, −1.3].
+    - MiniLM@10 moves from 72.6 to 69.4 (−3.2 [−4.6, −1.9]).
+    - bge's doc_hit@1 rises from 89.8 to 92.5.
+    - The naming accounts for the whole loss: 78.0 + 3.4 (T) is level with 81.1, so the cased embedder and reranker lose nothing measurable on lower-case questions.
+  - On the original questions every candidate is identical to C0 (1,362 of 1,362 focus choices; K2 differs only in naming a document that was already the fused one).
+- **Result under the rule written first: not adopted.**
+  - K3 meets every condition but one. It names a wrong document for 2 lower-case and 5 short lower-case questions, where C0 names none.
+  - K1 also lowers ALL CAPS recall: its interval lies below zero, and right focus falls 1,278 → 1,266.
+  - `src/vector_db/named_document.py` was left unchanged at this point.
+  - The rule compared each candidate with C0 on the same form, and on a caseless form C0 names nothing. Against the capitalised originals the comparison runs the other way: K3 names a wrong document 2 times on L against C0's 4 on O, 5 times on CL against 20 on C, and once on U. Its 7 wrong namings cost no question any recall with either reranker. The one MiniLM question that lost recall on L had its right agreement named. That comparison was not the rule, and is recorded, not acted on.
+- **Where the wrong namings come from** (fresh-dev; read after the counts had fixed the verdict). In every one, the asked-about agreement's identity cannot match the name the question uses:
+  - no identity at all: Southern Star Energy's affiliate agreement;
+  - no parties: the Burger King franchise agreement, filed by International Fast Food;
+  - parties that miss the name: General Finance and "UR Merger Sub" for United Rentals; NFLA and Food For Athletes for Gridiron BioNutrients;
+  - not retrieved: Nuance and Microsoft.
+  
+  What remains is a distinctive word of another agreement's party: "southern" for Southern Racing Promotions, "king" for King Pharmaceuticals, "rentals" for Herc Rentals, "microsoft" for an Inktomi agreement, "gridiron bionutrients" for Gridiron's supply agreement. In the capitalised question, the generic capitalised words (the title's) also matched other documents and left the choice ambiguous. The case-evidence rule drops them, and the one remaining match decides. So the failure is identity coverage that a case-free reading exposes. No wrong naming came from an ordinary word of the question read as a name; each matched a word of the name the question used ("king" of Burger King) to the same word in another company's name.
+- **ALL CAPS**: C0 reads every word of an ALL CAPS question as a name. It names a wrong document 11 times on U (7 ContractNLI, 2 CUAD, 2 PrivacyQA); K3 names one, with the same right-focus count (1,278) and recall change +0.04 [−0.24, +0.42]. The rule's fallback, "a correction to the ALL CAPS behaviour only if it passes on its own", cannot be met by a change that leaves lower-case questions alone, since the L conditions apply. So it is recorded here as a measured weakness for a later decision with its own rule.
+- **Integration review** (Session 19; the rule and the question set were written into the scratch notes before anything new was built or scored):
+  - *The reference was wrong.* On a caseless form C0 names nothing, so "wrong namings do not rise on any form" let a caseless matcher pass only if it was perfect. The reference for a question's naming is production's standard on the same question written with capitals: C0 on O for L, C0 on C for CL, and C0 on U for U.
+  - *New questions, built by construction* from fresh-test's documents. No fresh-test query was loaded or read.
+    - Names come from the file names, independent of the identity extractor: a CUAD file's CamelCase company field split into words ("SouthernStarEnergyInc" → "Southern Star Energy, Inc.") with its title field, and a MAUD file's "<Target>_<Acquirer>".
+    - Templates follow LegalBench-RAG's prefix style: "Consider Rae Systems, Inc.'s Co-Branding Agreement; ...", 'Consider the Merger Agreement between "Viasat, Inc." and "RigNet, Inc."; ...'.
+    - Each document gets two generic questions from fixed lists. 60 more questions name no document.
+    - The set has 232 named questions, from 77 CUAD and 39 MAUD documents, plus the 60 no-name questions, each in all five forms. The rule left out 166 documents whose file names give no word boundaries.
+  - *Rule*, all four conditions required:
+    - K3's wrong namings are at most C0's on the cased form of the same questions (L against O, CL against C, U against U), with no tolerance;
+    - K3 is identical to C0 on every O and C question;
+    - K3 names nothing on any no-name question in a caseless form;
+    - the dev results above still stand.
+    
+    A fallback restricted to ALL CAPS questions was fixed in advance, for use only if K3 failed.
+  - *Measured*, naming only, from the real first-search pools (named right / wrong / none):
+
+    | Form | C0 | K3 |
+    |---|---|---|
+    | O | 172 / 4 / 56 | = C0 |
+    | L | 0 / 0 / 232 | 169 / 1 / 62 |
+    | U | 175 / 7 / 50 | 170 / 2 / 60 |
+    | C | 159 / 6 / 67 | = C0 |
+    | CL | 0 / 0 / 232 | 151 / 5 / 76 |
+
+    - On the no-name questions, K3 names nothing on L, U or CL. C0 names one on O and on C (the same question, "Information about the Closing Condition ...", which matches "information" in an identity) and two on U.
+  - *Verdict: K3 passes*: 1 ≤ 4, 5 ≤ 6 and 2 ≤ 7; identical to C0 on O and C; no naming on any no-name question.
+    - The margin on CL is one naming.
+    - Its wrong namings are the kind seen on dev: one word shared with another company's name ("hf enterprises", "midwest", "american securities").
+    - Three of them are "investment group" questions, which C0 also gets wrong on C.
+- **Resolution**: K3 is in `src/vector_db/named_document.py` (`caseless`, `written_case`, `party_runs`). A question that capitalises its names is read exactly as before.
+  - Replayed on every recorded pool, the src code equals the evaluated K3 on all 6,810 dev (question, form) pairs and all 1,460 new ones: document, reason, matched words and scores.
+  - The measurement ships too. `eval/question_forms.py` with `python -m eval.run_realdocs_eval legalbench --question-form lower|upper|short|short-lower` runs the production node on the rewritten questions. Ids and ground truth are unchanged, so `--compare` against an original-form run pairs them. The generator reproduces all 6,810 question texts measured here.
+  - The golden and answerability gates run at integration.
+- **Not verified**:
+  - Questions that write some names with capitals and others without ("Does the NDA with northwind ..."): K2's case. They are read as capitalised, so "northwind" does not count. No form here writes them.
+  - Real deal-team questions, rather than rewrites of the benchmark's. The new set's names come from file names, and two thirds of CUAD's file names had no word boundaries.
+  - Recall on the new set. Only naming was measured there; recall was measured on dev.
+  - The CPU host itself; MiniLM was ranked on the GPU.
+- **Next**:
+  - The wrong namings point at identity coverage — agreements with no identity, or parties that miss the name in use — more than at the reading of case. On the store measured here, 9 of 712 documents have no identity and 26 have no parties.
+  - One guard to try is to never switch a caseless question away from a fused leader that has no party identity of its own. Another is to search both documents in that case (Decision 86's C3), so that a wrong name costs one focus search rather than the right agreement.
+  - Either needs a rule fixed in advance and data no round has used. fresh-test's documents have now been used for naming.
+- **Guarded by**:
+  - `tests/test_named_document_case.py`:
+    - which questions are caseless;
+    - how retrieved text writes its words: URLs, e-mail addresses and dotted abbreviations skipped, compounds read as pieces and joined, accents folded;
+    - party runs: in order, within one name, never from a title;
+    - lower case and ALL CAPS naming the party, and naming alike;
+    - ordinary words naming nothing, while the whole name still names;
+    - a name made of ordinary words naming by its run;
+    - short forms counting only when the text writes them in capitals ("app" is no short form);
+    - questions that name nothing;
+    - capitalised questions read as before.
+  - `tests/test_named_document_focus.py`: the lower-case-word test restated for both kinds of question.
+  - `tests/test_fuzz_properties.py`:
+    - a question in one case is caseless;
+    - a caseless question names alike in lower case and in capitals;
+    - written-case invariants;
+    - party-run invariants;
+    - question forms are deterministic.
+  - `tests/test_question_forms.py`.
+- **Impact**: src/vector_db/named_document.py, eval/question_forms.py (new), eval/run_realdocs_eval.py (`--question-form`), tests/test_named_document_case.py (new), tests/test_named_document_focus.py, tests/test_question_forms.py (new), tests/test_fuzz_properties.py, README.md, DECISIONS_LOG.md
+
 ## Decision 92: A deal-level figure tie-out, where two figures share a period only when they cover the same time
 - **Date**: Session 19
 - **Context**: tying out figures — the revenue, EBITDA, debt or headcount a CIM, a QoE report or a set of statements states, checked against every other document that states it — is a standard step of diligence, and the roadmap's "deal-level figure tie-out report". The cross-source registry (`src/utils/numerical_registry.py`) already compared figures, but only inside one question's retrieved context, for the financial verifier. Run over whole filings it misfired. On FinanceBench dev filings (Decision 68's company split; the store `D:/redline_data/int9/fb_int9` read through its payloads only): American Water Works' three consecutive 10-Ks gave 125 comparisons and 11 "inconsistent"; JPMorgan's 10-K and three 10-Qs 189 and 181; Best Buy's three 10-Ks and a 10-Q 147 and 118.
