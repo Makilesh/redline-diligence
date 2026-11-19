@@ -65,7 +65,10 @@ MAX_NAME_CHARS = 100
 _MAX_NAME_WORDS = 10
 MAX_TITLE_CHARS = 120
 
-_WS = re.compile(r"[ \t\r\f\v]+")
+# Unicode spaces too: a PDF printed from HTML separates words with U+00A0
+# ("JOINT\u00a0VENTURE\u00a0AGREEMENT"), and the patterns below separate them with
+# [ \t]; read as is, its names did not match (Decision 89).
+_WS = re.compile(r"[ \t\r\f\v\u00a0\u2000-\u200a\u202f\u205f\u3000]+")
 
 # Kinds of document a title names.
 _DOC_TYPE = re.compile(
@@ -135,14 +138,16 @@ _AND_SPLIT = re.compile(r"\s+(?:and|AND|And)\s+|\s*\bor\b\s*(?=[A-Z])")
 _NAME = (r"(?=[\w&'’.\-]*[A-Za-z])[A-Z0-9][\w&'’.\-]*"
          r"(?:[ \t]+(?:(?=[\w&'’.\-]*[A-Za-z])[A-Z0-9&][\w&'’.\-]*|&|of|de|du|for))*?"
          r"(?:,?[ \t]+" + _FORM + r")?")
+# Not the description itself ("a Delaware corporation ("NTC")"), also when a
+# PDF's line wraps after the article ("..., a\nDelaware limited liability
+# company" was read as the organisation "Delaware, limited"; Decision 89).
+_NOT_DESCRIPTION = r"(?<![Aa][ \t])(?<![Aa]n[ \t])(?<!\ba\n)(?<!\ban\n)\b"
 # Organisation names with a legal form near the top: "THE BLEECKER CONSULTING
 # GROUP, LLC", "Lyophilization Technology, Inc.". Not "a Dutch corporation".
 _ORG = re.compile(
-    r"(?<![Aa][ \t])(?<![Aa]n[ \t])\b((?:[A-Z0-9][\w&'’.\-]*[ \t]+(?:&[ \t]+|of[ \t]+|de[ \t]+|and[ \t]+)?){0,6}"
+    _NOT_DESCRIPTION + r"((?:[A-Z0-9][\w&'’.\-]*[ \t]+(?:&[ \t]+|of[ \t]+|de[ \t]+|and[ \t]+)?){0,6}"
     r"[A-Z0-9][\w&'’.\-]*),?[ \t]+(" + _FORM + r")(?![\w])",
 )
-# Not the description itself ("a Delaware corporation ("NTC")").
-_NOT_DESCRIPTION = r"(?<![Aa][ \t])(?<![Aa]n[ \t])\b"
 # A party introduced by its description: "AG Projects, a Dutch corporation",
 # "HYDRON TECHNOLOGIES, INC., a New York corporation".
 _DESCRIBED = re.compile(
@@ -277,6 +282,13 @@ def title_acronyms(title: str) -> set[str]:
     return out
 
 
+# The payload fields document_opening reads. Whatever rebuilds a stored
+# document's opening (identity_backfill, the startup check) fetches exactly
+# these: leaving one out, such as clause_id, gives it another opening than
+# ingestion read, and so another identity (Decision 89).
+OPENING_FIELDS = ("chunk_index", "text", "section_heading", "clause_id", "contains_pii")
+
+
 def document_opening(payloads: list[dict], max_chars: int = OPENING_CHARS) -> str:
     """
     The opening of a document from its child chunk payloads.
@@ -287,8 +299,8 @@ def document_opening(payloads: list[dict], max_chars: int = OPENING_CHARS) -> st
     the file.
 
     Args:
-        payloads: The document's child payloads, any order (reads chunk_index,
-            text, section_heading, contains_pii).
+        payloads: The document's child payloads, any order (reads the
+            OPENING_FIELDS).
         max_chars: Characters of chunk text to read.
 
     Returns:
@@ -302,6 +314,11 @@ def document_opening(payloads: list[dict], max_chars: int = OPENING_CHARS) -> st
             continue
         text = payload.get("text") or ""
         heading = (payload.get("section_heading") or "").strip()
+        # A legal PDF's clause sections are headed by the number the segmenter
+        # read off their own first line ("PREAMBLE", "1(a)"): not a heading the
+        # document printed. Put back, it pushed a line above the title.
+        if heading == (payload.get("clause_id") or "").strip():
+            heading = ""
         if heading and heading != last_heading and heading.lower() not in text.lower():
             text = f"{heading}\n{text}"
         last_heading = heading or last_heading
@@ -326,13 +343,29 @@ def _heading_like(line: str) -> bool:
     return upper >= 0.6 or titled
 
 
+def _title_part(line: str, after_connector: bool) -> bool:
+    """A line that can open a title wrapped onto the next one ("JOINT DEVELOPMENT AND MARKETING")."""
+    if not line or len(line) > 80 or len(line.split()) > 8 or line[-1] in ".,;:":
+        return False
+    if re.match(r"(?i)(?:this|the)\s", line):
+        return False
+    return after_connector or _heading_like(line)
+
+
 def extract_title(opening: str) -> str:
     """
     The document's own title: the first short heading-like line that names a
     kind of document ("AGREEMENT AND PLAN OF MERGER", "Mutual Non-Disclosure
     Agreement"), exhibit numbers and version stamps removed; else the phrase
     of its opening sentence ("THIS SPONSORSHIP AGREEMENT"); else "".
+
+    A title wrapped over lines, as a PDF prints a long centred one, is read
+    whole: a line that is only a kind of document ("AGREEMENT") or that opens
+    with a lower-case word ("to the Global Maintenance Agreement") takes up to
+    two title-like lines above it. A section reference ("Section 2.10 No
+    Duplication of Terms 16", a table of contents' line) is not a title.
     """
+    previous: list[str] = []
     for raw in opening.splitlines()[:40]:
         line = _clean(raw)
         while True:
@@ -340,11 +373,24 @@ def extract_title(opening: str) -> str:
             if stripped == line:
                 break
             line = stripped
+        before, previous = previous, ([] if line != _clean(raw) else previous + [line])
         if not line or len(line) > MAX_TITLE_CHARS or len(line.split()) > 15:
             continue
         if re.match(r"(?i)(?:this|the)\s", line) or line.endswith("."):
             continue
+        if re.match(r"(?i)(?:section|article|clause|paragraph)\s+[\dIVXLC]", line):
+            continue
         if _DOC_TYPE.search(line) and _heading_like(line):
+            connector = line[0].islower()
+            if connector or len(line.split()) == 1:
+                parts = [line]
+                for above in reversed(before[-2:]):
+                    if not _title_part(above, connector):
+                        break
+                    parts.insert(0, above)
+                joined = " ".join(parts)
+                if len(joined) <= MAX_TITLE_CHARS and len(joined.split()) <= 15:
+                    return joined
             return line
     # "THIS AGREEMENT" alone names no kind of agreement. The heading's length
     # cap holds here too: a run-on capitalised word (OCR without spaces) made

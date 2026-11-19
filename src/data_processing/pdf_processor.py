@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import re
 import statistics
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -248,7 +249,15 @@ class PDFProcessor:
         lines = []
         for block in page.get_text("dict", sort=True)["blocks"]:
             for line in block.get("lines", []):
-                text = "".join(span["text"] for span in line["spans"]).strip()
+                # Canonical form: a font's ToUnicode map may name a code point
+                # canonically equal to the plain one. In 210 of 232 CUAD
+                # contracts every semicolon came out as U+037E GREEK QUESTION
+                # MARK, which the identity patterns and every exact match
+                # downstream read as another character (Decision 89). NFC
+                # changes only how canonically equal text is written.
+                text = unicodedata.normalize(
+                    "NFC", "".join(span["text"] for span in line["spans"])
+                ).strip()
                 if not text:
                     continue
                 x0, y0, x1, y1 = line["bbox"]
@@ -623,13 +632,33 @@ class PDFProcessor:
             )
             self.warnings.append("Tables could not be extracted from this PDF; its text was indexed")
             return []
-        kept = [t for t in tables if self._has_row_labels(t)]
+        kept = [t for t in tables if self._has_row_labels(t) and not self._is_text_frame(t)]
         if len(kept) < len(tables):
             logger.info(
-                "Ruled tables without row labels left to the text path",
+                "Ruled tables without row labels, and boxes around text, left to the text path",
                 extra={"dropped": len(tables) - len(kept), "kept": len(kept)},
             )
         return kept
+
+    @staticmethod
+    def _is_text_frame(table: dict) -> bool:
+        """
+        Whether a ruled "table" is a box drawn around running text.
+
+        Exhibits printed from HTML, and word-processor files with page or
+        paragraph borders, rule a box around their text, and pdfplumber reports
+        the box as a one-column table whose cell holds the whole page with its
+        line breaks collapsed. Taken as a table, its region was removed from the
+        page text: in 35 of the 232 CUAD contracts tuned on (Decision 89) more
+        than half the text was indexed as flattened table cells — no clause
+        boundaries, no parent chunks, tables appended after the body, and no
+        title line or party clause for the document's identity. A grid with at
+        most one non-empty column has no columns to keep apart, so its text is
+        read as text.
+        """
+        rows = [table.get("headers") or [], *(table.get("rows") or [])]
+        columns = {i for row in rows for i, cell in enumerate(row) if str(cell or "").strip()}
+        return len(columns) <= 1
 
     @staticmethod
     def _has_row_labels(table: dict) -> bool:
