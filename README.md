@@ -263,7 +263,8 @@ The hosted demo runs on free tiers and is open to anyone, so the API assumes it 
 - **Compliance override is server-side.** `include_pii` is forced off for public callers.
 - **No internal errors leak.** Clients get a generic message and a request ID — on the streaming route too, and in the agent trace, which carries only a failure class; the detail goes to the log. Request bodies are size-capped before they are buffered.
 - **Abandoned work stops.** A client that disconnects cancels its run on both query routes, so a closed tab does not keep spending model quota; runs and nodes have deadlines, and shutdown drains in-flight queries.
-- **The service reports its own state.** `/ready` reflects whether the checkpointer is durable, which Qdrant backend is live and whether any chunk was indexed under an old encoding; `/metrics` (admin) gives per-node p50/p95, LLM calls and tokens. More than one API worker is refused at startup, because rate limits and quota windows are per process.
+- **The service reports its own state.** `/ready` reflects whether the checkpointer is durable, which Qdrant backend is live, whether any chunk was indexed under an old encoding and whether documents still need the identity backfill; `/metrics` (admin) gives per-node p50/p95, LLM calls and tokens. More than one API worker is refused at startup, because rate limits and quota windows are per process.
+- **An optional heuristic cannot fail a query.** A ranking or ingest heuristic that raises falls back to its switched-off behaviour, is named in the trace and counted in `redline_optional_step_failures_total`; PII, injection, deal and version safeguards fail closed instead (Decision 88).
 
 ---
 
@@ -342,13 +343,14 @@ Without a Qdrant server (development only), set `QDRANT_MODE=local` to use an em
 
 ```bash
 pytest                                                    # offline suite (~1,490 tests, ~40 s) — what CI runs
+HYPOTHESIS_PROFILE=fuzz pytest tests/test_fuzz_properties.py  # property tests of the text parsers, longer search
 python -m eval.run_verification_eval --no-nli --baseline eval/verification_baseline.json  # verification gate, no models
 python -m eval.run_retrieval_eval --baseline eval/baseline.json   # retrieval regression gate
 python tests/run_end_to_end_validation.py                 # live 41-question golden set (spends quota)
 cd web && npm test                                        # web unit tests (vitest)
 ```
 
-CI runs ruff, the offline suite with a branch-coverage floor and the verification gate on every push, plus `tsc`, eslint, the web unit tests and a production build of the web app. The offline suite includes a full-graph test that drives the real LangGraph pipeline, routes and stream with only the LLM, Postgres and model weights stubbed.
+CI runs ruff, the offline suite with a branch-coverage floor and the verification gate on every push, plus `tsc`, eslint, the web unit tests and a production build of the web app. The offline suite includes a full-graph test that drives the real LangGraph pipeline, routes and stream with only the LLM, Postgres and model weights stubbed. It runs with `STRICT_OPTIONAL_STEPS=1` (set in `tests/conftest.py`), so an optional heuristic that raises fails its test instead of quietly falling back as it would in production.
 
 ---
 
