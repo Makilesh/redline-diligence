@@ -292,6 +292,25 @@ def _build_filter(
     return Filter(must=conditions)
 
 
+def deal_read_filter(deal_id: str) -> Filter:
+    """
+    What a question may read in a deal: its current versions and no
+    PII-flagged passage — every condition a search applies before any
+    metadata filter.
+
+    For readers that scan a deal rather than search it (the figure tie-out,
+    Decision 92), so they can never show a superseded draft or a PII-flagged
+    passage that retrieval hides.
+
+    Args:
+        deal_id: The deal.
+
+    Returns:
+        Qdrant Filter.
+    """
+    return _build_filter(deal_id, {})
+
+
 # ==============================================================================
 # Hybrid Search
 # ==============================================================================

@@ -112,6 +112,18 @@ class TestReport:
         assert all(set(k["with_payload"]) == set(tie_out.PAYLOAD_FIELDS) for k in seen)
         assert "contains_pii" not in tie_out.PAYLOAD_FIELDS
 
+    def test_the_filter_is_the_one_questions_read_through(self):
+        from src.vector_db.hybrid_search import _build_filter, deal_read_filter
+
+        assert deal_read_filter(DEMO_DEAL).must == _build_filter(DEMO_DEAL, {}).must
+        assert tie_out._deal_filter(DEMO_DEAL).must == deal_read_filter(DEMO_DEAL).must
+
+    def test_a_deal_with_more_documents_than_one_listing_is_cut_short(self, monkeypatch):
+        monkeypatch.setattr(tie_out, "MAX_DEAL_DOCUMENTS", 1)
+        report = asyncio.run(tie_out.build_tie_out(DEMO_DEAL, client=_store(_sample_room())))
+        assert report.truncated and report.truncation_reason == "chunk_cap"
+        assert report.documents_total == report.documents_read == 1
+
     def test_the_chunk_cap_reads_whole_documents_and_names_the_rest(self):
         report = asyncio.run(tie_out.build_tie_out(DEMO_DEAL, client=_store(_sample_room()), chunk_cap=1))
         assert report.truncated and report.truncation_reason == "chunk_cap"
@@ -218,6 +230,14 @@ class TestCache:
 
         tie_out.forget_deal(DEMO_DEAL)
         assert not tie_out._cache
+
+    def test_recording_a_document_drops_the_deal_s_cached_report(self, monkeypatch):
+        monkeypatch.setattr(deals, "_documents", {})
+        monkeypatch.setattr(deals, "_deals", {})
+        tie_out._cache[(DEMO_DEAL, 5)] = (float("inf"), tie_out.TieOutReport(deal_id=DEMO_DEAL))
+        tie_out._cache[(PRIVATE_DEAL, 5)] = (float("inf"), tie_out.TieOutReport(deal_id=PRIVATE_DEAL))
+        deals.register_document(DEMO_DEAL, "doc-new", "new.txt", "financial", 3, True, None)
+        assert list(tie_out._cache) == [(PRIVATE_DEAL, 5)]
 
     def test_a_build_that_never_frees_the_slot_is_a_busy_error(self):
         client = _store(_sample_room())

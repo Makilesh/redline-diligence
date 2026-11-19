@@ -15,7 +15,7 @@ document states, labels that name nothing on their own, documents that state
 one label twice with different values, figures with no readable period.
 
 The deal is read as a question would read it: the same deal, current-version
-and no-PII filter (hybrid_search._build_filter), so the report can never show a
+and no-PII filter (hybrid_search.deal_read_filter), so the report can never show a
 superseded draft or a PII-flagged passage that retrieval hides. Points are
 scrolled with their payload only, never their vectors, one document at a time,
 and the read stops at a chunk cap and a time budget; a report cut short says so
@@ -51,6 +51,9 @@ READ_SHARE = 0.6
 # Documents are read a page's worth at a time. Large pages keep the requests
 # few: a local-mode store filters every point it holds on each request.
 SCROLL_PAGE = 2048
+# Documents one report lists. A deal with more is reported as cut short
+# ("chunk_cap": larger than one report reads), never as read whole.
+MAX_DEAL_DOCUMENTS = 5_000
 
 # Bounds on the response: document text is untrusted and unbounded, the
 # report is rendered as text by both consoles, and a large deal agrees on
@@ -232,22 +235,28 @@ def _deal_filter(deal_id: str):
     """What a question may read in this deal, minus the repeated table forms."""
     from qdrant_client.models import FieldCondition, Filter, MatchAny
 
-    from src.vector_db.hybrid_search import _build_filter
+    from src.vector_db.hybrid_search import deal_read_filter
 
-    base = _build_filter(deal_id, {})
+    base = deal_read_filter(deal_id)
     return Filter(
         must=base.must,
         must_not=[FieldCondition(key="content_type", match=MatchAny(any=SKIPPED_CONTENT_TYPES))],
     )
 
 
-async def _documents(client, collection: str, deal_filter) -> list[tuple[str, int]]:
-    """(document name, readable chunks) for every document of the deal, by name."""
+async def _documents(client, collection: str, deal_filter) -> tuple[list[tuple[str, int]], bool]:
+    """
+    (document name, readable chunks) for the deal's documents, by name, and
+    whether that is all of them: a facet lists at most MAX_DEAL_DOCUMENTS
+    (the largest first), and the caller reports a deal with more as cut short.
+    """
     facet = await client.facet(
         collection_name=collection, key="source_file", facet_filter=deal_filter,
-        limit=1000, exact=True,
+        limit=MAX_DEAL_DOCUMENTS + 1, exact=True,
     )
-    return sorted((str(hit.value), int(hit.count)) for hit in facet.hits)
+    hits = facet.hits[:MAX_DEAL_DOCUMENTS]
+    listed_all = len(facet.hits) <= MAX_DEAL_DOCUMENTS
+    return sorted((str(hit.value), int(hit.count)) for hit in hits), listed_all
 
 
 def _batches(documents: list[tuple[str, int]], page: int) -> list[list[tuple[str, int]]]:
@@ -348,10 +357,10 @@ async def build_tie_out(
     read_deadline = started + budget * READ_SHARE
 
     deal_filter = _deal_filter(deal_id)
-    documents = await _documents(client, COLLECTION_NAME, deal_filter)
+    documents, listed_all = await _documents(client, COLLECTION_NAME, deal_filter)
     chosen: list[tuple[str, int]] = []
     planned = 0
-    capped = False
+    capped = not listed_all
     for name, count in documents:
         if planned + count > cap:
             capped = True
@@ -433,9 +442,11 @@ async def build_tie_out(
 # A report reads a whole deal and parses every table in it — seconds of CPU on
 # a large one, on a host with two cores — and the route sits under the read
 # limit the consoles share (120 a minute), so builds run one at a time and a
-# result is kept for a few minutes. The cache key carries the deal's readable
-# chunk count, so an upload, a supersession or a purge is never answered from
-# an older report.
+# result is kept for a few minutes. Recording a document (deals.register_document)
+# and purging a deal drop its cached report. The cache is per API process; the
+# key carries the deal's readable chunk count, so another process's upload is
+# not answered from an older report either, unless it left the count unchanged
+# (a new version exactly as long as the old): then for at most CACHE_TTL_S.
 
 CACHE_TTL_S = 300.0
 CACHE_MAX_ENTRIES = 16

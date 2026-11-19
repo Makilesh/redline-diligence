@@ -405,6 +405,11 @@ def register_document(
     if deal_id in _deals:
         _deals[deal_id]["document_count"] = len(records)
 
+    # A cached tie-out report no longer describes the deal (Decision 92).
+    from src.reports.tie_out import forget_deal
+
+    forget_deal(deal_id)
+
 
 async def _scroll_deal_payloads(deal_id: str, fields: list[str]) -> list[dict]:
     """
