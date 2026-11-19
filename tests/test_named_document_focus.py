@@ -116,9 +116,12 @@ class TestNameDocument:
         assert not {"inc", "holdings", "spa"} & identity_terms(payload)
         assert identity_acronyms(payload) == {"spa"}
 
-    def test_only_words_the_question_capitalises_name_a_document(self):
-        room = ROOM + [_payload("s1", "S", text="Notices go to the bank.", doc_title="Escrow Agreement",
-                                doc_parties=["State Street Bank"])]
+    def test_a_word_in_lower_case_is_no_name(self):
+        room = ROOM + [_payload("s1", "S", text="Notices go to the bank under the laws of the state of New York.",
+                                doc_title="Escrow Agreement", doc_parties=["State Street Bank"])]
+        # A question that capitalises names: its lower-case words are not names.
+        assert name_document("Does the NDA state that copies must be returned?", room).document is None
+        # A caseless one (Decision 91): the retrieved text writes "state" in lower case, so it is that word.
         assert name_document("Does the document state that copies must be returned?", room).document is None
         assert name_document("Does the State Street escrow allow early release?", room).document == "S"
 

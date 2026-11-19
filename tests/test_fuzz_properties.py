@@ -24,6 +24,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from eval.question_forms import question_form
 from src.data_processing import document_identity as di
 from src.data_processing.ingest_pipeline import UnsupportedFileTypeError, sanitize_filename
 from src.data_processing.injection_screen import (
@@ -37,7 +38,7 @@ from src.data_processing.pii_detector import PIIDetector
 from src.utils.numerical_registry import NumericalRegistry, normalize_metric_label, normalize_period
 from src.vector_db.filing_period import question_fiscal_period
 from src.vector_db.hybrid_search import normalize_for_bm25
-from src.vector_db.named_document import NamedDocument, name_document
+from src.vector_db.named_document import NamedDocument, caseless, name_document, party_runs, written_case
 from src.verification.claims import resolve_cited_chunks, split_claims
 from src.verification.numeric_grounding import extract_numbers, ground_answer_numbers
 from tests.fixtures.fuzz import CASE_LOOKALIKES, RUN_LENGTHS, domain_text, lookalike
@@ -169,6 +170,35 @@ class TestNamedDocument:
         rng.shuffle(shuffled)
         assert name_document(query, consistent) == name_document(query, shuffled)
 
+    @given(domain_text(15))
+    def test_a_question_in_one_case_is_caseless(self, query):
+        # Decision 91: lower case marks no name; nor do ASCII capitals throughout.
+        assert caseless(query.lower())
+        if query.isascii():
+            assert caseless(query.upper())
+
+    @given(_payloads(), domain_text(15))
+    def test_a_caseless_question_names_alike_in_either_case(self, payloads, query):
+        lower, upper = query.lower(), query.upper()
+        if caseless(upper) and di.name_tokens(lower) == di.name_tokens(upper):
+            assert name_document(lower, payloads) == name_document(upper, payloads)
+
+    @given(st.lists(st.one_of(st.none(), domain_text(30)), max_size=4))
+    def test_written_case(self, texts):
+        lower, capitals = written_case(texts)
+        assert all(re.fullmatch(r"[a-z]{2,}", w) for w in lower)
+        assert all(re.fullmatch(r"[a-z]{2,8}", w) for w in capitals)
+
+    @given(domain_text(15), st.lists(st.one_of(st.sampled_from(_PARTIES), domain_text(5)), max_size=4),
+           st.lists(st.sampled_from(["Gamma", "Atlas", "Kelvin", "Ünïcødé", "M5", "Inc."]), max_size=3))
+    def test_party_runs(self, query, parties, one_word_parties):
+        runs = party_runs(query, parties)
+        # Words of the question, each a word of some party's name.
+        assert runs <= di.name_tokens(query)
+        assert all(any(w in di.name_tokens(p) for p in parties) for w in runs)
+        # A run needs two words in a row of one name.
+        assert party_runs(query, one_word_parties) == set()
+
 
 # ---------------------------------------------------------------------------
 # Query parsing, BM25 text
@@ -194,6 +224,17 @@ class TestQueryParsing:
         assert out == out.lower() and "  " not in out and out == out.strip()
         assert all(re.fullmatch(r"\d+(?:\.\d+)*|[^\W\d_][^\W_]*", t) for t in out.split())
         assert normalize_for_bm25(out) == out
+
+    @given(st.one_of(domain_text(20), st.tuples(domain_text(4), domain_text(6), domain_text(6), domain_text(8)).map(
+        lambda p: f"Consider the {p[0]} between {p[1]} and {p[2]}; {p[3]}")), st.text(max_size=12))
+    def test_question_forms(self, question, query_id):
+        # Decision 91's rewrites (an eval tool, but it parses question text).
+        short = question_form(question, query_id, "short")
+        assert short == question_form(question, query_id, "short")          # seeded by the id alone
+        assert question_form(question, query_id, "short-lower") == short.lower()
+        assert question_form(question, query_id, "lower") == question.lower()
+        assert question_form(question, query_id, "upper") == question.upper()
+        assert not re.search(r"[ \t]{2,}", short)
 
 
 # ---------------------------------------------------------------------------
