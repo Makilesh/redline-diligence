@@ -39,7 +39,8 @@ from src.vector_db.filing_period import question_fiscal_period
 from src.vector_db.hybrid_search import normalize_for_bm25
 from src.vector_db.named_document import NamedDocument, name_document
 from src.verification.claims import resolve_cited_chunks, split_claims
-from src.verification.numeric_grounding import extract_numbers, ground_answer_numbers
+from src.verification.numeric_grounding import ContextIndex, extract_numbers, ground_answer_numbers
+from src.verification.table_context import headed_window, joined_window
 from tests.fixtures.fuzz import CASE_LOOKALIKES, RUN_LENGTHS, domain_text, lookalike
 
 _ASCII_TOKEN = re.compile(r"[a-z0-9]+")
@@ -414,6 +415,49 @@ class TestFigures:
         statuses = {"grounded", "derived", "derived_unverified", "unsupported"}
         for check in ground_answer_numbers(answer, chunks):
             assert check["status"] in statuses
+
+
+class TestTableRows:
+    """The row and header each figure is recorded with, and the window built
+    from them for the figure veto (Decision 90)."""
+
+    @given(st.tuples(_UNITS, domain_text(25)).map("\n".join))
+    def test_every_figure_knows_its_row(self, text):
+        index = ContextIndex([{"text": text, "source_file": "a.pdf"}])
+        for fig in index.figures:
+            start, end = fig.row_span
+            assert 0 <= start <= fig.mention.start < fig.mention.end <= end <= len(text)
+            # A header is recorded only where it named the figure's period.
+            assert not fig.header_line or (fig.period and fig.header_line in text)
+
+    @given(domain_text(30), st.data())
+    def test_a_headed_window(self, body, data):
+        start = data.draw(st.integers(-2, len(body) + 2))
+        end = data.draw(st.integers(-2, len(body) + 2))
+        header = data.draw(st.one_of(st.just(""), domain_text(4)))
+        window = headed_window(body, (start, end), header, data.draw(st.booleans()))
+        if window:
+            lines = window.split("\n")
+            assert 1 <= len(lines) <= 4 and len(set(lines)) == len(lines)
+            assert all(line and line == " ".join(line.split()) for line in lines)
+            assert " ".join(body[start:end].split()) in lines
+
+    @given(st.lists(domain_text(20), min_size=1, max_size=3), st.data())
+    def test_a_joined_window(self, bodies, data):
+        rows = []
+        for key, body in enumerate(bodies):
+            for _ in range(data.draw(st.integers(0, 3))):
+                start = data.draw(st.integers(0, len(body)))
+                end = data.draw(st.integers(start, len(body)))
+                rows.append((key, body, (start, end), data.draw(st.sampled_from(["", "FY2023  FY2022"])), True))
+        window = joined_window(rows)
+        lines = window.split("\n") if window else []
+        assert len(set(lines)) == len(lines)
+        assert all(line and line == " ".join(line.split()) for line in lines)
+        # Every row that is a table row of its text is in the window.
+        for _key, body, (start, end), _header, _ in rows:
+            if headed_window(body, (start, end)):
+                assert " ".join(body[start:end].split()) in lines
 
 
 # What a model's JSON may hold where a number belongs: JSON integers have no
