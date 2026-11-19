@@ -8,6 +8,7 @@ Offline: no model is loaded (the smoke run uses use_nli=False).
 
 import json
 from collections import Counter
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -191,6 +192,20 @@ class TestBaselineGate:
         cur = self._current()
         cur["random_figure_grounding"]["N%"] = 0.40
         assert bench.compare_to_baseline(cur, self.BASE, 0.02)
+
+    def test_a_run_with_another_checker_is_not_compared(self):
+        # CI's file is recorded without a model; a FactCG run against it would
+        # report the model's flags as regressions.
+        off = {**self.BASE, "nli": "off"}
+        assert bench.baseline_mode_mismatch(off, "off") == ""
+        assert "--no-nli" in bench.baseline_mode_mismatch(off, "yaxili96/FactCG-DeBERTa-v3-Large")
+        assert bench.baseline_mode_mismatch({**self.BASE, "nli": "x/model"}, "off")
+        # A file from before the field was recorded is compared as before.
+        assert bench.baseline_mode_mismatch(self.BASE, "off") == ""
+
+    def test_the_recorded_baseline_names_its_checker(self):
+        path = Path(bench.__file__).resolve().parent / "verification_baseline.json"
+        assert json.loads(path.read_text(encoding="utf-8"))["nli"] == "off"
 
 
 class TestRunsOffline:
