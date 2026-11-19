@@ -464,3 +464,117 @@ async def sparse_index_status(
             extra=status,
         )
     return status
+
+
+IDENTITY_BACKFILL_COMMAND = "python -m src.vector_db.identity_backfill"
+# What the identity check reads: one page of points (payload ids and identity
+# fields only, no text), then the opening chunks of at most this many documents
+# that carry no identity. A sample, so that the check costs the same on a
+# 50,000-chunk index as on the demo deal.
+IDENTITY_SAMPLE_POINTS = 256
+IDENTITY_SAMPLE_DOCUMENTS = 20
+_IDENTITY_OPENING_CHUNKS = 16
+
+
+async def identity_index_status(
+    client: AsyncQdrantClient | None = None,
+    collection_name: str = COLLECTION_NAME,
+    sample_points: int = IDENTITY_SAMPLE_POINTS,
+    sample_documents: int = IDENTITY_SAMPLE_DOCUMENTS,
+) -> dict:
+    """
+    Whether indexed documents lack the identity the Decision 86 backfill gives them.
+
+    Ingestion writes doc_title and doc_parties on every child chunk; an index
+    written before Decision 86 has neither, and named-document focus then
+    keeps the fused-score choice for every question. Nothing fails, so this
+    looks — like sparse_index_status, it is a diagnostic. A document may also
+    lack both fields legitimately (a spreadsheet's opening names no
+    agreement), so a missing field proves nothing alone: the opening of each
+    sampled document without identity is read back and given to the same
+    extractor the backfill runs, and only a document it finds an identity for
+    counts as one the backfill would update.
+
+    Sampled and read-only: one scroll of `sample_points` points without text,
+    then one retrieve of the first chunks of at most `sample_documents`
+    documents, by the point ids ingestion gives them (no filter on an
+    unindexed field, which a server in strict mode would refuse).
+
+    Args:
+        client: AsyncQdrantClient instance. If None, uses singleton.
+        collection_name: Child collection to inspect.
+        sample_points: Points read to find documents.
+        sample_documents: Documents without identity whose opening is read.
+
+    Returns:
+        {"sampled_documents": documents seen in the sample,
+         "without_identity": of those, carrying neither field,
+         "checked": of those, whose opening was read,
+         "would_gain_identity": of those, the extractor finds an identity for,
+         "command": the backfill command}
+    """
+    from src.data_processing.document_identity import OPENING_FIELDS, extract_document_identity
+    from src.data_processing.ingest_pipeline import point_id_for
+    from src.utils.fail_open import fail_open
+
+    if client is None:
+        client = get_qdrant_client()
+
+    records, _ = await client.scroll(
+        collection_name=collection_name,
+        limit=sample_points,
+        with_payload=["deal_id", "doc_id", "doc_title", "doc_parties"],
+        with_vectors=False,
+    )
+    has_identity: dict[tuple[str, str], bool] = {}
+    for record in records:
+        payload = record.payload or {}
+        key = (payload.get("deal_id") or "", payload.get("doc_id") or "")
+        if not all(key):
+            continue
+        has_identity[key] = has_identity.get(key, False) or bool(
+            payload.get("doc_title") or payload.get("doc_parties"))
+    missing = [key for key, found in has_identity.items() if not found]
+    checked = missing[:sample_documents]
+
+    # chunk_id is f"{deal_id}_{doc_id}_{index:04d}" and the point id is derived
+    # from it (ingest_pipeline), so a document's opening is a lookup by id.
+    ids = {point_id_for(f"{deal}_{doc}_{i:04d}"): (deal, doc)
+           for deal, doc in checked for i in range(_IDENTITY_OPENING_CHUNKS)}
+    openings: dict[tuple[str, str], list[dict]] = {}
+    if ids:
+        for record in await client.retrieve(
+            collection_name=collection_name,
+            ids=list(ids),
+            # The fields ingestion read the opening from (a clause_id left out
+            # would put a legal PDF's clause number back above its title).
+            with_payload=list(OPENING_FIELDS),
+            with_vectors=False,
+        ):
+            key = ids.get(str(record.id))
+            if key:
+                openings.setdefault(key, []).append(record.payload or {})
+
+    def would_gain() -> int:
+        return sum(
+            1 for key in checked
+            if fail_open("document_identity", extract_document_identity, openings.get(key, []), default={})
+        )
+
+    gain = await asyncio.to_thread(would_gain) if openings else 0
+    status = {
+        "sampled_documents": len(has_identity),
+        "without_identity": len(missing),
+        "checked": len(checked),
+        "would_gain_identity": gain,
+        "command": IDENTITY_BACKFILL_COMMAND,
+    }
+    if gain:
+        logger.warning(
+            f"{gain} of {len(checked)} sampled documents in '{collection_name}' that carry no "
+            "doc_title or doc_parties would get them from the identity backfill (Decision 86); "
+            "until then a question that names an agreement keeps the fused-score choice. "
+            f"Run: {IDENTITY_BACKFILL_COMMAND}",
+            extra=status,
+        )
+    return status

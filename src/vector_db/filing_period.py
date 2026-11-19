@@ -51,6 +51,7 @@ from dataclasses import dataclass, field
 
 from qdrant_client.models import FieldCondition, MatchAny, MatchValue, ScoredPoint
 
+from src.utils.casefold import ascii_lower
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -101,7 +102,9 @@ def _year(token: str) -> int:
 
 
 def _quarter(token: str) -> int:
-    return int(token) if token.isdigit() else _ORDINAL[token.lower()]
+    # ascii_lower: the pattern is case-insensitive, so "fırst" (dotless ı)
+    # matched it and token.lower() was no key of _ORDINAL (Decision 88).
+    return int(token) if token.isdigit() else _ORDINAL[ascii_lower(token)]
 
 
 def question_fiscal_period(question: str) -> tuple[int | None, int | None]:

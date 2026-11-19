@@ -75,7 +75,34 @@ Two consequences worth stating plainly:
   35 s to re-run when most documents were already up to date. The
   choice itself adds no search and no rerank pairs: it is Python over the
   retrieved payloads, about 17 ms per legal question on the development laptop
-  (two ARM cores not measured). `NAMED_DOCUMENT_FOCUS=0` turns it off.
+  (two ARM cores not measured). `NAMED_DOCUMENT_FOCUS=0` turns it off. Startup
+  tells you whether you still need the backfill (Decision 88): in the
+  background, it reads a sample of the index, runs the extractor on the
+  openings of documents that carry no identity, and if any would gain one it
+  logs a warning with the command and reports the `identity_backfill_needed`
+  degraded mode (`/health`, `/ready` → `document_identity`). A spreadsheet or
+  minutes with no title or parties is not reported. The check is read-only,
+  bounded to 30 s, never delays or fails startup, and runs again at the next
+  start.
+- **Re-ingest contract PDFs indexed before Decision 89, then re-run the identity
+  backfill.** A PDF whose text sits inside a ruled box — an exhibit printed from
+  HTML, a document with page borders — was indexed as flattened one-column table
+  cells: no clause boundaries, no parent chunks, out of reading order, and often
+  no title or parties for named-document focus (35 of 232 CUAD contracts, more
+  than half their text). Uploading the same file again re-indexes it in place:
+  its doc_id comes from its bytes, so its old points are replaced, not
+  duplicated. The identity read from PDF text changed too (no-break spaces,
+  lines wrapped after "a", titles centred over several lines), and
+  `python -m src.vector_db.identity_backfill` applies that to every other
+  document without the files; on the 714-file benchmark index it changes the
+  identity of 6 of its 712 distinct documents, each a correction. The backfill
+  cannot repair a boxed PDF's chunks: only re-ingesting it does. Startup's
+  identity check does not report these corrections: it looks only for
+  documents that carry no identity at all. Filings indexed before Decision 89
+  can stay as they are: the rule also rebuilds statements whose columns
+  pdfplumber had collapsed into one, but on FinanceBench's dev questions a
+  re-ingested index was level with the old one (evidence page in the final
+  context +2.7 points [−2.5, +8.5]).
 - **MiniLM is still the best fit for two cores, not the best small reranker.**
   Six Apache-2.0 alternatives were measured on the same emulated host
   (Decision 77). Only `ettin-reranker-68m-v1` beat it on LegalBench-RAG's dev
@@ -366,15 +393,32 @@ and a bigger host, not with processes.
 | Endpoint | What it says | Fails when |
 |---|---|---|
 | `GET /health` | Liveness, plus `phase`, `checkpointer` and every active `degraded` mode | Never, while the process serves |
-| `GET /ready` | Graph compiled, Qdrant answering, not draining — plus the Qdrant backend, stale-BM25 count, checkpointer durability and each model's load state | Any hard check is false (503) |
-| `GET /metrics` | Prometheus text (`?format=json` for JSON with p50/p95): query outcomes, per-node latency, LLM calls and tokens per node, in-flight pipelines | Admin key required unless `METRICS_PUBLIC=1` |
+| `GET /ready` | Graph compiled, Qdrant answering, not draining — plus the Qdrant backend, stale-BM25 count, documents the identity backfill would update (`document_identity`), checkpointer durability and each model's load state | Any hard check is false (503) |
+| `GET /metrics` | Prometheus text (`?format=json` for JSON with p50/p95): query outcomes, per-node latency, LLM calls and tokens per node, in-flight pipelines, optional steps that failed | Admin key required unless `METRICS_PUBLIC=1` |
 
 A degraded mode is a fallback the process is running on — in-memory
 checkpoints, a model whose warmup failed, chunks indexed under an old BM25
-encoding, more than one worker, a wildcard CORS origin. Each is logged once at
-ERROR as `DEGRADED_MODE` and listed by reason in `/health` and, with an
-explanation, in `/ready`. In production `REQUIRE_DURABLE_CHECKPOINTS=1` turns
-the most common one — Postgres unreachable — into a failed start instead.
+encoding, documents the identity backfill would update, more than one worker,
+a wildcard CORS origin. Each is logged once at ERROR as `DEGRADED_MODE` and
+listed by reason in `/health` and, with an explanation, in `/ready`. In
+production `REQUIRE_DURABLE_CHECKPOINTS=1` turns the most common one —
+Postgres unreachable — into a failed start instead.
+
+**An optional step that fails does not fail the request** (Decision 88). The
+quality heuristics — the filing-period preference, the table representation
+cap, document focus and the named document, context expansion, the financial
+cross-check; at ingest filing metadata, document identity, risk signals,
+context headers and version proposals — fall back to what they do when
+switched off, log one ERROR (`Optional step failed; using its default`, with
+the step and the traceback), name the step in that node's trace
+(`perf.fallbacks`) and count it in `redline_optional_step_failures_total{step}`.
+Alert on any increase: each one is a bug. Safety steps never fall back: a PII
+screen, injection screen or deal/version/PII filter that fails fails the
+request or the upload (with `LAYA_PII=1`, an upload Laya cannot screen is
+refused with 503 rather than indexed on the regex alone).
+`STRICT_OPTIONAL_STEPS=1` makes optional steps raise instead; the test suite
+sets it so that a fallback cannot hide a bug from CI — do not set it in
+production.
 
 **Models load from the image, not the Hub.** The image bakes every model into
 its Hugging Face cache, and the app loads a cached model from that snapshot

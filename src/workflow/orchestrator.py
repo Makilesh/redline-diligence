@@ -146,6 +146,10 @@ def _attach_perf(result, scope: dict, node: str):
         # One per LLM call, in order; "length" is a reply cut off at max_tokens.
         "finish_reasons": list(scope.get("finish_reasons") or []),
     }
+    if scope.get("fallbacks"):
+        # Optional steps that raised and fell back to their default inside this
+        # node (src/utils/fail_open.py); absent when none did.
+        perf["fallbacks"] = list(dict.fromkeys(scope["fallbacks"]))
     trace = result.get("agent_trace")
     if isinstance(trace, list) and trace and isinstance(trace[-1], dict):
         trace = [*trace[:-1], {**trace[-1], "perf": perf}]

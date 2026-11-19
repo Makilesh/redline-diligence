@@ -105,7 +105,7 @@ def _as_score(value) -> float:
         return 0.0
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: a huge integer
         return 0.0
 
 

@@ -27,6 +27,7 @@ measurement, so it can be shown as one — and it costs no quota.
 
 import time
 
+from src.utils.fail_open import fail_open
 from src.utils.numerical_registry import NumericalRegistry
 from src.workflow.state_definitions import AgentState
 from src.utils.logger import setup_logger
@@ -34,10 +35,55 @@ from src.utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 
+def _cross_check(chunks: list[dict]) -> dict | None:
+    """
+    The registry of the context's labelled figures and its disagreements.
+
+    Args:
+        chunks: Context chunk payloads.
+
+    Returns:
+        {registry, inconsistencies, figures, cross_checked}, or None when the
+        context holds no labelled figure.
+    """
+    registry = NumericalRegistry.from_chunks(chunks)
+    if len(registry) == 0:
+        return None
+    return {
+        "registry": registry.to_dict(),
+        "inconsistencies": registry.find_inconsistencies(),
+        "figures": len(registry),
+        "cross_checked": registry.cross_checked_count(),
+    }
+
+
+# Returned by the cross-check when it fails (src/utils/fail_open.py).
+_FAILED = {"failed": True}
+
+
+def _skipped(reason: str) -> dict:
+    return {
+        "numerical_registry": {},
+        "inconsistencies": [],
+        "agent_trace": [
+            {
+                "agent": "financial_verifier",
+                "skipped": True,
+                "reason": reason,
+                "method": "deterministic",
+            }
+        ],
+    }
+
+
 async def financial_verifier_node(state: AgentState) -> dict:
     """
     LangGraph node — cross-checks financial figures across retrieved documents.
     Populates: numerical_registry, inconsistencies, agent_trace.
+
+    Optional (Decision 88): if the cross-check fails, the answer is written
+    without it, exactly as for a context with no labelled figures, and the
+    trace says why ("failed").
 
     Args:
         state: Current AgentState with expanded_context / reranked_results.
@@ -53,32 +99,22 @@ async def financial_verifier_node(state: AgentState) -> dict:
         extra={"num_chunks": len(chunks)},
     )
 
-    registry = NumericalRegistry.from_chunks(chunks)
-
-    if len(registry) == 0:
+    checked = fail_open("financial_verifier", _cross_check, chunks, default=_FAILED)
+    if checked is _FAILED:
+        return _skipped("failed")
+    if checked is None:
         logger.info("Agent 4: No labelled figures found in context, skipping")
-        return {
-            "numerical_registry": {},
-            "inconsistencies": [],
-            "agent_trace": [
-                {
-                    "agent": "financial_verifier",
-                    "skipped": True,
-                    "reason": "no_labelled_figures",
-                    "method": "deterministic",
-                }
-            ],
-        }
+        return _skipped("no_labelled_figures")
 
-    inconsistencies = registry.find_inconsistencies()
-    cross_checked = registry.cross_checked_count()
+    inconsistencies = checked["inconsistencies"]
+    cross_checked = checked["cross_checked"]
     sources = sorted({c.get("source_file", "") for c in chunks if c.get("source_file")})
     elapsed_ms = round((time.monotonic() - start) * 1000, 1)
 
     logger.info(
         "Agent 4: Financial Verifier complete",
         extra={
-            "figures": len(registry),
+            "figures": checked["figures"],
             "cross_checked": cross_checked,
             "inconsistencies_found": len(inconsistencies),
             "elapsed_ms": elapsed_ms,
@@ -86,14 +122,14 @@ async def financial_verifier_node(state: AgentState) -> dict:
     )
 
     return {
-        "numerical_registry": registry.to_dict(),
+        "numerical_registry": checked["registry"],
         "inconsistencies": inconsistencies,
         "agent_trace": [
             {
                 "agent": "financial_verifier",
                 "method": "deterministic",
                 "model": "none (deterministic registry)",
-                "figures": len(registry),
+                "figures": checked["figures"],
                 "cross_checked": cross_checked,
                 "inconsistencies": len(inconsistencies),
                 "sources": sources,

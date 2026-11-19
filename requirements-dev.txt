@@ -22,3 +22,6 @@ httpx>=0.27,<1.0
 # Pinned to a minor: ruff adds and re-scopes rules between minors, which would
 # turn a green CI red without any code change.
 ruff>=0.16,<0.17
+# Property-based tests of the text parsers (tests/test_fuzz_properties.py,
+# Decision 88); last run with 6.170.15. HYPOTHESIS_PROFILE=fuzz searches harder.
+hypothesis>=6.100,<7.0
