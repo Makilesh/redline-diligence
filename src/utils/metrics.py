@@ -245,6 +245,13 @@ CHECKPOINT_THREADS_DELETED = _register(
 DEGRADED = _register(
     Gauge("redline_degraded", "1 for each degraded mode currently active, labelled by reason.")
 )
+OPTIONAL_STEP_FAILURES = _register(
+    Counter(
+        "redline_optional_step_failures_total",
+        "Optional steps that raised and fell back to their documented default, by step "
+        "(src/utils/fail_open.py). Any increase is a bug to fix, not a mode to run in.",
+    )
+)
 _STARTED = time.time()
 UPTIME = _register(Gauge("redline_uptime_seconds", "Seconds since this process started."))
 UPTIME.set_function(lambda: time.time() - _STARTED)
@@ -357,6 +364,21 @@ def record_llm_call(
         if model not in scope["models"]:
             scope["models"].append(model)
         scope.setdefault("finish_reasons", []).append(finish_reason)
+
+
+def record_optional_step_failure(step: str) -> None:
+    """
+    Counts one optional step that fell back to its default, and names it in
+    the scope of the graph node it ran in, so the node's trace says so
+    (`perf.fallbacks`, see orchestrator._attach_perf) without a log search.
+
+    Args:
+        step: Step name, as passed to fail_open.
+    """
+    OPTIONAL_STEP_FAILURES.inc(step=step)
+    scope = _node_scope.get()
+    if scope is not None:
+        scope.setdefault("fallbacks", []).append(step)
 
 
 class _LLMUsageTap(logging.Filter):

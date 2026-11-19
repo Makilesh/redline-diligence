@@ -11,12 +11,13 @@ import time
 from src.vector_db.reranker import embed_texts_async, get_embed_executor, rerank_pairs_async
 from src.vector_db.hybrid_search import compute_sparse_bm25, dense_search, hybrid_search
 from src.vector_db.filing_period import prefer_named_period
-from src.vector_db.named_document import name_document
+from src.vector_db.named_document import NamedDocument, name_document
 from src.vector_db.representation_cap import cap_table_representations
 from src.vector_db.rrf_fusion import leading_document, reciprocal_rank_fusion
 from src.vector_db.parent_child_retrieval import expand_context
 from src.agents.retrieval_strategy import clamp_retrieval_config, get_retrieval_config
 from src.workflow.state_definitions import AgentState
+from src.utils.fail_open import fail_open, fail_open_async
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -76,13 +77,17 @@ async def _candidates_for_query(
     )
     # Another year's filing of the same company is set aside when the question
     # names a period that one of that company's filings covers (filing_period.py;
-    # a no-op for documents without filing metadata).
-    dense_results, sparse_results, _ = await prefer_named_period(
+    # a no-op for documents without filing metadata). The steps marked optional
+    # here fail open (src/utils/fail_open.py, Decision 88): this one to the
+    # lists as retrieved.
+    dense_results, sparse_results, _ = await fail_open_async(
+        "filing_period", prefer_named_period,
         query, dense_results, sparse_results,
         query_vector=query_vector, query_sparse=query_sparse, deal_id=deal_id,
         metadata_filters=metadata_filters,
         top_k_dense=config.get("top_k_dense", 40),
         top_k_sparse=config.get("top_k_sparse", 40),
+        default=(dense_results, sparse_results, None),
     )
 
     fused = reciprocal_rank_fusion(
@@ -95,7 +100,10 @@ async def _candidates_for_query(
 
     payloads = {p.payload["chunk_id"]: p.payload for p in (*dense_results, *sparse_results)}
     # One converter table holds one of the reranker's slots (representation_cap.py).
-    ranked = cap_table_representations([cid for cid, _ in fused if cid in payloads], payloads)
+    # Optional: uncapped on a failure.
+    fused_ids = [cid for cid, _ in fused if cid in payloads]
+    ranked = fail_open("representation_cap", cap_table_representations, fused_ids, payloads,
+                       default=fused_ids)
     candidates = [payloads[cid] for cid in ranked[: config.get("reranker_top_k", 20)]]
 
     # Document focus: search again inside the document the fused list points
@@ -109,39 +117,76 @@ async def _candidates_for_query(
     # to choose from (a BM25 search there added nothing on top of it).
     # Candidates are added, never removed, so a question
     # spanning several documents keeps everything it had; the reranker
-    # decides. Measured in Decision 67.
+    # decides. Measured in Decision 67. Optional: no focus candidates on a
+    # failure, which is what focus_k=0 gives.
     focus_k = int(config.get("document_focus_k", 0) or 0)
     if focus_k > 0 and candidates:
-        doc_id, _share = leading_document(
-            fused, {cid: p.get("doc_id") for cid, p in payloads.items()}
+        candidates += await fail_open_async(
+            "document_focus", _focus_candidates,
+            query, query_vector, fused, payloads, candidates, focus_k, deal_id, metadata_filters,
+            default=[],
         )
-        # Among near-identical contracts the fused score leans to the wrong
-        # one, and the question usually says which it means ("the Northwind
-        # NDA", "the merger agreement between Parent X and Target Y"). A
-        # document the question names, by the title and parties read from its
-        # opening at ingest, is searched instead; when nothing is named the
-        # fused choice stands (named_document.py, Decision 86).
-        named = name_document(query, payloads.values())
-        if named.document and named.document != doc_id:
-            logger.info(
-                "Document focus: the question names another document",
-                extra={"named": named.source_file, "matched": named.matched,
-                       "score": named.score, "runner_up": named.runner_up,
-                       "fused_choice": next((p.get("source_file") for p in payloads.values()
-                                             if p.get("doc_id") == doc_id), None)},
-            )
-            doc_id = named.document
-        if doc_id:
-            in_document = await dense_search(
-                query_vector=query_vector,
-                deal_id=deal_id,
-                metadata_filters=metadata_filters,
-                top_k=focus_k,
-                doc_id=doc_id,
-            )
-            seen = {c["chunk_id"] for c in candidates}
-            candidates += [p.payload for p in in_document if p.payload["chunk_id"] not in seen]
     return candidates
+
+
+async def _focus_candidates(
+    query: str,
+    query_vector: list[float],
+    fused: list[tuple[str, float]],
+    payloads: dict[str, dict],
+    candidates: list[dict],
+    focus_k: int,
+    deal_id: str,
+    metadata_filters: dict,
+) -> list[dict]:
+    """
+    The focus document's passages that are not candidates already.
+
+    Args:
+        query: The query or sub-question.
+        query_vector: Its dense embedding.
+        fused: The fused ranking (chunk_id, rrf_score).
+        payloads: chunk_id -> payload of the first search's results.
+        candidates: The candidates so far (their chunk_ids are skipped).
+        focus_k: Passages to search for inside the document.
+        deal_id: Deal scope.
+        metadata_filters: The pass's filters, applied again.
+
+    Returns:
+        Up to focus_k payloads, best first.
+    """
+    doc_id, _share = leading_document(
+        fused, {cid: p.get("doc_id") for cid, p in payloads.items()}
+    )
+    # Among near-identical contracts the fused score leans to the wrong
+    # one, and the question usually says which it means ("the Northwind
+    # NDA", "the merger agreement between Parent X and Target Y"). A
+    # document the question names, by the title and parties read from its
+    # opening at ingest, is searched instead; when nothing is named the
+    # fused choice stands (named_document.py, Decision 86) — as it does if
+    # naming fails.
+    named = fail_open("named_document", name_document, query, payloads.values(),
+                      default=NamedDocument(reason="failed"))
+    if named.document and named.document != doc_id:
+        logger.info(
+            "Document focus: the question names another document",
+            extra={"named": named.source_file, "matched": named.matched,
+                   "score": named.score, "runner_up": named.runner_up,
+                   "fused_choice": next((p.get("source_file") for p in payloads.values()
+                                         if p.get("doc_id") == doc_id), None)},
+        )
+        doc_id = named.document
+    if not doc_id:
+        return []
+    in_document = await dense_search(
+        query_vector=query_vector,
+        deal_id=deal_id,
+        metadata_filters=metadata_filters,
+        top_k=focus_k,
+        doc_id=doc_id,
+    )
+    seen = {c["chunk_id"] for c in candidates}
+    return [p.payload for p in in_document if p.payload["chunk_id"] not in seen]
 
 
 async def _retrieve_for_queries(
@@ -459,13 +504,17 @@ async def retrieval_executor_node(state: AgentState) -> dict:
         # guarantee coverage during selection, not to dictate reading order.
         reranked.sort(key=lambda c: c["reranker_score"], reverse=True)
 
-    # Step 7: Context expansion
-    expanded = await expand_context(
+    # Step 7: Context expansion. Optional: if it fails, the reranked chunks go
+    # on alone — no parent sections, table siblings or section tables, each of
+    # which is fetched under the same deal, version and PII conditions.
+    expanded = await fail_open_async(
+        "context_expansion", expand_context,
         chunks=reranked,
         include_parents=config.get("use_parent_expansion", True),
         include_siblings=config.get("use_sibling_expansion", True),
         include_pii=include_pii,
         deal_id=deal_id,
+        default=[dict(c) for c in reranked],
     )
 
     elapsed_ms = (time.monotonic() - start) * 1000
