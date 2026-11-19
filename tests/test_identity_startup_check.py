@@ -87,6 +87,25 @@ async def test_an_empty_index():
     assert status["sampled_documents"] == 0 and status["would_gain_identity"] == 0
 
 
+@pytest.mark.asyncio
+async def test_the_opening_is_read_with_every_field_ingestion_read(tmp_path):
+    # The extractor must see the opening it saw at ingestion: a clause_id left
+    # out puts a legal PDF's clause number back above its title (Decision 89).
+    from src.data_processing.document_identity import OPENING_FIELDS
+
+    client, _ = await _room(tmp_path, backfilled=False)
+    fetched: list = []
+    retrieve = client.retrieve
+
+    async def recording(*args, **kwargs):
+        fetched.append(kwargs.get("with_payload"))
+        return await retrieve(*args, **kwargs)
+
+    client.retrieve = recording
+    await identity_index_status(client)
+    assert fetched and all(set(OPENING_FIELDS) <= set(f) for f in fetched)
+
+
 def test_the_result_is_a_degraded_mode_until_backfilled():
     runtime_status.set_identity_index({"checked": 4, "would_gain_identity": 3,
                                        "command": "python -m src.vector_db.identity_backfill"})

@@ -513,7 +513,7 @@ async def identity_index_status(
          "would_gain_identity": of those, the extractor finds an identity for,
          "command": the backfill command}
     """
-    from src.data_processing.document_identity import extract_document_identity
+    from src.data_processing.document_identity import OPENING_FIELDS, extract_document_identity
     from src.data_processing.ingest_pipeline import point_id_for
     from src.utils.fail_open import fail_open
 
@@ -546,7 +546,9 @@ async def identity_index_status(
         for record in await client.retrieve(
             collection_name=collection_name,
             ids=list(ids),
-            with_payload=["chunk_index", "text", "section_heading", "contains_pii"],
+            # The fields ingestion read the opening from (a clause_id left out
+            # would put a legal PDF's clause number back above its title).
+            with_payload=list(OPENING_FIELDS),
             with_vectors=False,
         ):
             key = ids.get(str(record.id))
