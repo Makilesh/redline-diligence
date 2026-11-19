@@ -208,6 +208,64 @@ class RiskSignal(BaseModel):
     page_number: int | None = None
 
 
+class TieOutValue(BaseModel):
+    """One document's statement of a figure, as printed and where."""
+    source_file: str = ""
+    page_number: int | None = None
+    section_heading: str = Field("", description="Section the figure sits in, at most 120 characters")
+    as_printed: str = Field("", description="The figure as the document prints it, at most 40 characters")
+    value: float = Field(0.0, description="Absolute value after unit and scale normalisation")
+    scale_known: bool = Field(
+        True, description="False when the document states no unit for it; compared at any power of 1,000"
+    )
+
+
+class TieOutFigure(BaseModel):
+    """A labelled figure (metric and period) that two or more documents state."""
+    metric: str = Field(..., description="Line-item label as printed, at most 120 characters")
+    period: str = Field(
+        ...,
+        description=(
+            "FY2023 | FY2024E | FY ending 2023-01 | 2023-07-29 (a balance date) | "
+            "3M/6M/9M/YTD ending <date> | Q42023"
+        ),
+    )
+    kind: str = Field("amount", description="amount | percent | multiple")
+    status: str = Field(..., description="conflict | agree")
+    max_deviation_pct: float = Field(0.0, description="Gap between the values, % of the larger")
+    values: list[TieOutValue] = Field(default_factory=list, description="One per document, at most 10")
+    more_documents: int = Field(0, description="Documents stating the figure beyond those listed")
+
+
+class TieOutReport(BaseModel):
+    """
+    Deal-level figure tie-out (Decision 92): every labelled figure two or more
+    documents state, conflicts first. Deterministic; no LLM call.
+    """
+    deal_id: str
+    conflicts: list[TieOutFigure] = Field(default_factory=list, description="Largest gap first, at most 200")
+    agreements: list[TieOutFigure] = Field(default_factory=list, description="At most 200")
+    conflicts_total: int = 0
+    agreements_total: int = 0
+    single_source_figures: int = Field(0, description="Figures only one document states")
+    ambiguous_figures: int = Field(
+        0, description="Figures a document states twice with different values; not compared"
+    )
+    generic_figures: int = Field(
+        0, description="Figures under labels that name nothing alone ('Total', 'Other'); not compared"
+    )
+    figures_without_period: int = Field(0, description="Figures read with no period; not compared")
+    documents_total: int = 0
+    documents_read: int = 0
+    documents_not_read: list[str] = Field(
+        default_factory=list, description="Documents the cap or the time budget left out, at most 50"
+    )
+    chunks_read: int = 0
+    truncated: bool = Field(False, description="True when not every document was read")
+    truncation_reason: str = Field("", description="'' | chunk_cap | time_budget")
+    elapsed_ms: float = 0.0
+
+
 class BudgetStatusResponse(BaseModel):
     """Response model for budget status."""
     synthesis_primary: dict = Field(default_factory=dict)

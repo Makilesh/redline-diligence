@@ -7,12 +7,13 @@ import os
 import re
 import secrets
 import uuid
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from api.models.request_models import DealCreateRequest, DealIdPath
-from api.models.response_models import DealResponse, DocumentRecord, RiskSignal
+from api.models.response_models import DealResponse, DocumentRecord, RiskSignal, TieOutReport
 from api.security import (
     ClientContext,
     can_read_deal,
@@ -638,6 +639,48 @@ async def list_deal_risk_signals(
     return signals
 
 
+@router.get("/deals/{deal_id}/tie-out", response_model=TieOutReport)
+async def deal_tie_out(deal_id: DealIdPath, client: ClientContext = Depends(read_rate_limit)):
+    """
+    Ties out the deal's figures across its documents (Decision 92).
+
+    Every labelled figure (metric + period) that two or more documents state,
+    with each document's value, page and section, and whether they agree after
+    unit, scale and rounding normalisation — conflicts first. Deterministic: no
+    LLM call. Reads what a question may read (current versions, no PII), within
+    a chunk cap and a time budget; a report cut short says so (`truncated`).
+
+    A store that cannot be read is a 503, never an empty report: "no conflicts"
+    from a report that read nothing would be false. 503 with Retry-After also
+    when another report held the build slot for the whole wait.
+    """
+    require_readable_deal(deal_id, client.is_admin)
+    from src.reports.tie_out import TieOutBusy, get_tie_out
+
+    try:
+        report = await get_tie_out(deal_id)
+    except TieOutBusy:
+        raise HTTPException(
+            status_code=503,
+            detail="Another tie-out report is being built. Please retry shortly.",
+            headers={"Retry-After": "15"},
+        )
+    except Exception as e:
+        logger.error(
+            "Tie-out report failed",
+            extra={
+                "deal_id": deal_id,
+                "error_type": type(e).__name__,
+                "error": str(e),
+                "request_id": client.request_id,
+            },
+        )
+        raise HTTPException(
+            status_code=503, detail=public_error_detail("Tie-out report", client.request_id)
+        )
+    return TieOutReport.model_validate(asdict(report))
+
+
 # ==============================================================================
 # Ephemeral sandbox deals
 # ==============================================================================
@@ -817,6 +860,11 @@ async def purge_deal(deal_id: str) -> dict:
     from src.workflow.orchestrator import purge_deal_checkpoints
 
     threads_dropped = await purge_deal_checkpoints(get_graph(), deal_id)
+
+    # A cached tie-out report quotes the deal's labels and figures (Decision 92).
+    from src.reports.tie_out import forget_deal
+
+    forget_deal(deal_id)
 
     documents_dropped = len(_documents.pop(deal_id, []))
     _deals.pop(deal_id, None)
