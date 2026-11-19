@@ -144,7 +144,7 @@ Document text is wrapped in escaped `<document>` tags and every prompt that read
 
 **LLMs generate, code computes, a decision model judges.** Many of the pipeline's steps are not generation at all but typed judgments — *does this passage disclose litigation?*, *what kind of document is this?*, *is this question about the deal?* — and they were being made by regexes or by spending an LLM call. [Laya](https://huggingface.co/convaiinnovations/laya) (Apache-2.0, 421M parameters) answers typed questions in one encoder forward pass with a probability instead of prose: ~30 ms per question on a GPU, runs locally, costs nothing, and cannot hallucinate text. The authors' fine-tuned `typed-decisions` checkpoint is used as-is; nothing here is fine-tuned yet.
 
-Every use was measured against the method it would replace on a labelled set built for it — thresholds chosen on a dev split, results reported on a held-out split — and adopted **only where it won**. Every use falls back to the previous rule-based path when Laya is unavailable ([`src/decisions/`](src/decisions)).
+Every use was measured against the method it would replace on a labelled set built for it — thresholds chosen on a dev split, results reported on a held-out split — and adopted **only where it won**. Every use falls back to the previous rule-based path when Laya is unavailable ([`src/decisions/`](src/decisions)), except PII screening once it is switched on: with `LAYA_PII=1`, an upload Laya cannot screen is refused rather than indexed on the regex alone (Decision 88).
 
 | Decision | Before | With Laya | Status |
 |---|---|---|---|
@@ -342,7 +342,7 @@ Without a Qdrant server (development only), set `QDRANT_MODE=local` to use an em
 ### 4. Tests and evaluation
 
 ```bash
-pytest                                                    # offline suite (~1,490 tests, ~40 s) — what CI runs
+pytest                                                    # offline suite (~2,000 tests, ~40 s) — what CI runs
 HYPOTHESIS_PROFILE=fuzz pytest tests/test_fuzz_properties.py  # property tests of the text parsers, longer search
 python -m eval.run_verification_eval --no-nli --baseline eval/verification_baseline.json  # verification gate, no models
 python -m eval.run_retrieval_eval --baseline eval/baseline.json   # retrieval regression gate
