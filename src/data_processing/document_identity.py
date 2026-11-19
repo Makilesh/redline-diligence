@@ -223,7 +223,11 @@ STOPWORDS = frozenset({
 })
 _TOKEN = re.compile(r"[a-z0-9]+")
 # Compounds whose parts a question may write joined or apart: "i-on", "Coca-Cola", "theglobe.com".
-_COMPOUND = re.compile(r"[a-z0-9]+(?:[\-./'’][a-z0-9]+)+")
+# Tried only where a run of letters and digits starts: from inside a run the
+# match fails exactly as it did from the run's start, and trying it there made
+# a long run (a hash, OCR without spaces) quadratic — 1.8 s for one legal
+# question's retrieved text (Decision 88).
+_COMPOUND = re.compile(r"(?<![a-z0-9])[a-z0-9]+(?:[\-./'’][a-z0-9]+)+")
 _ACRONYM_SKIP = frozenset({"and", "of", "the", "for", "to", "a", "an", "in", "on", "by", "with"})
 
 
@@ -342,10 +346,12 @@ def extract_title(opening: str) -> str:
             continue
         if _DOC_TYPE.search(line) and _heading_like(line):
             return line
-    # "THIS AGREEMENT" alone names no kind of agreement.
+    # "THIS AGREEMENT" alone names no kind of agreement. The heading's length
+    # cap holds here too: a run-on capitalised word (OCR without spaces) made
+    # a title of hundreds of characters, copied onto every chunk.
     for match in _THIS_TITLE.finditer(opening[:PARTY_CLAUSE_WITHIN]):
         title = _clean(match.group(1))
-        if len(title.split()) >= 2:
+        if len(title.split()) >= 2 and len(title) <= MAX_TITLE_CHARS:
             return title
     return ""
 

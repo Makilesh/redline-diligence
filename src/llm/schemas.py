@@ -164,7 +164,10 @@ def _unit_score(value: Any) -> float | None:
             return None
     if not isinstance(value, (int, float)):
         return None
-    value = float(value)
+    try:
+        value = float(value)
+    except OverflowError:  # an integer of hundreds of digits: no score (Decision 88)
+        return None
     return value if 0.0 <= value <= 1.0 else None
 
 

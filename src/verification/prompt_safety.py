@@ -86,6 +86,27 @@ _ROLE_LABEL = re.compile(
 _INVISIBLE = re.compile("[\U000E0000-\U000E007F]+")
 
 
+# Passes of the marker rewrite before every remaining bracket is rewritten.
+_MARKER_PASSES = 16
+
+
+def _neutralise_markers(text: str) -> str:
+    """
+    Rewrites forged markers until none is left.
+
+    One pass rewrites the innermost markers only, and that can complete the
+    one around them: "[x [a|b] | y]" became "[x (a|b) | y]", a citation marker
+    the verifier and the citation panel parse (found by the property tests,
+    Decision 88). Ordinary text has no marker and costs one pass; nesting
+    deeper than _MARKER_PASSES is adversarial, and then every bracket goes.
+    """
+    for _ in range(_MARKER_PASSES):
+        text, rewritten = _FORGED_MARKER.subn(lambda m: f"({m.group(1)})", text)
+        if not rewritten:
+            return text
+    return text.replace("[", "(").replace("]", ")") if _FORGED_MARKER.search(text) else text
+
+
 def escape_document_text(text: str) -> str:
     """
     Neutralises delimiter look-alikes and forged system markers in untrusted text.
@@ -115,13 +136,15 @@ def escape_document_text(text: str) -> str:
         Text in which no delimiter or system marker survives as such.
     """
     text = _TAG_LOOKALIKE.sub(lambda m: f"&lt;{m.group(1)}{m.group(2)}", text or "")
-    text = _FORGED_MARKER.sub(lambda m: f"({m.group(1)})", text)
+    # Chat tokens first: "[INST]" rewritten to "(INST)" could otherwise complete
+    # a marker around it ("[a [INST] | b]") after the marker pass.
     text = _CHAT_TOKEN.sub(
         lambda m: "&lt;" + next(g for g in m.groups() if g is not None) + "&gt;"
         if m.group(0).startswith("<")
         else "(" + next(g for g in m.groups() if g is not None) + ")",
         text,
     )
+    text = _neutralise_markers(text)
     text = _ROLE_LABEL.sub(lambda m: f"{m.group(1)}(document text) {m.group(2)}", text)
     return _INVISIBLE.sub(lambda m: f"({len(m.group(0))} invisible characters removed)", text)
 

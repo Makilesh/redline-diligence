@@ -36,3 +36,9 @@ class NoExtractableContentError(IngestionError):
     """Parsing succeeded but produced nothing to index."""
 
     status_code = 422
+
+
+class PIIScreeningUnavailable(IngestionError):
+    """The configured PII screen could not run, so nothing was indexed (fail closed)."""
+
+    status_code = 503

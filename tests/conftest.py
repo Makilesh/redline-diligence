@@ -24,6 +24,11 @@ os.environ.setdefault("API_URL", "http://127.0.0.1:9")
 # accident on a machine that has the weights cached.
 os.environ.setdefault("WARM_MODELS", "0")
 
+# An optional step (src/utils/fail_open.py) that raises falls back to its
+# default in production; under the suite it re-raises, so a guard can never hide
+# a bug from CI. Tests of the fallback itself turn it off with monkeypatch.
+os.environ.setdefault("STRICT_OPTIONAL_STEPS", "1")
+
 # `import litellm` calls dotenv.load_dotenv(), which walks up from litellm's own
 # install directory. With the venv inside the checkout that finds the
 # developer's .env and loads all of it into the test process — measured: 25

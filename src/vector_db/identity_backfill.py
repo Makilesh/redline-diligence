@@ -33,6 +33,7 @@ from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 from src.data_processing.document_identity import extract_document_identity
 from src.vector_db.constants import COLLECTION_NAME
+from src.utils.fail_open import fail_open
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -67,7 +68,8 @@ async def backfill_document_identity(
         dry_run: Compute and count, write nothing.
 
     Returns:
-        Counts: documents, updated, unchanged, with_title, with_parties.
+        Counts: documents, updated, unchanged, with_title, with_parties, and
+        failed (identity extraction raised; the document was left as it was).
     """
     scroll_filter = (Filter(must=[FieldCondition(key="deal_id", match=MatchValue(value=deal_id))])
                      if deal_id else None)
@@ -95,10 +97,17 @@ async def backfill_document_identity(
         if offset is None:
             break
 
-    stats = {"documents": len(point_ids), "updated": 0, "unchanged": 0, "with_title": 0, "with_parties": 0}
+    stats = {"documents": len(point_ids), "updated": 0, "unchanged": 0, "with_title": 0, "with_parties": 0,
+             "failed": 0}
     for key, ids in point_ids.items():
         payloads = sorted(opening[key], key=lambda p: p.get("chunk_index") or 0)[:_OPENING_CHUNKS]
-        identity = extract_document_identity(payloads)
+        # A document whose identity cannot be read is left exactly as it is —
+        # not given {}, which would delete fields it may already carry — and
+        # the run goes on to the next (src/utils/fail_open.py).
+        identity = fail_open("document_identity", extract_document_identity, payloads, default=None)
+        if identity is None:
+            stats["failed"] += 1
+            continue
         stats["with_title"] += "doc_title" in identity
         stats["with_parties"] += "doc_parties" in identity
         if current[key] == {_canonical(identity)}:

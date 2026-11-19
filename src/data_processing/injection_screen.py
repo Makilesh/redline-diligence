@@ -284,8 +284,10 @@ def flagged_locations(items, limit: int = LOCATION_LIMIT) -> list[dict]:
                 "source_file": key[0], "page_number": page, "section_heading": heading,
                 "signals": set(),
             }
+        signals = item.get("signals")
         merged[key]["signals"].update(
-            s for s in item.get("signals") or [] if isinstance(s, str) and s in SIGNALS
+            s for s in (signals if isinstance(signals, (list, tuple, set)) else [])
+            if isinstance(s, str) and s in SIGNALS
         )
     return [
         {**entry, "signals": [s for s in SIGNALS if s in entry["signals"]]}

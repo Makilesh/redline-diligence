@@ -69,6 +69,8 @@ from __future__ import annotations
 import re
 from datetime import date, timedelta
 
+from src.utils.casefold import ascii_lower
+
 # Only the opening pages are read: the cover of an SEC form is page 1, and an
 # earnings release states its subject in its first lines. Reading further would
 # pick up the dates of comparative periods and exhibits.
@@ -197,7 +199,9 @@ def _date_from(match: re.Match) -> date | None:
     g = match.groups()
     month, day, year = (g[0], g[1], g[2]) if g[0] else (g[4], g[3], g[5])
     try:
-        return date(int(year), _MONTHS[month.lower()], int(day))
+        # ascii_lower: "Auguſt" (long s) matches the case-insensitive month
+        # names, and .lower() alone is no key of _MONTHS (Decision 88).
+        return date(int(year), _MONTHS[ascii_lower(month)], int(day))
     except ValueError:
         return None
 
@@ -350,10 +354,10 @@ def _quarter_of_10q(text: str, end: date) -> int | None:
     """Fiscal quarter of a 10-Q from its year-to-date statements, or None."""
     found = set()
     for m in _YTD.finditer(text):
-        if (_MONTHS[m.group(3).lower()], int(m.group(4))) != (end.month, end.day):
+        if (_MONTHS[ascii_lower(m.group(3))], int(m.group(4))) != (end.month, end.day):
             continue
-        length = re.sub(r"[\s-]", "", m.group(1).lower())
-        quarter = _YTD_QUARTER[m.group(2).lower()].get(length)
+        length = re.sub(r"[\s-]", "", ascii_lower(m.group(1)))
+        quarter = _YTD_QUARTER[ascii_lower(m.group(2))].get(length)
         if quarter:
             found.add(quarter)
     year_to_date = found - {1}

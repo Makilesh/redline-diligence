@@ -69,6 +69,7 @@ from src.data_processing.errors import (  # noqa: F401  (re-exported)
     DocumentExtractionError,
     IngestionError,
     NoExtractableContentError,
+    PIIScreeningUnavailable,
     UnsafeDocumentError,
     UnsupportedFileTypeError,
 )
@@ -81,7 +82,7 @@ from src.data_processing.financial_table_converter import (
 )
 from src.data_processing.injection_screen import screen_text
 from src.data_processing.pii_detector import PIIDetector
-from src.data_processing.risk_signal_extractor import RiskSignalExtractor
+from src.data_processing.risk_signal_extractor import RiskSignalExtractor, RiskSignalResult
 from src.data_processing.semantic_chunker import (
     DEFAULT_PARENT_TARGET_TOKENS,
     SemanticChunker,
@@ -95,6 +96,7 @@ from src.vector_db.constants import (
     PARENT_COLLECTION_NAME,
     QDRANT_BATCH_SIZE,
 )
+from src.utils.fail_open import fail_open, fail_open_async
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -207,7 +209,12 @@ def sanitize_filename(name: str | None) -> str:
 
     if len(base) > 200:
         stem, ext = os.path.splitext(base)
-        base = stem[: 200 - len(ext)] + ext
+        # The extension is kept (it selects the parser) unless it alone fills
+        # the budget: "a." followed by 300 characters became a 301-character
+        # dotfile, which the checks above exist to refuse (Decision 88).
+        if len(ext) >= 200:
+            stem, ext = base, ""
+        base = (stem[: 200 - len(ext)] + ext).rstrip()
     return base
 
 
@@ -673,12 +680,18 @@ def _child_payload(
         locator = f"Slide {slide}" if slide else ""
         if meta.get("sheet_state"):
             locator = "hidden sheet"
-        payload["context_header"] = build_context_header(
+        # Optional (src/utils/fail_open.py): a chunk whose header cannot be
+        # built is indexed under its bare text, as with headers off.
+        header = fail_open(
+            "context_header", build_context_header,
             doc.filename,
             title=title,
             heading_path=meta.get("heading_path") or [chunk.section_heading or ""],
             locator=locator,
+            default=None,
         )
+        if header is not None:
+            payload["context_header"] = header
     return payload
 
 
@@ -746,6 +759,20 @@ def _laya_chunk_scores(
     try:
         scores = ingest_signals.score_chunks(texts, risk_categories=risk_categories, pii=use_pii)
     except LayaUnavailable as e:
+        if use_pii:
+            # LAYA_PII=1 flags chunks the regex does not, so the regex alone
+            # would index as PII-free a chunk the configured screen excludes:
+            # PII detection fails closed, and nothing of the document is
+            # indexed (Decision 88). Risk and category are optional and do
+            # fall back, as below, when PII is not Laya's to judge.
+            logger.error(
+                "Laya unavailable at ingest with LAYA_PII=1; refusing to index unscreened",
+                extra={"file_name": filename, "error": str(e)},
+            )
+            raise PIIScreeningUnavailable(
+                "The document could not be screened for personal data (the screening model is "
+                "unavailable), so nothing was indexed. Retry the upload later."
+            ) from e
         logger.warning(
             "Laya unavailable at ingest; keeping regex risk and PII results",
             extra={"file_name": filename, "error": str(e)},
@@ -847,13 +874,17 @@ def extract_and_chunk(
         has_redline=has_redline,
         category_source=category_source,
         category_confidence=category_confidence,
-        filing=extract_filing_metadata(sections),
+        # Optional (src/utils/fail_open.py, Decision 88): a filing whose cover
+        # cannot be read is indexed without filing_* fields, which retrieval
+        # already treats as "not a filing".
+        filing=fail_open("filing_metadata", extract_filing_metadata, sections, default={}),
     )
 
     if not sections:
         raise NoExtractableContentError("No text could be extracted from the document")
 
-    title = document_title(sections)
+    # Used only by context headers; "" is a document that opens with no heading.
+    title = fail_open("context_header", document_title, sections, default="")
     structural_chunks = StructuralChunker().chunk(sections)
     children, parents = SemanticChunker().chunk_with_parents(
         structural_chunks, parent_target_tokens=DEFAULT_PARENT_TARGET_TOKENS
@@ -873,8 +904,15 @@ def extract_and_chunk(
     parent_pii = [0] * len(parents)
     parent_children: list[list[str]] = [[] for _ in parents]
 
+    # Optional: a chunk whose risk scan fails gets no regex signals. Risk
+    # signals are read by the dashboard and the trace, never by a retrieval
+    # filter.
     regex_risk = [
-        risk_extractor.extract(c.text, file_name=filename, document_category=document_category)
+        fail_open(
+            "risk_signals", risk_extractor.extract,
+            c.text, file_name=filename, document_category=document_category,
+            default=RiskSignalResult(signals=[], signal_details=[], signal_count=0),
+        )
         for c in children
     ]
     laya_scores, laya_risk_used = _laya_chunk_scores(
@@ -950,8 +988,10 @@ def extract_and_chunk(
     # chunks just built and written on every one of them, so a question that
     # names the document can be matched to it (document_identity.py; read by
     # named_document.py, Decision 86). `python -m src.vector_db.identity_backfill`
-    # computes the same fields from an existing index's payloads.
-    identity = extract_document_identity(doc.chunks)
+    # computes the same fields from an existing index's payloads. Optional: a
+    # document whose identity cannot be read gets none, and the query step keeps
+    # the fused-score choice for it.
+    identity = fail_open("document_identity", extract_document_identity, doc.chunks, default={})
     for payload in doc.chunks:
         payload.update(identity)
 
@@ -1334,9 +1374,13 @@ async def index_document(
         "content_sha256": doc.content_sha256,
         "previously_indexed": bool(existing.count),
         "superseded_by": retired_by,
-        "version_candidates": await _version_candidates(
+        # Optional, and after the upsert: a failure here must not turn an
+        # indexed document into an error response. No proposal, then.
+        "version_candidates": await fail_open_async(
+            "version_candidates", _version_candidates,
             client, collection_name, deal_id, doc.doc_id, filename,
             explicit=supersedes_doc_id,
+            default=[],
         ),
     }
     logger.info(

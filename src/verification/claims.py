@@ -37,7 +37,11 @@ from src.verification.numeric_grounding import extract_numbers, strip_citations
 #   [📄 FileName | Section]            (sources without pages, e.g. .txt)
 # Matching on the pipe avoids colliding with ordinary markdown links.
 CITATION_MARKER = re.compile(r"\[([^\[\]]*\|[^\[\]]*)\]")
-PAGE_IN_MARKER = re.compile(r"(?:p\.|pg\.|page\s*)(\d+)", re.IGNORECASE)
+# At most six digits: the page is read with int(), which refuses a string of
+# more than 4,300 digits (Python 3.11+), so a marker the model wrote with a
+# runaway page number failed the whole request after synthesis (Decision 88).
+# No document has a millionth page; a longer number is no page at all.
+PAGE_IN_MARKER = re.compile(r"(?:p\.|pg\.|page\s*)(\d{1,6})(?!\d)", re.IGNORECASE)
 
 # Wording that states what the EVIDENCE does not say. Kept separate from the
 # synthesizer's usable-answer guard (_DECLINES_TO_ANSWER there) so that changing
@@ -130,6 +134,29 @@ _ABBREVIATIONS = {
     "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov",
     "dec", "p", "pp", "ref", "est", "avg", "al",
 }
+_WORD_OR_DOT = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.")
+
+
+def _word_before_final_period(text: str) -> str | None:
+    """
+    What re.findall(r"([A-Za-z.]+)\\.$", text.rstrip()) finds — the run of
+    letters and dots before a closing full stop — read from the end.
+
+    The regex scanned the whole text, and the text grows each time an
+    abbreviation joins the next sentence to it, so an answer repeating
+    "Inc." was quadratic: 0.2 s at 12,000 characters, about 1.4 s for an
+    8,192-token answer (Decision 88).
+    """
+    end = len(text)
+    while end and text[end - 1].isspace():
+        end -= 1
+    if not end or text[end - 1] != ".":
+        return None
+    start = end - 1
+    while start and text[start - 1] in _WORD_OR_DOT:
+        start -= 1
+    return text[start:end - 1] or None
+
 
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+(?=[\"'“(\[*A-Z0-9$€£])")
 _LEADING_MARKERS = re.compile(r"^\s*(?:\[[^\[\]]*\|[^\[\]]*\]\s*[.,;]?\s*)+")
@@ -231,9 +258,8 @@ def _split_sentences(line: str) -> list[str]:
     merged: list[str] = []
     for piece in pieces:
         if merged:
-            prev = merged[-1].rstrip()
-            last_word = re.findall(r"([A-Za-z.]+)\.$", prev)
-            if last_word and last_word[0].lower().rstrip(".") in _ABBREVIATIONS:
+            last_word = _word_before_final_period(merged[-1])
+            if last_word and last_word.lower().rstrip(".") in _ABBREVIATIONS:
                 merged[-1] = f"{merged[-1]} {piece}"
                 continue
             lead = _LEADING_MARKERS.match(piece)
