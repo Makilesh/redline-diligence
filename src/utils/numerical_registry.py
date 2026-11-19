@@ -30,6 +30,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from src.utils.casefold import ascii_lower
 from src.utils.logger import setup_logger
 from src.verification.numeric_grounding import (
     SCALE_HINT_RE as _SCALE_HINT,
@@ -316,7 +317,8 @@ class NumericalRegistry:
         hint = _SCALE_HINT.search(text)
         chunk_scale = None
         if hint:
-            word = next(g for g in hint.groups() if g).lower()
+            # Read as numeric grounding reads it (ascii_lower: see src/utils/casefold.py).
+            word = ascii_lower(next(g for g in hint.groups() if g))
             chunk_scale = _SCALE_WORD.get(word)
         if chunk_scale is None and chunk.get("scale_factor"):
             try:

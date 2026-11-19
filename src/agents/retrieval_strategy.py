@@ -132,7 +132,9 @@ def clamp_retrieval_config(config: dict) -> dict:
         cast, low, high = bounds
         try:
             number = float(value)
-        except (TypeError, ValueError):
+        # OverflowError: an integer of a few hundred digits, which JSON allows
+        # and float() refuses — it failed the rewrite (Decision 88).
+        except (TypeError, ValueError, OverflowError):
             continue
         if number != number:  # NaN
             continue

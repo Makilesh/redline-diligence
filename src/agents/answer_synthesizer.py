@@ -327,9 +327,16 @@ def _select_cited_chunks(answer: str, chunks: list[dict]) -> list[dict]:
                 continue
             chunk_page = chunk.get("page_number")
             # A page in the marker narrows to that page; its absence means the
-            # model did not scope the citation, so the document match stands.
-            if page is not None and chunk_page is not None and int(chunk_page) != page:
-                continue
+            # model did not scope the citation, so the document match stands —
+            # as it does for a page that is not a number, which int() refused
+            # here after synthesis (Decision 88; claims.resolve_cited_chunks,
+            # the verifier's reading of the same markers, already allowed it).
+            if page is not None and chunk_page is not None:
+                try:
+                    if int(chunk_page) != page:
+                        continue
+                except (TypeError, ValueError, OverflowError):
+                    pass
             return True
         return False
 

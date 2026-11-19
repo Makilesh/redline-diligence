@@ -207,7 +207,12 @@ def sanitize_filename(name: str | None) -> str:
 
     if len(base) > 200:
         stem, ext = os.path.splitext(base)
-        base = stem[: 200 - len(ext)] + ext
+        # The extension is kept (it selects the parser) unless it alone fills
+        # the budget: "a." followed by 300 characters became a 301-character
+        # dotfile, which the checks above exist to refuse (Decision 88).
+        if len(ext) >= 200:
+            stem, ext = base, ""
+        base = (stem[: 200 - len(ext)] + ext).rstrip()
     return base
 
 

@@ -45,6 +45,8 @@ import re
 from dataclasses import dataclass, asdict, field
 from typing import Callable, Iterable
 
+from src.utils.casefold import ascii_lower
+
 # ─── Extraction ────────────────────────────────────────────────────────────────
 
 _SCALE_WORDS = {
@@ -720,8 +722,11 @@ class ContextIndex:
                 continue
             seen_bodies.add(body)
             source = chunk.get("source_file", "") or ""
+            # ascii_lower: "(ın mıllıons)" — "IN MILLIONS" lower-cased under
+            # Turkish rules — matches the case-insensitive hint, and .lower()
+            # alone is no key of SCALE_HINT_WORDS (Decision 88).
             hints = [
-                (m.start(), SCALE_HINT_WORDS[next(g for g in m.groups() if g).lower()])
+                (m.start(), SCALE_HINT_WORDS[ascii_lower(next(g for g in m.groups() if g))])
                 for m in SCALE_HINT_RE.finditer(body)
             ]
             units = _body_units(body)
