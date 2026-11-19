@@ -76,6 +76,19 @@ Two consequences worth stating plainly:
   choice itself adds no search and no rerank pairs: it is Python over the
   retrieved payloads, about 17 ms per legal question on the development laptop
   (two ARM cores not measured). `NAMED_DOCUMENT_FOCUS=0` turns it off.
+- **Re-ingest contract PDFs indexed before Decision 89, then re-run the identity
+  backfill.** A PDF whose text sits inside a ruled box — an exhibit printed from
+  HTML, a document with page borders — was indexed as flattened one-column table
+  cells: no clause boundaries, no parent chunks, out of reading order, and often
+  no title or parties for named-document focus (35 of 232 CUAD contracts, more
+  than half their text). Uploading the same file again re-indexes it in place:
+  its doc_id comes from its bytes, so its old points are replaced, not
+  duplicated. The identity read from PDF text changed too (no-break spaces,
+  lines wrapped after "a", titles centred over several lines), and
+  `python -m src.vector_db.identity_backfill` applies that to every other
+  document without the files; on the 714-file benchmark index it changes the
+  identity of 6 of its 712 distinct documents, each a correction. The backfill
+  cannot repair a boxed PDF's chunks: only re-ingesting it does.
 - **MiniLM is still the best fit for two cores, not the best small reranker.**
   Six Apache-2.0 alternatives were measured on the same emulated host
   (Decision 77). Only `ettin-reranker-68m-v1` beat it on LegalBench-RAG's dev
