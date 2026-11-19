@@ -7,10 +7,12 @@ import {
   FileText,
   FileWarning,
   History,
+  Scale,
   ShieldAlert,
   TriangleAlert,
 } from "lucide-react";
 
+import TieOutPanel from "@/components/TieOutPanel";
 import { prettyFilename } from "@/lib/citations";
 import type { DocumentRecord, RiskSignal, Severity } from "@/lib/types";
 import { signalLabels } from "@/lib/verification";
@@ -18,6 +20,8 @@ import { signalLabels } from "@/lib/verification";
 interface DataRoomPanelProps {
   documents: DocumentRecord[];
   risks: RiskSignal[];
+  /** The deal the figure tie-out is read for; the tab says to pick one without it. */
+  dealId?: string | null;
 }
 
 const SEVERITY_STYLE: Record<Severity, { dot: string; text: string; bg: string }> = {
@@ -151,24 +155,33 @@ function DocumentList({ documents }: { documents: DocumentRecord[] }) {
   );
 }
 
-export default function DataRoomPanel({ documents, risks }: DataRoomPanelProps) {
-  const [tab, setTab] = useState<"documents" | "risk">("documents");
+export default function DataRoomPanel({ documents, risks, dealId = null }: DataRoomPanelProps) {
+  const [tab, setTab] = useState<"documents" | "risk" | "tieout">("documents");
   const highRisk = risks.filter((r) => r.severity === "high").length;
 
-  const tabs = [
+  const tabs: {
+    id: "documents" | "risk" | "tieout";
+    label: string;
+    icon: typeof History;
+    count?: number;
+    alert?: boolean;
+  }[] = [
     {
-      id: "documents" as const,
+      id: "documents",
       label: "Documents",
       icon: History,
       count: documents.length,
     },
     {
-      id: "risk" as const,
+      id: "risk",
       label: "Risk",
       icon: ShieldAlert,
       count: risks.length,
       alert: highRisk > 0,
     },
+    // No count: the report reads the whole deal, so it is fetched only when
+    // this tab is opened.
+    { id: "tieout", label: "Tie-out", icon: Scale },
   ];
 
   return (
@@ -200,9 +213,11 @@ export default function DataRoomPanel({ documents, risks }: DataRoomPanelProps) 
               <span className="relative flex items-center gap-1.5">
                 <Icon size={12} />
                 {t.label}
-                <span className="font-mono text-[0.68rem] tabular-nums opacity-70">
-                  {t.count}
-                </span>
+                {t.count !== undefined && (
+                  <span className="font-mono text-[0.68rem] tabular-nums opacity-70">
+                    {t.count}
+                  </span>
+                )}
                 {t.alert && (
                   <TriangleAlert size={10} className="text-bad" aria-label="high severity present" />
                 )}
@@ -226,8 +241,10 @@ export default function DataRoomPanel({ documents, risks }: DataRoomPanelProps) 
         >
           {tab === "documents" ? (
             <DocumentList documents={documents} />
-          ) : (
+          ) : tab === "risk" ? (
             <RiskList risks={risks} />
+          ) : (
+            <TieOutPanel dealId={dealId} />
           )}
         </motion.div>
       </AnimatePresence>

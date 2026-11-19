@@ -373,6 +373,25 @@ class TestCitations:
 _UNITS = st.sampled_from(["", "(in millions)", "(in mıllıons)", "in thouſands of", "(in thousands)",
                           "USD m", "($ in billions)", "(İN MİLLİONS)"])
 
+# Decision 92: the column headers and header blocks the tie-out reads periods from.
+_HEADER_WORDS = st.one_of(
+    st.sampled_from([
+        "Three Months Ended", "Six Months Ended", "Nine Months Ended", "Twelve Months Ended",
+        "13 Weeks Ended", "Fifty-Three Weeks Ended", "twenty-six weeks", "Year Ended", "Fiscal Year",
+        "Years Ended", "first quarter", "Fourth Quarter", "YTD", "half-year", "July 29,", "December 31,",
+        "Jan. 28", "31 March", "2023", "2022", "2024E", "2023A", "FY2023", "FY'22", "Q4 2023", "LTM", "TTM",
+        "| $ |", "|", "(In millions)", "vs.", "Budget", "Column 3", "Revenue", "$1,263", "(25)", "34.3 | %",
+    ]),
+    st.sampled_from(["Three Months Ended", "July 29,", "Fiscal Year", "Six Months Ended",
+                     "September 30,", "August 31, 2022"]).map(lookalike),
+    domain_text(2),
+)
+_HEADER_LINES = st.lists(_HEADER_WORDS, max_size=10).map("  ".join)
+_PERIOD_KEY = re.compile(
+    r"FY\d{4}E?|FY ending \d{4}-\d{2}|\d{4}-\d{2}-\d{2}|(?:3M|6M|9M|YTD) ending \d{4}-\d{2}-\d{2}"
+    r"|(?:Q[1-4]|H[12])\S*"
+)
+
 
 class TestFigures:
     @given(domain_text())
@@ -405,6 +424,45 @@ class TestFigures:
         label = normalize_metric_label(text)
         assert re.fullmatch(r"(?:[a-z0-9%/&+]+(?: [a-z0-9%/&+]+)*)?", label)
         assert isinstance(normalize_period(text), str)
+
+    @given(_HEADER_LINES, st.lists(_HEADER_LINES, max_size=2))
+    def test_period_keys(self, line, context):
+        from src.utils.numerical_registry import _PERIOD, _header_keys, column_period
+
+        annual, interim = _header_keys(line, context, False), _header_keys(line, context, True)
+        assert len(annual) == len(interim) == len(_PERIOD.findall(line))
+        for key, interim_key in zip(annual, interim):
+            # A key is one of the documented forms, or None for a column that
+            # cannot be compared safely.
+            assert key is None or _PERIOD_KEY.fullmatch(key), key
+            # A 10-Q's reading only withdraws fiscal years: a bare year it
+            # cannot place, or a 31 December that is a balance date there.
+            assert interim_key == key or interim_key is None or (
+                re.fullmatch(r"\d{4}-\d{2}-\d{2}", interim_key) and re.fullmatch(r"FY\d{4}", key or "")
+            ), (key, interim_key)
+        assert column_period(line) is None or len(_PERIOD.findall(line)) == 1
+
+    @given(st.lists(st.fixed_dictionaries({
+        "source_file": st.sampled_from(["a.pdf", "b.pdf", "c.txt"]),
+        "text": st.lists(_HEADER_LINES, min_size=1, max_size=6).map("\n".join),
+        "chunk_index": st.integers(0, 3),
+        "is_table": st.sampled_from([0, 1]),
+        "table_id": st.sampled_from([None, "t1", "t2"]),
+        "filing_form": st.sampled_from([None, "10-K", "10-Q", "earnings_release"]),
+    }), max_size=5))
+    def test_tie_out(self, chunks):
+        registry, read = NumericalRegistry.from_documents(chunks)
+        result = registry.tie_out()
+        assert read == len({c["source_file"] for c in chunks})
+        statuses = [f.status for f in result.figures]
+        assert statuses == sorted(statuses, key=lambda s: s != "conflict")
+        for figure in result.figures:
+            assert figure.status in {"conflict", "agree"} and figure.kind in {"amount", "percent", "multiple"}
+            # One value per document, at least two documents, all of this period.
+            assert len({e.source_file for e in figure.entries}) == len(figure.entries) >= 2
+            assert {e.fiscal_year for e in figure.entries} == {figure.fiscal_year} != {""}
+            assert figure.max_deviation_pct >= 0
+            assert figure.status == "conflict" or figure.max_deviation_pct == 0
 
     @given(st.lists(st.one_of(domain_text(8), _MARKERS), max_size=8).map(" ".join),
            st.lists(st.fixed_dictionaries({"source_file": st.sampled_from(["a.pdf", "b.txt"]),

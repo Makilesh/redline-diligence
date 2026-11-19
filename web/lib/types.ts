@@ -260,6 +260,53 @@ export interface RiskSignal {
   page_number: number | null;
 }
 
+/** One document's statement of a figure (`GET /deals/{id}/tie-out`). */
+export interface TieOutValue {
+  source_file: string;
+  page_number: number | null;
+  section_heading: string;
+  /** The figure as the document prints it. Document text: rendered as text. */
+  as_printed: string;
+  /** Absolute value after unit and scale normalisation. */
+  value: number;
+  /** False when the document states no unit; compared at any power of 1,000. */
+  scale_known: boolean;
+}
+
+/** A labelled figure two or more documents state (Decision 92). */
+export interface TieOutFigure {
+  metric: string;
+  period: string;
+  kind: "amount" | "percent" | "multiple";
+  status: "conflict" | "agree";
+  max_deviation_pct: number;
+  values: TieOutValue[];
+  more_documents: number;
+}
+
+/**
+ * The deal-level figure tie-out: conflicts first, then agreements, then what
+ * was not compared. Deterministic; no model wrote any of it.
+ */
+export interface TieOutReport {
+  deal_id: string;
+  conflicts: TieOutFigure[];
+  agreements: TieOutFigure[];
+  conflicts_total: number;
+  agreements_total: number;
+  single_source_figures: number;
+  ambiguous_figures: number;
+  generic_figures: number;
+  figures_without_period: number;
+  documents_total: number;
+  documents_read: number;
+  documents_not_read: string[];
+  chunks_read: number;
+  truncated: boolean;
+  truncation_reason: string;
+  elapsed_ms: number;
+}
+
 /**
  * An indexed document the upload looks related to. A proposal only: nothing
  * has been superseded, and the UI must not present it as if it had.

@@ -31,6 +31,7 @@ vi.mock("@/lib/api", () => ({
   ]),
   listDocuments: vi.fn(async () => []),
   listRiskSignals: vi.fn(async () => []),
+  getTieOut: vi.fn(async () => null),
   getBudget: vi.fn(async () => null),
   createDeal: vi.fn(),
   ingestDocument: vi.fn(),

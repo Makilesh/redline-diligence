@@ -28,6 +28,9 @@ import type {
   PlannedStage,
   QueryResponse,
   StageEvent,
+  TieOutFigure,
+  TieOutReport,
+  TieOutValue,
   ValidationStatus,
   VersionCandidate,
 } from "./types";
@@ -304,4 +307,91 @@ export function normalizeStageEvent(raw: unknown): StageEvent | null {
 /** Reads a list of strings out of an untyped detail bag. */
 export function stringList(value: unknown): string[] {
   return list(value).filter((v): v is string => typeof v === "string" && v.length > 0);
+}
+
+// The server caps these too (src/reports/tie_out.py); the client does not rely
+// on it, because every one of them is document text.
+export const TIE_OUT_LIMITS = {
+  figures: 200,
+  values: 10,
+  label: 120,
+  printed: 40,
+  source: 200,
+  section: 120,
+  period: 40,
+  documents: 50,
+} as const;
+
+const clip = (v: unknown, limit: number): string => {
+  const flat = str(v).replace(/\s+/g, " ").trim();
+  return flat.length <= limit ? flat : `${flat.slice(0, limit - 1)}…`;
+};
+
+function normalizeTieOutValue(raw: unknown): TieOutValue | null {
+  if (!isBag(raw) || !str(raw.source_file)) return null;
+  return {
+    source_file: clip(raw.source_file, TIE_OUT_LIMITS.source),
+    page_number: numOrNull(raw.page_number),
+    section_heading: clip(raw.section_heading, TIE_OUT_LIMITS.section),
+    as_printed: clip(raw.as_printed, TIE_OUT_LIMITS.printed),
+    value: num(raw.value),
+    scale_known: raw.scale_known !== false,
+  };
+}
+
+function normalizeTieOutFigure(raw: unknown): TieOutFigure | null {
+  if (!isBag(raw) || !str(raw.metric)) return null;
+  // Only an explicit "agree" is an agreement: anything else is shown as the
+  // less favourable reading, a conflict to look at.
+  const status = raw.status === "agree" ? "agree" : "conflict";
+  const values = list(raw.values)
+    .slice(0, TIE_OUT_LIMITS.values)
+    .map(normalizeTieOutValue)
+    .filter((v): v is TieOutValue => v !== null);
+  return {
+    metric: clip(raw.metric, TIE_OUT_LIMITS.label),
+    period: clip(raw.period, TIE_OUT_LIMITS.period),
+    kind: oneOf(raw.kind, ["amount", "percent", "multiple"] as const) ?? "amount",
+    status,
+    max_deviation_pct: num(raw.max_deviation_pct),
+    values,
+    more_documents: num(raw.more_documents),
+  };
+}
+
+/**
+ * Normalises a `GET /deals/{id}/tie-out` report.
+ *
+ * @returns The typed report, or null when the payload is not one (no deal_id).
+ */
+export function normalizeTieOut(raw: unknown): TieOutReport | null {
+  if (!isBag(raw) || typeof raw.deal_id !== "string") return null;
+  const figures = (value: unknown) =>
+    list(value)
+      .slice(0, TIE_OUT_LIMITS.figures)
+      .map(normalizeTieOutFigure)
+      .filter((f): f is TieOutFigure => f !== null);
+  const conflicts = figures(raw.conflicts).map((f) => ({ ...f, status: "conflict" as const }));
+  const agreements = figures(raw.agreements).filter((f) => f.status === "agree");
+  return {
+    deal_id: raw.deal_id,
+    conflicts,
+    agreements,
+    conflicts_total: Math.max(num(raw.conflicts_total), conflicts.length),
+    agreements_total: Math.max(num(raw.agreements_total), agreements.length),
+    single_source_figures: num(raw.single_source_figures),
+    ambiguous_figures: num(raw.ambiguous_figures),
+    generic_figures: num(raw.generic_figures),
+    figures_without_period: num(raw.figures_without_period),
+    documents_total: num(raw.documents_total),
+    documents_read: num(raw.documents_read),
+    documents_not_read: stringList(raw.documents_not_read)
+      .slice(0, TIE_OUT_LIMITS.documents)
+      .map((d) => clip(d, TIE_OUT_LIMITS.source)),
+    chunks_read: num(raw.chunks_read),
+    // A report that does not say it read everything is not taken to have.
+    truncated: raw.truncated !== false,
+    truncation_reason: str(raw.truncation_reason),
+    elapsed_ms: num(raw.elapsed_ms),
+  };
 }

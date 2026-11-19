@@ -11,6 +11,7 @@ This module is a pure HTTP client. It holds no pipeline logic — every decision
 
 import os
 import sys
+import time
 from pathlib import Path
 
 import streamlit as st
@@ -33,6 +34,7 @@ from app.components.verification import result_outcome
 from app.components.citation_viewer import render_citations
 from app.components.agent_trace_viewer import render_agent_trace
 from app.components.risk_dashboard import render_risk_dashboard
+from app.components.tie_out import render_tie_out
 from app.components.version_browser import render_version_browser
 
 # API base URL — docker-compose injects API_URL=http://api:8000 (service DNS name);
@@ -66,6 +68,35 @@ def _get_json(path: str, timeout: int = 10):
     except requests.RequestException:
         return None
     return None
+
+
+# The tie-out report reads the whole data room, and Streamlit reruns this
+# script on every widget interaction, so one fetch per deal is kept a while.
+TIE_OUT_TIMEOUT_S = 45
+TIE_OUT_KEEP_S = 120.0
+
+
+def _tie_out_report(deal_id: str):
+    """
+    The deal's figure tie-out report (Decision 92), fetched at most once per
+    deal every two minutes.
+
+    Args:
+        deal_id: Deal to report on.
+
+    Returns:
+        The parsed report, or None when it could not be fetched (retried on
+        the next rerun).
+    """
+    kept = st.session_state.setdefault("tie_out_reports", {})
+    hit = kept.get(deal_id)
+    now = time.monotonic()
+    if hit and now - hit[0] < TIE_OUT_KEEP_S:
+        return hit[1]
+    report = _get_json(f"/deals/{deal_id}/tie-out", timeout=TIE_OUT_TIMEOUT_S)
+    if report is not None:
+        kept[deal_id] = (now, report)
+    return report
 
 
 def render_budget_panel() -> None:
@@ -227,13 +258,14 @@ def render_results(result: dict, deal_id: str) -> None:
     citations = result.get("citations", [])
     trace = result.get("agent_trace", [])
 
-    tab_answer, tab_cites, tab_trace, tab_risk, tab_versions = st.tabs(
+    tab_answer, tab_cites, tab_trace, tab_risk, tab_versions, tab_tie_out = st.tabs(
         [
             "💬 Answer",
             f"📚 Citations ({len(citations)})",
             f"🧭 Agent Trace ({len(trace)})",
             "🚨 Risk Signals",
             "🗂 Versions",
+            "🧮 Tie-out",
         ]
     )
 
@@ -277,6 +309,9 @@ def render_results(result: dict, deal_id: str) -> None:
 
     with tab_versions:
         render_version_browser(_get_json(f"/deals/{deal_id}/documents") or [])
+
+    with tab_tie_out:
+        render_tie_out(_tie_out_report(deal_id))
 
 
 def main():
