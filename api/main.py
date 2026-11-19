@@ -135,6 +135,38 @@ async def _refresh_sparse_index_status(force: bool = False) -> None:
     runtime_status.set_sparse_index(status)
 
 
+# Ceiling on the startup identity check. It runs as a background task, so this
+# bounds how long it may keep reading, not how long startup waits (it does not).
+_IDENTITY_CHECK_TIMEOUT_SECONDS = 30.0
+_identity_check_task: asyncio.Task | None = None
+
+
+async def _check_identity_index() -> None:
+    """
+    Samples the index for documents the identity backfill would update and
+    records the result in runtime_status (Decision 88). Read-only, bounded,
+    and never the reason startup is slow or fails: it runs beside startup,
+    and any error is logged and recorded as "not read".
+    """
+    try:
+        from src.vector_db.collection_manager import identity_index_status
+        from src.vector_db import qdrant_client as qdrant_module
+
+        status = await asyncio.wait_for(
+            identity_index_status(qdrant_module.get_qdrant_client()),
+            timeout=_IDENTITY_CHECK_TIMEOUT_SECONDS,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.warning(
+            "Could not check the index for documents without identity",
+            extra={"error_type": type(e).__name__},
+        )
+        status = None
+    runtime_status.set_identity_index(status)
+
+
 async def _checkpoint_sweeper_loop() -> None:
     """Sweeps expired checkpoint threads at startup and then on an interval."""
     interval = max(60, int(os.getenv("CHECKPOINT_SWEEP_INTERVAL_SECONDS", "3600")))
@@ -157,7 +189,7 @@ async def lifespan(app: FastAPI):
     """
     Application lifespan handler — startup and shutdown logic.
     """
-    global _app_graph, _checkpoint_sweeper_task
+    global _app_graph, _checkpoint_sweeper_task, _identity_check_task
 
     logger.info("Starting M&A Due Diligence Intelligence Engine")
     runtime_status.set_phase("starting")
@@ -173,6 +205,9 @@ async def lifespan(app: FastAPI):
     await assert_server_compatible(client)
     await setup_collections(client)
     await _refresh_sparse_index_status(force=True)
+    # Documents the identity backfill would update (Decision 86) — beside
+    # startup, not in its way.
+    _identity_check_task = asyncio.create_task(_check_identity_index())
 
     # Initialize budget tracker
     postgres_url = _postgres_url()
@@ -205,13 +240,14 @@ async def lifespan(app: FastAPI):
     logger.info(
         "Shutting down application", extra={"pipelines_in_flight": pipelines_in_flight()}
     )
-    if _checkpoint_sweeper_task is not None:
-        _checkpoint_sweeper_task.cancel()
-        try:
-            await _checkpoint_sweeper_task
-        except asyncio.CancelledError:
-            pass
-        _checkpoint_sweeper_task = None
+    for task in (_checkpoint_sweeper_task, _identity_check_task):
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+    _checkpoint_sweeper_task = _identity_check_task = None
     await stop_sandbox_sweeper()
     await close_checkpointer()
     await close_qdrant_client()
@@ -378,6 +414,7 @@ async def readiness_check(request: Request):
             **content,
             "qdrant": qdrant_module.get_qdrant_backend(),
             "sparse_index": runtime_status.sparse_index(),
+            "document_identity": runtime_status.identity_index(),
             "checkpointer": status["checkpointer"],
             "models": status["models"],
             "degraded": status["degraded"],

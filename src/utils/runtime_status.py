@@ -43,6 +43,8 @@ class _RuntimeStatus:
     degraded: dict[str, str] = field(default_factory=dict)
     # Last sparse_index_status() result; None until read.
     sparse_index: dict | None = None
+    # identity_index_status() result from startup; None until read.
+    identity_index: dict | None = None
 
 
 _status = _RuntimeStatus()
@@ -159,6 +161,35 @@ def set_sparse_index(status: dict | None) -> None:
 
 def sparse_index() -> dict | None:
     return _status.sparse_index
+
+
+def set_identity_index(status: dict | None) -> None:
+    """
+    Records whether sampled documents lack the identity the backfill would give them.
+
+    Such documents are never the named document of a question (Decision 86):
+    a silent loss of the named-document focus, so it is a degraded mode until
+    the backfill has run.
+
+    Args:
+        status: collection_manager.identity_index_status() output, or None
+            when it could not be read.
+    """
+    _status.identity_index = status
+    gain = (status or {}).get("would_gain_identity", 0)
+    if gain:
+        mark_degraded(
+            "identity_backfill_needed",
+            f"{gain} of {status.get('checked')} sampled documents carry no doc_title/doc_parties "
+            "that the identity backfill would add, so questions naming them keep the fused-score "
+            f"document choice. Run `{status.get('command')}` (checked at startup).",
+        )
+    else:
+        clear_degraded("identity_backfill_needed")
+
+
+def identity_index() -> dict | None:
+    return _status.identity_index
 
 
 def describe() -> dict:
