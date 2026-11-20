@@ -33,6 +33,7 @@ from app.components.answer_display import render_answer, render_refusal, render_
 from app.components.verification import result_outcome
 from app.components.citation_viewer import render_citations
 from app.components.agent_trace_viewer import render_agent_trace
+from app.components.checklist import render_checklist
 from app.components.risk_dashboard import render_risk_dashboard
 from app.components.tie_out import render_tie_out
 from app.components.version_browser import render_version_browser
@@ -97,6 +98,49 @@ def _tie_out_report(deal_id: str):
     if report is not None:
         kept[deal_id] = (now, report)
     return report
+
+
+# The checklist grid reranks every contract against every item — a minute or
+# more on the CPU host — so it is built on request, not on every rerun, and a
+# grid is kept a while. The server waits up to 30 s for another grid's build
+# and has a 60 s budget of its own.
+CHECKLIST_TIMEOUT_S = 120
+CHECKLIST_KEEP_S = 600.0
+
+
+def _checklist_report(deal_id: str):
+    """
+    The deal's checklist grid (Decision 95), fetched at most once per deal
+    every ten minutes.
+
+    Args:
+        deal_id: Deal to read.
+
+    Returns:
+        The parsed grid, or None when it could not be fetched (retried on the
+        next rerun).
+    """
+    kept = st.session_state.setdefault("checklist_reports", {})
+    hit = kept.get(deal_id)
+    now = time.monotonic()
+    if hit and now - hit[0] < CHECKLIST_KEEP_S:
+        return hit[1]
+    report = _get_json(f"/deals/{deal_id}/checklist", timeout=CHECKLIST_TIMEOUT_S)
+    if report is not None:
+        kept[deal_id] = (now, report)
+    return report
+
+
+def render_checklist_tab(deal_id: str) -> None:
+    """The checklist tab: a button until the grid is asked for, then the grid."""
+    requested = st.session_state.setdefault("checklist_requested", set())
+    if deal_id not in requested:
+        if not st.button("Check the contracts against the checklist", key="checklist_build"):
+            st.caption("Every contract of the deal against 15 diligence items, each with its evidence "
+                       "passage. Built on request: it reranks the whole deal.")
+            return
+        requested.add(deal_id)
+    render_checklist(_checklist_report(deal_id))
 
 
 def render_budget_panel() -> None:
@@ -258,7 +302,7 @@ def render_results(result: dict, deal_id: str) -> None:
     citations = result.get("citations", [])
     trace = result.get("agent_trace", [])
 
-    tab_answer, tab_cites, tab_trace, tab_risk, tab_versions, tab_tie_out = st.tabs(
+    tab_answer, tab_cites, tab_trace, tab_risk, tab_versions, tab_tie_out, tab_checklist = st.tabs(
         [
             "💬 Answer",
             f"📚 Citations ({len(citations)})",
@@ -266,6 +310,7 @@ def render_results(result: dict, deal_id: str) -> None:
             "🚨 Risk Signals",
             "🗂 Versions",
             "🧮 Tie-out",
+            "🧾 Checklist",
         ]
     )
 
@@ -312,6 +357,9 @@ def render_results(result: dict, deal_id: str) -> None:
 
     with tab_tie_out:
         render_tie_out(_tie_out_report(deal_id))
+
+    with tab_checklist:
+        render_checklist_tab(deal_id)
 
 
 def main():
