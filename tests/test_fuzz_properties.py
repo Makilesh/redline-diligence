@@ -711,8 +711,10 @@ class TestStatementRows:
         # order, none of them a sentence.
         assert len(title) <= 4
         texts = [r.text.strip() for r in rows[floor:index] if len(r.cells) == 1]
-        positions = [texts.index(t) for t in title]
-        assert positions == sorted(positions)
+        # In reading order: the title is a subsequence of those lines (a line may
+        # repeat, so positions are not read with list.index).
+        remaining = iter(texts)
+        assert all(any(t == text for text in remaining) for t in title)
         assert not any(t.endswith((".", ":")) or len(t) > 120 for t in title)
 
     @given(st.lists(_CELL_TEXTS, min_size=1, max_size=4), _CELL_TEXTS)
