@@ -717,7 +717,11 @@ class BudgetTracker:
             for stamp, booked in window:
                 to_free -= booked
                 if to_free <= 0:
-                    wait = stamp + 60.0 - now
+                    # Elapsed time first: now - stamp is exact (two clock
+                    # readings under a minute apart), so the wait cannot exceed
+                    # the window. stamp + 60 rounds at the clock's magnitude and
+                    # came out an ulp over 60 s near a power of two of uptime.
+                    wait = 60.0 - (now - stamp)
                     break
             raise TokenWindowFull(model, tokens, max(wait, MIN_RATE_LIMIT_COOLDOWN_SECONDS))
 
