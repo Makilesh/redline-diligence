@@ -1239,10 +1239,14 @@ class TestFilingSignature:
            st.sampled_from([".", ""]),
            st.sampled_from(["", "Table of Contents", "SIGNATURES", "Index", "Page 112", "112",
                             "Date: February 23, 2018", "By: /s/ A. Person", "The following is the Company's report",
-                            "in the City of Paris.", "Minnesota."]),
+                            "in the City of Paris.", "Minnesota.",
+                            # The follow-up review's Title Case kinds: part headers, titles, the block's words.
+                            "PART IV", "Part II", "Annual Report", "Exhibits and Financial Statement Schedules",
+                            "Chief Executive Officer", "On Behalf Of", "The Board of Directors of", "Signed for",
+                            "Notes to Consolidated Financial Statements"]),
            st.sampled_from(["THE COCA-COLA COMPANY", "3M COMPANY", "AT&T INC.", "J. C. PENNEY COMPANY, INC.",
                             "COCA-COLA FEMSA, S.A.B. DE C.V.", "AMAZON.COM, INC.", "NESTLÉ S.A.", "eBay Inc.",
-                            "Best Buy Co., Inc."]),
+                            "Best Buy Co., Inc.", "Medtronic plc", "e.l.f. Beauty, Inc.", "Mt. Bachelor Inc."]),
            st.sampled_from(["(Registrant)", "(REGISTRANT)"]),
            st.one_of(st.sampled_from(["", "By: /s/ JAMES QUINCEY Date: February 23, 2018"]), domain_text(3)))
     def test_a_signature_name_is_the_printed_name_alone(self, sentence, clause, stop, junk, name, label, tail):

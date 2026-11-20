@@ -182,16 +182,26 @@ _SIGNED = re.compile(
     re.IGNORECASE)
 # What may not sit in a name alone: a running header or heading carried over a
 # page break ("Table of Contents", "SIGNATURES", "Index", "Page").
-_SIGNED_NOT_NAME = re.compile(r"\b(?:table\s+of\s+contents|contents|index|signatures?|page)\b", re.IGNORECASE)
+# Nor a 10-K's part header ("PART IV"), the report's or a schedule's title, or
+# the words of the block itself ("Chief Executive Officer", "On Behalf Of",
+# "the Undersigned"), which Title Case lets through the case rule below.
+_SIGNED_NOT_NAME = re.compile(
+    r"\b(?:table\s+of\s+contents|contents|index|signatures?|page|part\s+[ivx]+|annual\s+report|exhibits?|schedules?"
+    r"|officers?|directors?|behalf|signed|undersigned)\b",
+    re.IGNORECASE)
 # A full stop inside a name follows an initial or a dotted abbreviation ("J. C.
 # PENNEY", "S.A.B. DE C.V.") or a corporate one ("Co.", "Inc."); after any
 # other word it ends a sentence ("Paul, State of Minnesota. 3M COMPANY").
-_NAME_ABBREVIATION = re.compile(r"[A-Za-z](?:\.[A-Za-z])*|co|cos|inc|corp|ltd|bros|mfg|intl|st|no", re.IGNORECASE)
-# Words of a name printed in lower case: connectives, particles and a possessive.
+_NAME_ABBREVIATION = re.compile(r"[A-Za-z](?:\.[A-Za-z])*|co|cos|inc|corp|ltd|bros|mfg|intl|st|mt|ft|no",
+                                re.IGNORECASE)
+# Words of a name printed in lower case: connectives, particles, a possessive,
+# and the legal forms and ".com" registrants print so ("Medtronic plc",
+# "Amazon.com, Inc."). A dotted acronym ("e.l.f. Beauty") is read apart.
 _NAME_LOWER_WORDS = frozenset({
-    "and", "of", "the", "de", "del", "della", "des", "du", "la", "le", "y", "et", "und", "van", "von", "der", "for",
-    "s",
+    "and", "of", "the", "de", "del", "della", "des", "du", "la", "le", "y", "und", "van", "von", "der", "for", "s",
+    "com",
 })
+_DOTTED_ACRONYM = re.compile(r"(?<![^\W\d_])(?:[^\W\d_]\.){2,}")
 _SIGNED_LABEL = re.compile(r"\(\s*Registrant\s*\)", re.IGNORECASE)
 # The label follows the name; it must start this close to the sentence's end.
 _SIGNED_NAME_CHARS = 100
@@ -437,8 +447,8 @@ def _is_name_alone(name: str) -> bool:
         return False
     if any(not _NAME_ABBREVIATION.fullmatch(m.group(1)) for m in re.finditer(r"([^\s.]+(?:\.[^\s.]+)*)\.\s", name)):
         return False
-    return all(any(c.isupper() for c in word) or word.lower() in _NAME_LOWER_WORDS
-               for word in re.findall(r"[^\W\d_]+", name))
+    return all(any(c.isupper() for c in word) or word.lower() in _NAME_LOWER_WORDS or word.lower() in _NAME_STOPWORDS
+               for word in re.findall(r"[^\W\d_]+", _DOTTED_ACRONYM.sub(" ", name)))
 
 
 def _quarter_of_10q(text: str, end: date) -> int | None:
