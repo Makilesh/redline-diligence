@@ -1382,9 +1382,7 @@ async def index_document(
                 )
         raise
 
-    # Remove points this document no longer produces: on a re-index, and on a
-    # first ingest that finds parents an earlier failed rollback left behind.
-    if existing.count or leftover_parents:
+    async def delete_stale() -> None:
         for name, points in (
             (collection_name, child_points),
             (parent_collection_name, parent_points),
@@ -1394,6 +1392,17 @@ async def index_document(
                 points_selector=_doc_filter(deal_id, doc.doc_id, [p.id for p in points]),
                 wait=True,
             )
+
+    # Remove points this document no longer produces (only relevant on re-index).
+    if existing.count:
+        await delete_stale()
+    elif leftover_parents:
+        # A first ingest that finds parents an earlier failed rollback left
+        # behind. The document is already whole and searchable, so failing to
+        # remove them must not turn the upload into an error with no registry
+        # or audit entry: optional (Decision 88), and a parent no child names
+        # is reported as orphan_parent by reingest_report.
+        await fail_open_async("leftover_parent_delete", delete_stale, default=None)
 
     result = {
         "doc_id": doc.doc_id,

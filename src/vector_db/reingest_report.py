@@ -19,6 +19,11 @@ says what each needs:
                        BM25 encoding is old, or its points do not form one
                        document (a re-index cut short: two stamps, children
                        their parent does not hold, parents nothing points to)
+    operator           left to a person, never to the driver: its points
+                       disagree on its version state (some retired, some
+                       current), its name, category or supersedes link, or
+                       it has parents and no child; the row lists the values
+    identity_failed    the identity extractor raised on it
     backfill_identity  `python -m src.vector_db.identity_backfill` would change
                        its doc_title / doc_parties
     nothing
@@ -59,7 +64,15 @@ CHILD_FIELDS = [
 PARENT_FIELDS = ["deal_id", "doc_id", "chunk_id", "child_chunk_ids", "ingest_version", "is_current_version",
                  "superseded_by"]
 
-ACTIONS = ("reingest", "backfill_identity", "nothing")
+ACTIONS = ("reingest", "operator", "identity_failed", "backfill_identity", "nothing")
+
+# Per document, fields every child of one upload carries with one value.
+DOCUMENT_FIELDS = ("source_file", "document_category", "supersedes_doc_id")
+
+# Problems the driver must not resolve by guessing: which version state, name,
+# category or supersedes link is right, or whether a document that has no
+# child left should exist at all, is an operator's call (action "operator").
+OPERATOR_PROBLEMS = ("mixed_version_state", "mixed_document_fields", "orphan_parents_only")
 
 
 @dataclass
@@ -145,11 +158,21 @@ def document_problems(doc: DocumentPoints) -> list[str]:
 
     problems: set[str] = set()
     points = doc.children + doc.parents
+    if doc.parents and not doc.children:
+        # Parents with no child: a first upload whose rollback could not
+        # delete them. Nothing of it is searchable; whether it should exist
+        # is not the file's to say.
+        problems.add("orphan_parents_only")
     if len({_stamp(p) for _, p in points}) > 1:
         problems.add("mixed_stamps")
     if len({int(p.get("is_current_version", 1) or 0) for _, p in points}) > 1 \
             or len({p.get("superseded_by") or "" for _, p in points}) > 1:
         problems.add("mixed_version_state")
+    # What one upload writes on every child: two values mean two uploads under
+    # one doc_id, cut short (the same bytes re-uploaded under another name,
+    # category override or supersedes link).
+    if any(len({p.get(f) or "" for _, p in doc.children}) > 1 for f in DOCUMENT_FIELDS):
+        problems.add("mixed_document_fields")
 
     children: dict[str, dict] = {}
     for point_id, payload in doc.children:
@@ -191,15 +214,23 @@ def document_problems(doc: DocumentPoints) -> list[str]:
     return sorted(problems)
 
 
-def plan_document(doc: DocumentPoints, identity: dict | None, identity_unchanged: bool | None) -> dict:
+def plan_document(doc: DocumentPoints, identity: dict | None, identity_unchanged: bool | None,
+                  identity_failed: bool = False) -> dict:
     """
     What one document needs, and why.
+
+    `operator` (before anything else): a problem the driver must not resolve
+    by guessing (OPERATOR_PROBLEMS); the row lists the values in conflict.
+    `identity_failed`: nothing else to do, but the identity extractor raised
+    on the document, so the backfill would leave it as it is (as it counts it,
+    "failed") — a bug to look at, not "nothing".
 
     Args:
         doc: Its points.
         identity: The identity the backfill would write (None: not computed,
             or the extractor raised).
         identity_unchanged: Whether its points already carry exactly that.
+        identity_failed: The extractor raised on this document's opening.
 
     Returns:
         The document's row of the report.
@@ -226,13 +257,31 @@ def plan_document(doc: DocumentPoints, identity: dict | None, identity_unchanged
             else f"stamped {min(stamps)}"
         reasons.append(f"{file_type} extraction changed at ingest_version {since}; {written}")
 
-    if reasons:
+    for_operator = [p for p in problems if p in OPERATOR_PROBLEMS]
+    if for_operator:
+        action = "operator"
+        reasons.insert(0, "for an operator, not the driver: " + ", ".join(for_operator))
+    elif reasons:
         action = "reingest"
+    elif identity_failed:
+        action = "identity_failed"
+        reasons.append("the identity extractor raised on this document (the backfill counts it failed)")
     elif identity is not None and identity_unchanged is False:
         action = "backfill_identity"
         reasons.append("the identity backfill would change doc_title / doc_parties")
     else:
         action = "nothing"
+
+    conflicts = {}
+    if "mixed_version_state" in problems:
+        conflicts["superseded_by"] = sorted({p.get("superseded_by") or "" for _, p in doc.children + doc.parents})
+        conflicts["is_current_version"] = sorted({int(p.get("is_current_version", 1) or 0)
+                                                  for _, p in doc.children + doc.parents})
+    if "mixed_document_fields" in problems:
+        for f in DOCUMENT_FIELDS:
+            values = sorted({p.get(f) or "" for p in child_payloads})
+            if len(values) > 1:
+                conflicts[f] = values
 
     return {
         "deal_id": doc.deal_id,
@@ -253,8 +302,10 @@ def plan_document(doc: DocumentPoints, identity: dict | None, identity_unchanged
             "doc_title": any(p.get("doc_title") for p in child_payloads),
             "doc_parties": any(p.get("doc_parties") for p in child_payloads),
             "backfill_changes": None if identity is None or identity_unchanged is None else not identity_unchanged,
+            "failed": identity_failed,
         },
         "problems": problems,
+        "conflicts": conflicts,
         "action": action,
         "reasons": reasons,
     }
@@ -360,7 +411,8 @@ async def build_report(
             doc = docs[key]
             identity = plan.identity(key) if key in plan.point_ids else None
             unchanged = plan.unchanged(key, identity) if identity is not None else None
-            out.append(plan_document(doc, identity, unchanged))
+            failed = key in plan.point_ids and identity is None
+            out.append(plan_document(doc, identity, unchanged, identity_failed=failed))
         return out
 
     # The identity extractor is regex work over each opening: off the event loop.
@@ -403,6 +455,7 @@ def _totals(rows: list[dict], with_files: bool) -> dict:
             {"file_type": t, "ingest_version": json.loads(s), "identity": i, "action": a, "documents": n}
             for (t, s, i, a), n in sorted(groups.items())],
         "inconsistent": sum(1 for r in rows if r["problems"]),
+        "identity_failed": sum(1 for r in rows if r["identity"].get("failed")),
     }
     if with_files:
         totals["reingest_without_file"] = sum(1 for r in rows if r["action"] == "reingest" and not r.get("file"))
@@ -412,7 +465,9 @@ def _totals(rows: list[dict], with_files: bool) -> dict:
 def _identity_state(identity: dict) -> str:
     has = "title+parties" if identity["doc_title"] and identity["doc_parties"] else \
         "title" if identity["doc_title"] else "parties" if identity["doc_parties"] else "none"
-    if identity["backfill_changes"]:
+    if identity.get("failed"):
+        has += ", extractor failed"
+    elif identity["backfill_changes"]:
         has += ", backfill changes it"
     return has
 
@@ -437,6 +492,8 @@ def format_report(report: dict) -> str:
                 file_note = "" if "file" not in row else f"  file: {row['file'] or 'NOT PROVIDED'}"
                 lines.append(f"    {row['action']:<17} {row['source_file']} ({row['doc_id']}): "
                              f"{'; '.join(row['reasons'])}{file_note}")
+                for field_name, values in row.get("conflicts", {}).items():
+                    lines.append(f"        {field_name}: {json.dumps(values, ensure_ascii=True)}")
     if "files" in report:
         files = report["files"]
         lines.append(f"\nfiles under {files['directory']}: {files['matched']} matched to a document, "

@@ -20,8 +20,15 @@ reported. A run that fails or leaves the document inconsistent is repeated
 the rest, whatever an interrupted one left. A file the pipeline refuses
 (IngestionError) is not retried.
 
+The file is copied first, and its copy's bytes must still be the document's
+(compute_doc_id(deal, sha256) == doc_id): a file edited after the report is
+refused at once, never indexed as a second, current document beside the old.
+
 Nothing else is written: documents the report does not mark for re-ingestion,
-or whose file is not given, are left as they are and listed. Each attempt is
+or whose file is not given, are left as they are and listed. Documents the
+report leaves to an operator (version state, name, category or supersedes
+link in conflict across their points, or parents with no child) are listed
+with the values in conflict and never indexed: guessing would choose a state. Each attempt is
 one JSON line in --log, and each document one `document_reingested` audit
 event. Afterwards run the identity backfill, then the report again.
 """
@@ -31,7 +38,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -43,6 +52,8 @@ from src.utils import audit_log
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
+
+FILE_CHANGED = "file changed since the report: its bytes are no longer this document's"
 
 
 def plan_reingest(report: dict, types: set[str] | None = None) -> tuple[list[dict], list[dict]]:
@@ -112,14 +123,8 @@ async def reingest_document(
         {"deal_id", "doc_id", "source_file", "ok", "attempts", "problems", "error",
          "chunks_before", "chunks_after", "parents_before", "parents_after", "seconds"}
     """
-    from src.data_processing.errors import IngestionError
-    from src.data_processing.ingest_pipeline import index_document, sanitize_filename
+    from src.data_processing.ingest_pipeline import compute_content_hash, compute_doc_id
 
-    # A document whose children are all gone (parents a failed rollback left)
-    # has no name or version flag in the index: it takes its file's name, and
-    # is current, as a new upload would be.
-    filename = row["source_file"] or sanitize_filename(Path(row["file"]).name)
-    is_current = True if row["is_current_version"] is None else bool(row["is_current_version"])
     outcome = {
         "deal_id": row["deal_id"], "doc_id": row["doc_id"], "source_file": row["source_file"],
         "file": row["file"], "ok": False, "attempts": 0, "problems": [], "error": None,
@@ -128,15 +133,56 @@ async def reingest_document(
         "chunks_after": None, "parents_after": None, "seconds": 0.0,
     }
     started = time.perf_counter()
+    # The file is indexed from a private copy whose bytes are checked against
+    # the document first. A file edited after the report would otherwise be
+    # indexed as a new, current document beside the old one (doc_id comes from
+    # the bytes), and each retry would repeat it.
+    workdir = tempfile.mkdtemp(prefix="reingest_")
+    try:
+        copy = Path(workdir) / f"original{Path(row['file']).suffix}"
+        shutil.copyfile(row["file"], copy)
+        if compute_doc_id(row["deal_id"], compute_content_hash(str(copy))) != row["doc_id"]:
+            outcome.update(error=FILE_CHANGED, seconds=round(time.perf_counter() - started, 2))
+            if log is not None:
+                log.write(json.dumps({**outcome, "attempt": 0}, ensure_ascii=False) + "\n")
+                log.flush()
+        else:
+            await _attempts(client, row, str(copy), outcome, started, retries=retries, reclassify=reclassify,
+                            collection_name=collection_name, parent_collection_name=parent_collection_name,
+                            embed_fn=embed_fn, sparse_fn=sparse_fn, backoff_s=backoff_s, log=log)
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+    if not outcome["ok"]:
+        logger.error("Re-ingest did not complete the document",
+                     extra={"doc_id": row["doc_id"], "attempts": outcome["attempts"], "error": outcome["error"],
+                            "problems": outcome["problems"]})
+    audit_log.record(
+        "document_reingested",
+        deal_id=row["deal_id"], doc_id=row["doc_id"], file_name=row["source_file"],
+        ok=outcome["ok"], attempts=outcome["attempts"], error=outcome["error"], problems=outcome["problems"],
+        chunks_before=outcome["chunks_before"], chunks_after=outcome["chunks_after"],
+        parents_before=outcome["parents_before"], parents_after=outcome["parents_after"],
+        ingest_version_before=outcome["ingest_version_before"],
+    )
+    return outcome
+
+
+async def _attempts(client, row: dict, path: str, outcome: dict, started: float, *, retries: int,
+                    reclassify: bool, collection_name: str, parent_collection_name: str, embed_fn, sparse_fn,
+                    backoff_s: float, log) -> None:
+    """index_document, read back, verify; repeated until whole or out of attempts. Fills `outcome`."""
+    from src.data_processing.errors import IngestionError
+    from src.data_processing.ingest_pipeline import index_document
+
     for attempt in range(1, retries + 2):
         outcome["attempts"] = attempt
         t0 = time.perf_counter()
         result, error, final = None, None, False
         try:
             result = await index_document(
-                row["file"], filename, row["deal_id"],
+                path, row["source_file"], row["deal_id"],
                 None if reclassify else row["document_category"],
-                is_current_version=is_current,
+                is_current_version=bool(row["is_current_version"]),
                 supersedes_doc_id=row["supersedes_doc_id"] or None,
                 client=client, collection_name=collection_name,
                 parent_collection_name=parent_collection_name,
@@ -148,6 +194,9 @@ async def reingest_document(
             error, final = f"{type(e).__name__}: {e}", True
         except Exception as e:  # noqa: BLE001 — a store or model fault: verify, then retry
             error = f"{type(e).__name__}: {e}"
+        if result is not None and result["doc_id"] != row["doc_id"]:
+            # The checked copy makes this impossible; if it happens, stop.
+            error, final = f"indexed as {result['doc_id']}, not {row['doc_id']}", True
         try:
             problems = await _verify(client, row, result, collection_name, parent_collection_name) \
                 if not final else []
@@ -169,19 +218,6 @@ async def reingest_document(
                            extra={"doc_id": row["doc_id"], "attempt": attempt, "error": error,
                                   "problems": problems})
             await asyncio.sleep(backoff_s * 2 ** (attempt - 1))
-    if not outcome["ok"]:
-        logger.error("Re-ingest did not complete the document",
-                     extra={"doc_id": row["doc_id"], "attempts": outcome["attempts"], "error": outcome["error"],
-                            "problems": outcome["problems"]})
-    audit_log.record(
-        "document_reingested",
-        deal_id=row["deal_id"], doc_id=row["doc_id"], file_name=row["source_file"],
-        ok=outcome["ok"], attempts=outcome["attempts"], error=outcome["error"], problems=outcome["problems"],
-        chunks_before=outcome["chunks_before"], chunks_after=outcome["chunks_after"],
-        parents_before=outcome["parents_before"], parents_after=outcome["parents_after"],
-        ingest_version_before=outcome["ingest_version_before"],
-    )
-    return outcome
 
 
 async def run(
@@ -209,9 +245,15 @@ async def run(
     report = await build_report(client, deal_id=deal_id, files=files, collection_name=collection_name,
                                 parent_collection_name=parent_collection_name)
     todo, missing = plan_reingest(report, types)
+    rows = [r for deal in report["deals"].values() for r in deal["documents"]]
     summary = {
         "planned": len(todo),
         "without_file": [{k: r[k] for k in ("deal_id", "doc_id", "source_file", "file_type")} for r in missing],
+        # Never indexed by the driver: which state is right is a person's call.
+        "for_operator": [{k: r[k] for k in ("deal_id", "doc_id", "source_file", "problems", "conflicts")}
+                         for r in rows if r["action"] == "operator"],
+        "identity_failed": [{k: r[k] for k in ("deal_id", "doc_id", "source_file")}
+                            for r in rows if r["action"] == "identity_failed"],
         "files_not_indexed": report["files"]["not_indexed"],
         "dry_run": dry_run,
         "documents": [],
@@ -268,6 +310,9 @@ def main(argv=None) -> int:
         for row in summary["documents"]:
             print(f"would re-ingest {row['source_file']} ({row['deal_id']}/{row['doc_id']}) from {row['file']}: "
                   f"{'; '.join(row['reasons'])}")
+    for row in summary["for_operator"]:
+        print(f"left for an operator: {row['source_file']} ({row['deal_id']}/{row['doc_id']}): "
+              f"{', '.join(row['problems'])} {json.dumps(row['conflicts'], ensure_ascii=True)}")
     return 1 if summary.get("failed") else 0
 
 

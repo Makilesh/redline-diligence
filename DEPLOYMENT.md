@@ -520,8 +520,9 @@ done
 ```
 
 Check: both `.snapshot` files exist with the sizes printed, and
-`qdrant-backup/*.json` records each collection's point count. The snapshot
-files live outside the Qdrant container, whose own snapshot directory
+`qdrant-backup/*.json` records each collection's point count and the
+snapshot's sha256 (`checksum`), which the rollback passes back to Qdrant. The
+snapshot files live outside the Qdrant container, whose own snapshot directory
 (`/qdrant/snapshots`) is not on a volume.
 
 Local mode (`QDRANT_MODE=local`): stop the API, then copy the store folder,
@@ -537,14 +538,23 @@ $C run --rm --no-deps -v "$ORIG:/originals:ro" -v "$PWD/qdrant-backup:/backup" a
 
 For every document: its file type, the `ingest_version` stamp its points
 carry (0: indexed before this decision), its identity, whether its points
-form one consistent document, and its action — `reingest`, `backfill_identity`
-or `nothing` — with the file found for it. A PDF without a stamp is marked
-`reingest`: which code wrote it cannot be told, and Decisions 89 and 93 both
-changed PDF extraction. Other formats are unchanged since before the stamp.
-Check: the documents marked `reingest` are the PDFs you expect, and
-`to re-ingest with no file` is 0 — or each document listed there is one you
-accept leaving as it is (it keeps working, on the old extraction). Decide
-which deals to run; `--deal <id>` limits every command below.
+form one consistent document, and its action — `reingest`, `operator`,
+`identity_failed`, `backfill_identity` or `nothing` — with the file found for
+it. A PDF without a stamp is marked `reingest`: which code wrote it cannot be
+told, and Decisions 89 and 93 both changed PDF extraction. Other formats are
+unchanged since before the stamp. `operator` is a document the driver will
+not touch because fixing it means choosing a state: its points disagree on
+whether it is retired (some carry `superseded_by`, some do not), or on its
+name, category or supersedes link (an interrupted re-upload), or it has
+parents and no child (a failed first upload, nothing of it searchable). The
+row lists the values in conflict. `identity_failed` is a document the
+identity extractor raises on: a bug to report, not an action. Check: the
+documents marked `reingest` are the PDFs you expect; `to re-ingest with no
+file` is 0, or each document listed there is one you accept leaving as it is
+(it keeps working, on the old extraction); and every `operator` document is
+resolved by hand — re-upload it with the state you choose, mark it
+superseded, or purge it — before phase 2, or knowingly left. Decide which
+deals to run; `--deal <id>` limits every command below.
 
 ### Phase 2 · Re-ingest
 
@@ -558,13 +568,17 @@ $C run --rm --no-deps -v "$ORIG:/originals:ro" -v "$PWD/qdrant-backup:/backup" a
 Each marked document is indexed again by `index_document` — the function
 `POST /ingest` calls — under the name, category, version flag and
 `supersedes` link the index holds for it (`--reclassify` lets the classifier
-choose the category instead, as a new upload does). It is then read back: all
+choose the category instead, as a new upload does). Its file is copied first,
+and the copy's bytes must still be that document's: a file edited since the
+report is refused at once ("file changed since the report") and never
+indexed beside the old one. The document is then read back: all
 its points must carry the current stamp, its children and parents must link,
 and the counts must be the run's. A document that fails or comes back
 inconsistent is indexed again (`--retries`, default 2): a complete run
 replaces every point of it, whatever an interrupted one left. Each document
 is a `document_reingested` event in the audit log. Check: the command exits
-0, its summary shows `"failed": []`, and `done` equals `planned`.
+0, its summary shows `"failed": []`, `done` equals `planned`, and
+`for_operator` holds only the documents you chose to leave in phase 1.
 
 ### Phase 3 · Identity backfill
 
@@ -587,6 +601,7 @@ differently (6 of 712 documents on the LegalBench-RAG index, Decision 89).
 $C run --rm --no-deps -v "$PWD/qdrant-backup:/backup" api \
   python -m src.vector_db.reingest_report --json /backup/report-after.json
 $C up -d api
+export ADMIN_API_KEY=$(grep ^ADMIN_API_KEY .env | cut -d= -f2-)   # as in step 7
 curl -H "X-Admin-Key: $ADMIN_API_KEY" https://<name>.duckdns.org/ready
 ```
 
@@ -599,25 +614,36 @@ gives), because Decision 93's headers give more figures a period.
 
 ### Rollback (from any phase)
 
-Server — stop the API, then put both collections back exactly as
-snapshotted (the collection is deleted first, so that nothing written since
-survives; the snapshot is on the host, so deleting loses nothing):
+Server — stop the API, then upload each snapshot over its collection with
+`priority=snapshot` (the snapshot's data wins; the collection is created if
+it is missing) and the sha256 phase 0 saved, so that a damaged file is
+refused before anything is replaced. Nothing is deleted first: a failed
+upload leaves the collection as it was, not empty. The API starts again only
+when both collections hold the snapshot's point count; otherwise it stays
+stopped and the block says why:
 
 ```bash
 $C stop api
-for c in manda_due_diligence manda_parent_chunks; do
-  $C run --rm --no-deps -v "$PWD/qdrant-backup:/backup:ro" api sh -c "
-    curl -fsS -X DELETE http://qdrant:6333/collections/$c &&
-    curl -fsS -X POST 'http://qdrant:6333/collections/$c/snapshots/upload?priority=snapshot' \
-         -F snapshot=@/backup/$c.snapshot &&
-    curl -fsS http://qdrant:6333/collections/$c"
-done
-$C up -d api
+(
+  set -e
+  for c in manda_due_diligence manda_parent_chunks; do
+    sum=$(python3 -c "import json; print(json.load(open('qdrant-backup/$c.json'))['checksum'])")
+    $C run --rm --no-deps -v "$PWD/qdrant-backup:/backup:ro" api curl -fsS -X POST \
+      "http://qdrant:6333/collections/$c/snapshots/upload?priority=snapshot&checksum=$sum" \
+      -F "snapshot=@/backup/$c.snapshot"
+  done
+  for c in manda_due_diligence manda_parent_chunks; do
+    want=$(python3 -c "import json; print(json.load(open('qdrant-backup/$c.json'))['points_count'])")
+    got=$($C run --rm --no-deps -T api python -c "import json, urllib.request; print(json.load(urllib.request.urlopen('http://qdrant:6333/collections/$c'))['result']['points_count'])")
+    [ "$got" = "$want" ] || { echo "$c holds $got points, the snapshot $want: the API stays stopped"; exit 1; }
+  done
+) && $C up -d api
 ```
 
-Check: each collection's `points_count` equals the one in
-`qdrant-backup/<collection>.json`, and the report (with the same `--files`)
-equals `report-before.json`. Restore onto the same Qdrant minor version (a snapshot
+Check: the block ends by starting the API (otherwise investigate before
+anything else; the snapshot files are untouched), and the report (with the
+same `--files`) equals `report-before.json`, which also shows that no point
+the re-ingest added survived the restore. Restore onto the same Qdrant minor version (a snapshot
 moves at most one minor version). Before phase 2, you can rehearse the
 restore without touching the live collections by uploading each snapshot to a
 new name (`.../collections/<collection>_restore_check/snapshots/upload?priority=snapshot`),

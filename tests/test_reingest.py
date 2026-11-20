@@ -86,6 +86,21 @@ class TestInterruptedReindex:
         assert {"child_not_held_by_parent", "parent_holds_other_children"} & set(row["problems"])
 
     @pytest.mark.asyncio
+    async def test_a_reupload_under_another_name_cut_short_is_left_for_an_operator(self, monkeypatch, tmp_path):
+        """Review S3: same bytes and stamp, new name and category; one doc_id, two names. Not "nothing"."""
+        monkeypatch.setattr(ip, "QDRANT_BATCH_SIZE", 5)
+        path = rd.write_supply_agreement(tmp_path)
+        client = await rd.new_client()
+        first = await rd.index(client, path, "Supply v1.txt")
+        rd.fail_child_batch(client, 2)
+        with pytest.raises(ConnectionError):
+            await rd.index(client, path, "Master Supply Agreement (executed).txt", category="financial")
+        rd.heal(client)
+        row = await _row(client, first["doc_id"])
+        assert row["action"] == "operator" and "mixed_document_fields" in row["problems"]
+        assert row["conflicts"]["source_file"] == ["Master Supply Agreement (executed).txt", "Supply v1.txt"]
+
+    @pytest.mark.asyncio
     async def test_with_the_chunking_unchanged_a_reindex_cut_short_needs_nothing(self, monkeypatch, tmp_path):
         monkeypatch.setattr(ip, "QDRANT_BATCH_SIZE", 5)
         path = rd.write_supply_agreement(tmp_path)
@@ -132,6 +147,10 @@ class TestConsistency:
                                                                "child_chunk_ids": []})), "orphan_parent"),
         (lambda c, p: c.append((ip.point_id_for("d_x_0001b"), {**c[1][1]})), "duplicate_chunk_id"),
         (lambda c, p: c[1][1].update(chunk_index=5), "foreign_point_id"),
+        (lambda c, p: c[1][1].update(source_file="renamed.txt"), "mixed_document_fields"),
+        (lambda c, p: c[1][1].update(document_category="legal"), "mixed_document_fields"),
+        (lambda c, p: c[1][1].update(supersedes_doc_id="d-older"), "mixed_document_fields"),
+        (lambda c, p: c.clear(), "orphan_parents_only"),
     ])
     def test_each_broken_invariant_is_named(self, mutate, problem):
         children = _state(["0000", "0001"], parent_chunk_id="d_x_p0000", ingest_version=1, is_current_version=1)
@@ -176,8 +195,8 @@ class TestReport:
         assert rows[current_pdf["doc_id"]]["action"] == "nothing"   # stamped by the current code
         assert rows[stale["doc_id"]]["action"] == "reingest"
         assert "BM25 encoding" in rows[stale["doc_id"]]["reasons"][0]
-        assert report["deals"][DEAL]["totals"]["by_action"] == {"reingest": 2, "backfill_identity": 0,
-                                                                "nothing": 1}
+        assert report["deals"][DEAL]["totals"]["by_action"] == {"reingest": 2, "operator": 0, "identity_failed": 0,
+                                                                "backfill_identity": 0, "nothing": 1}
         scoped = await reingest_report.build_report(client, deal_id="other-deal")
         assert list(scoped["deals"]) == ["other-deal"]
 
@@ -189,6 +208,24 @@ class TestReport:
                                  points=Filter(must=[FieldCondition(key="deal_id", match=MatchValue(value=DEAL))]))
         row = await _row(client, doc["doc_id"])
         assert row["action"] == "backfill_identity" and row["identity"]["backfill_changes"] is True
+
+    @pytest.mark.asyncio
+    async def test_an_identity_the_extractor_cannot_read_is_counted_failed(self, monkeypatch, tmp_path):
+        """Not "nothing": the backfill would count it failed and leave it."""
+        import src.vector_db.identity_backfill as bf
+
+        monkeypatch.setenv("STRICT_OPTIONAL_STEPS", "0")
+        client = await rd.new_client()
+        doc = await rd.index(client, rd.write_supply_agreement(tmp_path))
+
+        def crash(payloads):
+            raise KeyError("spa")
+
+        monkeypatch.setattr(bf, "extract_document_identity", crash)
+        report = await reingest_report.build_report(client)
+        (row,) = report["deals"][DEAL]["documents"]
+        assert row["doc_id"] == doc["doc_id"] and row["action"] == "identity_failed"
+        assert row["identity"]["failed"] and report["deals"][DEAL]["totals"]["identity_failed"] == 1
 
     @pytest.mark.asyncio
     async def test_the_report_writes_nothing(self, tmp_path):
@@ -389,21 +426,91 @@ class TestDriver:
         assert outcome["ok"] and outcome["attempts"] == 2 and outcome["doc_id"] == doc["doc_id"]
 
     @pytest.mark.asyncio
-    async def test_a_document_left_with_parents_only_is_rebuilt_from_its_file(self, monkeypatch, tmp_path):
-        """The report marks it (no child, orphan parents); the driver indexes it under its file's name."""
+    async def test_a_document_left_with_parents_only_is_left_for_an_operator(self, monkeypatch, tmp_path):
+        """A failed first upload's parents: nothing is searchable, and the driver must not resurrect it."""
         path = rd.write_supply_agreement(tmp_path)
-        fresh_children, fresh_parents = await rd.fresh(path)
         client = await rd.new_client()
         doc = await rd.old_index(monkeypatch, client, path)
         await client.delete(COLLECTION_NAME, points_selector=Filter(must=[
             FieldCondition(key="doc_id", match=MatchValue(value=doc["doc_id"]))]))
         row = await _row(client, doc["doc_id"])
-        assert row["action"] == "reingest" and "orphan_parent" in row["problems"] and row["source_file"] is None
+        assert row["action"] == "operator" and "orphan_parents_only" in row["problems"]
+        before = await rd.points(client, PARENT_COLLECTION_NAME)
 
         summary = await _run(client, tmp_path)
-        assert summary["done"] == 1
-        assert rd.same(await rd.points(client), fresh_children)
-        assert rd.same(await rd.points(client, PARENT_COLLECTION_NAME), fresh_parents)
+        assert summary["planned"] == 0 and [d["doc_id"] for d in summary["for_operator"]] == [doc["doc_id"]]
+        assert await rd.points(client) == {}
+        assert await rd.points(client, PARENT_COLLECTION_NAME) == before
+
+    @pytest.mark.asyncio
+    async def test_a_file_edited_after_the_report_is_refused_not_indexed_beside_it(self, monkeypatch, tmp_path):
+        """Review S5: its bytes are another document now; nothing is written and nothing retried."""
+        monkeypatch.setattr(ip, "CURRENT_SINCE", {"txt": 1})
+        path = fx.write_txt(tmp_path, "memo.txt")
+        client = await rd.new_client()
+        doc = await rd.index(client, path)
+        await rd.strip_stamp(client)
+        before = await rd.points(client)
+        real = reingest_run.build_report
+
+        async def report_then_edit(*args, **kwargs):
+            report = await real(*args, **kwargs)
+            path.write_text(fx.SAMPLE_TXT + "\nEdited after the report.\n", encoding="utf-8")
+            return report
+
+        monkeypatch.setattr(reingest_run, "build_report", report_then_edit)
+        summary = await _run(client, tmp_path)
+        (failed,) = summary["failed"]
+        assert failed["doc_id"] == doc["doc_id"] and failed["attempts"] == 0
+        assert failed["error"] == reingest_run.FILE_CHANGED
+        assert await rd.points(client) == before  # no second document, no write
+
+    @pytest.mark.asyncio
+    async def test_a_retired_document_stays_retired(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(ip, "CURRENT_SINCE", {"txt": 1})
+        client = await rd.new_client()
+        old = await rd.index(client, fx.write_txt(tmp_path, "a.txt"))
+        new = await rd.index(client, fx.write_txt(tmp_path, "b.txt", fx.SAMPLE_TXT + "\nAmended.\n"),
+                             supersedes_doc_id=old["doc_id"])
+        assert (await ip.mark_superseded(DEAL, old["doc_id"], new["doc_id"], client=client))["ok"]
+        await rd.strip_stamp(client)
+
+        summary = await _run(client, tmp_path)
+        assert summary["done"] == 2 and summary["for_operator"] == []
+        rows = {r["doc_id"]: r for r in (await reingest_report.build_report(client))["deals"][DEAL]["documents"]}
+        assert (rows[old["doc_id"]]["is_current_version"], rows[old["doc_id"]]["superseded_by"]) == (0, new["doc_id"])
+        assert (rows[new["doc_id"]]["is_current_version"], rows[new["doc_id"]]["supersedes_doc_id"]) == \
+            (1, old["doc_id"])
+        for collection in (COLLECTION_NAME, PARENT_COLLECTION_NAME):
+            states = {(p["is_current_version"], p.get("superseded_by") or "")
+                      for p, _ in (await rd.points(client, collection)).values() if p["doc_id"] == old["doc_id"]}
+            assert states == {(0, new["doc_id"])}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("lowest_id_retired", [False, True])
+    async def test_a_mixed_version_state_is_left_for_an_operator(self, monkeypatch, tmp_path, lowest_id_retired):
+        """Review S4: some children retired, some current; the outcome must not hang on which id is lowest."""
+        monkeypatch.setattr(ip, "CURRENT_SINCE", {"txt": 1})
+        client = await rd.new_client()
+        old = await rd.index(client, fx.write_txt(tmp_path, "a.txt"))
+        new = await rd.index(client, fx.write_txt(tmp_path, "b.txt", fx.SAMPLE_TXT + "\nAmended.\n"),
+                             supersedes_doc_id=old["doc_id"])
+        await ip.mark_superseded(DEAL, old["doc_id"], new["doc_id"], client=client)
+        ids = sorted(str(i) for i, (p, _) in (await rd.points(client)).items() if p["doc_id"] == old["doc_id"])
+        current = ids[1:] if lowest_id_retired else ids[: len(ids) // 2 + 1]
+        await client.set_payload(COLLECTION_NAME, payload={"is_current_version": 1, "superseded_by": ""},
+                                 points=current)
+        before = await rd.points(client)
+
+        row = await _row(client, old["doc_id"])
+        assert row["action"] == "operator" and "mixed_version_state" in row["problems"]
+        assert row["conflicts"]["superseded_by"] == ["", new["doc_id"]]
+        summary = await _run(client, tmp_path)
+        assert [d["doc_id"] for d in summary["for_operator"]] == [old["doc_id"]]
+        assert old["doc_id"] not in {d["doc_id"] for d in summary["documents"]}
+        after = await rd.points(client)
+        assert {i: v for i, v in after.items() if v[0]["doc_id"] == old["doc_id"]} == \
+            {i: v for i, v in before.items() if v[0]["doc_id"] == old["doc_id"]}
 
     @pytest.mark.asyncio
     async def test_documents_without_a_file_are_listed_and_left_alone(self, monkeypatch, tmp_path):
