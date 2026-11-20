@@ -61,6 +61,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from eval import gpu_state
 from eval.verification_corpus import (
     CORPUS_DIR,
     PROJECT_ROOT,
@@ -488,6 +489,8 @@ def render_markdown(report: dict) -> str:
         f"NLI: {report['nli']} · device: {report['device']} · LLM calls: 0 · "
         f"{report['total_seconds']}s", "",
     ]
+    if gpu_note := gpu_state.note(report.get("gpu")):
+        lines += [gpu_note, ""]
     for split, summary in report["splits"].items():
         h = summary["headline"]
         lines += [
@@ -539,8 +542,10 @@ async def run(args: argparse.Namespace) -> dict:
     """Runs the selected splits (and optional extras) and assembles the report."""
     from src.verification import nli
 
-    started = time.perf_counter()
     use_nli = False if args.no_nli else None
+    # Before anything of ours loads: was another process computing on the GPU? (gpu_state)
+    gpu_before = gpu_state.sample_if("n/a" if args.no_nli else _device())
+    started = time.perf_counter()
     corpus_chunks()  # chunk once, before timing anything per item
 
     splits = ("dev", "test") if args.split == "all" else (args.split,)
@@ -570,6 +575,8 @@ async def run(args: argparse.Namespace) -> dict:
     report["nli"] = (nli.loaded_model_name() or nli.nli_model_name()) if enabled else "off"
     report["device"] = _device() if enabled else "n/a"
     report["total_seconds"] = round(time.perf_counter() - started, 1)
+    report["gpu"] = gpu_state.record(
+        gpu_before, gpu_state.sample_after(gpu_before))
     return report
 
 
