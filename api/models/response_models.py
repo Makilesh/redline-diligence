@@ -266,6 +266,83 @@ class TieOutReport(BaseModel):
     elapsed_ms: float = 0.0
 
 
+class ChecklistPassage(BaseModel):
+    """A window of a document, verbatim, and where it is."""
+    text: str = Field(
+        "", description="The document's own words, at most 800 characters (alternates and not-found cells 240)"
+    )
+    page_number: int | None = None
+    section_heading: str = Field("", description="At most 120 characters")
+    chunk_id: str = ""
+    score: float = Field(0.0, description="Reranker score on the common scale, 0-1")
+
+
+class ChecklistCell(BaseModel):
+    """One document's answer to one checklist item."""
+    item_id: str
+    status: str = Field(..., description="found | not_found | unclear")
+    score: float | None = Field(None, description="The evidence's reranker score; None when nothing was retrieved")
+    answerability: float | None = Field(
+        None, description="Laya's P(the passage states it), when the grid read it (GPU hosts)"
+    )
+    passage: ChecklistPassage | None = Field(
+        None, description="The best evidence in the document (for not_found, the closest passage)"
+    )
+    alternates: list[ChecklistPassage] = Field(
+        default_factory=list, description="The next two, at most; none for not_found"
+    )
+
+
+class ChecklistRow(BaseModel):
+    """A contract and its cells, in the order of the report's items."""
+    doc_id: str
+    source_file: str = ""
+    document_category: str = ""
+    cells: list[ChecklistCell] = Field(default_factory=list)
+
+
+class ChecklistColumn(BaseModel):
+    """A checklist item and how many contracts carry it."""
+    id: str
+    label: str
+    question: str
+    found: int = 0
+    unclear: int = 0
+    not_found: int = 0
+
+
+class ChecklistExcludedDocument(BaseModel):
+    """A readable document the grid has no row for: not a contract."""
+    source_file: str = ""
+    document_category: str = ""
+
+
+class ChecklistReport(BaseModel):
+    """
+    Deal-level checklist review grid (Decision 95): the deal's contracts against
+    a diligence checklist, each cell the best evidence passage verbatim and a
+    status. Deterministic; no LLM call.
+    """
+    deal_id: str
+    items: list[ChecklistColumn] = Field(default_factory=list)
+    rows: list[ChecklistRow] = Field(default_factory=list, description="Contracts by name, at most 100")
+    documents_total: int = Field(0, description="Readable documents in the deal")
+    documents_checked: int = 0
+    documents_not_checked: list[str] = Field(
+        default_factory=list, description="Contracts the cap or the time budget left out, at most 50"
+    )
+    documents_excluded: list[ChecklistExcludedDocument] = Field(
+        default_factory=list, description="Documents that are not contracts, at most 50"
+    )
+    excluded_total: int = 0
+    truncated: bool = Field(False, description="True when not every contract was checked")
+    truncation_reason: str = Field("", description="'' | document_cap | time_budget")
+    reranker: str = Field("", description="The reranker profile whose thresholds set the statuses")
+    answerability: bool = Field(False, description="Whether Laya's answerability was read")
+    timings_ms: dict[str, float] = Field(default_factory=dict)
+    elapsed_ms: float = 0.0
+
+
 class BudgetStatusResponse(BaseModel):
     """Response model for budget status."""
     synthesis_primary: dict = Field(default_factory=dict)

@@ -293,6 +293,28 @@ class TestChunkers:
         assert _no_space("".join(s["text"] for s in segments)) == _no_space("".join(t for _, t in pages))
 
 
+class TestChecklistWindows:
+    # Decision 95: a checklist cell shows a window of its chunk, verbatim.
+    @given(st.one_of(domain_text(40), st.lists(_SENTENCE, min_size=1, max_size=20).map(" ".join),
+                     st.text(max_size=3000)),
+           st.integers(1, 900), st.integers(1, 40))
+    @example("x" * 250, 100, 10)
+    @example("Clause one.  \n\n  Clause two; and three!", 12, 40)
+    def test_windows_are_verbatim_bounded_ordered_and_cover_the_text(self, text, max_chars, max_windows):
+        from src.reports.checklist import sentence_windows
+
+        windows = sentence_windows(text, max_chars=max_chars, max_windows=max_windows)
+        assert len(windows) <= max_windows
+        assert all(0 <= s < e <= len(text) and e - s <= max_chars for s, e in windows)
+        assert all(not text[s].isspace() and not text[e - 1].isspace() for s, e in windows)
+        assert all(b[0] > a[0] for a, b in zip(windows, windows[1:]))
+        if not text.strip():
+            assert windows == []
+        if len(windows) < max_windows:
+            covered = {i for s, e in windows for i in range(s, e)}
+            assert all(i in covered for i, ch in enumerate(text) if not ch.isspace())
+
+
 # ---------------------------------------------------------------------------
 # PII, injection, file names
 # ---------------------------------------------------------------------------
