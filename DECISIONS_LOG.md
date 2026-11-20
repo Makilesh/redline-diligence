@@ -1812,7 +1812,12 @@ All architecture decisions that deviated from or resolved ambiguities in p4.md a
   - Laya on. Every store here was built with LAYA off; with Laya the category and PII may differ between runs.
   - Re-indexing while the API serves: the window was measured, but its effect on answers was not.
   - That the stamp is bumped when it should be. It is a constant someone must change with the extraction, and no test can tell that a change altered chunks.
-- **Guarded by**:
+- **Follow-up review** (the same reviewer, at 26ad7b1, rerunning P1 and S1–S5 and adding S6–S10):
+  - **Confirmed:** every fix above holds, and the write path is still identical to base apart from the stamp.
+  - **Regression from the copy step, now fixed:** an original removed or unreadable after the report raised out of the copy and ended the whole run, with no summary and no audit event. Documents after it were never reached. That document now fails alone with `file unreadable since the report`, no attempt is made, and the run goes on, as 07996b1 did when `index_document` refused the file. A test removes a file between the report and the run, and it fails on 26ad7b1.
+  - **Runbook:**
+    - The backup and restore checks now use an exact `POST …/points/count`, since the collection info's `points_count` is documented as approximate.
+    - `operator` remedies now name only what the API offers: re-upload, purge the deal, or leave it. There is no per-document delete.
   - `tests/test_ingest_stamp.py`:
     - every child and parent is stamped, with any sparse function, and extraction's payloads are not;
     - after a chunking change, each of the three interrupted re-indexes leaves two stamps, and indexing again equals a fresh ingest;

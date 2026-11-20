@@ -54,6 +54,7 @@ from src.utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 FILE_CHANGED = "file changed since the report: its bytes are no longer this document's"
+FILE_UNREADABLE = "file unreadable since the report"
 
 
 def plan_reingest(report: dict, types: set[str] | None = None) -> tuple[list[dict], list[dict]]:
@@ -140,9 +141,16 @@ async def reingest_document(
     workdir = tempfile.mkdtemp(prefix="reingest_")
     try:
         copy = Path(workdir) / f"original{Path(row['file']).suffix}"
-        shutil.copyfile(row["file"], copy)
-        if compute_doc_id(row["deal_id"], compute_content_hash(str(copy))) != row["doc_id"]:
-            outcome.update(error=FILE_CHANGED, seconds=round(time.perf_counter() - started, 2))
+        try:
+            shutil.copyfile(row["file"], copy)
+            unread, doc_id = None, compute_doc_id(row["deal_id"], compute_content_hash(str(copy)))
+        except OSError as e:
+            # Removed, unreadable or on a share that dropped since the report:
+            # this document fails with no attempt, and the run goes on to the
+            # next one (as index_document's own refusal of the file did).
+            unread, doc_id = f"{FILE_UNREADABLE}: {type(e).__name__}: {e}", None
+        if unread or doc_id != row["doc_id"]:
+            outcome.update(error=unread or FILE_CHANGED, seconds=round(time.perf_counter() - started, 2))
             if log is not None:
                 log.write(json.dumps({**outcome, "attempt": 0}, ensure_ascii=False) + "\n")
                 log.flush()

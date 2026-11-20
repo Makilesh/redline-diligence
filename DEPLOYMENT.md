@@ -512,7 +512,10 @@ c = sys.argv[1]
 base = f"http://qdrant:6333/collections/{c}"
 snap = json.load(urllib.request.urlopen(urllib.request.Request(f"{base}/snapshots", method="POST"), timeout=3600))["result"]
 urllib.request.urlretrieve(f"{base}/snapshots/{snap['name']}", f"/backup/{c}.snapshot")
-count = json.load(urllib.request.urlopen(f"{base}", timeout=60))["result"]["points_count"]
+# An exact count: the collection info's points_count is documented as approximate.
+count = json.load(urllib.request.urlopen(urllib.request.Request(
+    f"{base}/points/count", data=b'{"exact": true}', headers={"Content-Type": "application/json"},
+    method="POST"), timeout=600))["result"]["count"]
 json.dump({**snap, "points_count": count}, open(f"/backup/{c}.json", "w"))
 print(c, snap["name"], snap["size"], "bytes,", count, "points")
 PY
@@ -552,8 +555,12 @@ identity extractor raises on: a bug to report, not an action. Check: the
 documents marked `reingest` are the PDFs you expect; `to re-ingest with no
 file` is 0, or each document listed there is one you accept leaving as it is
 (it keeps working, on the old extraction); and every `operator` document is
-resolved by hand — re-upload it with the state you choose, mark it
-superseded, or purge it — before phase 2, or knowingly left. Decide which
+resolved by hand before phase 2, or knowingly left. The API has no
+per-document delete, so the remedies are: re-upload the file with the state
+you choose (to retire it, re-upload the newer document with
+`supersedes_doc_id` set to it); purge the whole deal
+(`POST /deals/{id}/purge`) and ingest it again; or leave it. Parents with no
+child are harmless where they are: nothing searchable points to them. Decide which
 deals to run; `--deal <id>` limits every command below.
 
 ### Phase 2 · Re-ingest
@@ -634,7 +641,7 @@ $C stop api
   done
   for c in manda_due_diligence manda_parent_chunks; do
     want=$(python3 -c "import json; print(json.load(open('qdrant-backup/$c.json'))['points_count'])")
-    got=$($C run --rm --no-deps -T api python -c "import json, urllib.request; print(json.load(urllib.request.urlopen('http://qdrant:6333/collections/$c'))['result']['points_count'])")
+    got=$($C run --rm --no-deps -T api python -c "import json, urllib.request as u; r = u.Request('http://qdrant:6333/collections/$c/points/count', data=b'{\"exact\": true}', headers={'Content-Type': 'application/json'}, method='POST'); print(json.load(u.urlopen(r, timeout=600))['result']['count'])")
     [ "$got" = "$want" ] || { echo "$c holds $got points, the snapshot $want: the API stays stopped"; exit 1; }
   done
 ) && $C up -d api

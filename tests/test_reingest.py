@@ -466,6 +466,31 @@ class TestDriver:
         assert await rd.points(client) == before  # no second document, no write
 
     @pytest.mark.asyncio
+    async def test_a_file_removed_after_the_report_fails_alone_and_the_run_goes_on(self, monkeypatch, tmp_path):
+        """Follow-up review S6: the copy step must not end the run for every other document."""
+        monkeypatch.setattr(ip, "CURRENT_SINCE", {"txt": 1})
+        client = await rd.new_client()
+        gone = fx.write_txt(tmp_path, "a.txt")
+        kept = fx.write_txt(tmp_path, "b.txt", fx.SAMPLE_TXT + "\nAnother document.\n")
+        doc_gone, doc_kept = await rd.index(client, gone), await rd.index(client, kept)
+        await rd.strip_stamp(client)
+        real = reingest_run.build_report
+
+        async def report_then_remove(*args, **kwargs):
+            report = await real(*args, **kwargs)
+            gone.unlink()
+            return report
+
+        monkeypatch.setattr(reingest_run, "build_report", report_then_remove)
+        summary = await _run(client, tmp_path)
+        (failed,) = summary["failed"]
+        assert failed["doc_id"] == doc_gone["doc_id"] and failed["attempts"] == 0
+        assert failed["error"].startswith(reingest_run.FILE_UNREADABLE)
+        assert summary["done"] == 1
+        rows = {r["doc_id"]: r for r in (await reingest_report.build_report(client))["deals"][DEAL]["documents"]}
+        assert rows[doc_kept["doc_id"]]["action"] == "nothing"
+
+    @pytest.mark.asyncio
     async def test_a_retired_document_stays_retired(self, monkeypatch, tmp_path):
         monkeypatch.setattr(ip, "CURRENT_SINCE", {"txt": 1})
         client = await rd.new_client()
