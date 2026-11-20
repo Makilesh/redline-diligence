@@ -144,6 +144,17 @@ class TestSignaturePage:
         f"{SENTENCE} The following is the Company's report ACME (Registrant)",
         f"{SENTENCE} Paul, State of Minnesota. 3M COMPANY (Registrant)",
         f"{SENTENCE} acme corp (Registrant)",
+        # The follow-up review: Title Case headers, titles and the block's own words.
+        f"{SENTENCE} PART IV 3M COMPANY (Registrant)",
+        f"{SENTENCE[:-1]}, in St. Paul, Minnesota. PART IV 3M COMPANY (Registrant)",
+        f"{SENTENCE} Annual Report ACME CORP (Registrant)",
+        f"{SENTENCE} Exhibits and Financial Statement Schedules ACME CORP (Registrant)",
+        f"{SENTENCE} Chief Executive Officer ACME CORP (Registrant)",
+        f"{SENTENCE} The Board of Directors of ACME CORP (Registrant)",
+        f"{SENTENCE} On Behalf Of ACME CORP (Registrant)",
+        f"{SENTENCE} Signed for ACME CORP (Registrant)",
+        f"{SENTENCE} ACME CORP and the Undersigned Officers of the Company (Registrant)",
+        f"{SENTENCE} Smith et Wesson Holding (Registrant)",
     ])
     def test_what_is_not_a_name_alone_gives_none(self, block):
         assert _signed(block) == ""
@@ -158,6 +169,13 @@ class TestSignaturePage:
         (". AMAZON.COM, INC.", "AMAZON.COM, INC"),
         (". eBay Inc.", "eBay Inc"),
         (". McDonald's Corporation", "McDonald's Corporation"),
+        # Legal forms, ".com" and dotted acronyms printed in lower case.
+        (". Medtronic plc", "Medtronic plc"),
+        (". Johnson Controls International plc", "Johnson Controls International plc"),
+        (". Amazon.com, Inc.", "Amazon.com, Inc"),
+        (". Overstock.com, Inc.", "Overstock.com, Inc"),
+        (". e.l.f. Beauty, Inc.", "e.l.f. Beauty, Inc"),
+        (". Mt. Bachelor Inc.", "Mt. Bachelor Inc"),
     ])
     def test_names_with_periods_initials_and_marks(self, tail, name):
         assert _signed(f"{SENTENCE[:-1]}{tail}\n(Registrant)\nBy: /s/ A. Person") == name
@@ -260,3 +278,55 @@ class TestDownstream:
         assert all(c.is_confirmed for c in ground_texts([both], ContextIndex([pep, ko]))[0])
         own = "Coca-Cola reported goodwill of $9,401 in fiscal 2017."
         assert all(c.is_confirmed for c in ground_texts([own], ContextIndex([pep, ko]))[0])
+
+    def test_another_companys_unnamed_filing_does_not_vouch_either(self):
+        # The follow-up review's caution: with real file names, an unnamed
+        # Coca-Cola chunk's "cocacola" must not speak for PepsiCo's figure,
+        # whether it carries its own keys or none.
+        pep = {"text": "Values are as stated in the source, in millions.\n"
+                       "Net revenue: Fiscal Year 2017=63,525 Fiscal Year 2016=62,799\n",
+               "source_file": "PEPSICO_2017_10K.pdf", "is_table": 1, "filing_company": "PepsiCo, Inc",
+               "filing_entity_keys": ["sec:1-1183", "name:pepsico"]}
+        claim = "Coca-Cola reported net revenue of $63,525 and goodwill of $9,401 in fiscal 2017."
+        for keys in (["sec:1-2217"], None):
+            ko = {"text": "The Coca-Cola Company\nValues are as stated in the source, in millions.\n"
+                          "Goodwill: Fiscal Year 2017=9,401 Fiscal Year 2016=10,629\n",
+                  "source_file": "COCACOLA_2017_10K.pdf", "is_table": 1}
+            if keys:
+                ko["filing_entity_keys"] = keys
+            checks = ground_texts([claim], ContextIndex([pep, ko]))[0]
+            assert all(c.binding == "unbound" and "PepsiCo, Inc" in c.binding_note for c in checks), keys
+
+    @pytest.mark.parametrize("release, source", [
+        ("Disney's segment operating income for fiscal 2019 was $14,868 million.\n", "q4_release.pdf"),
+        ("Its segment operating income for fiscal 2019 was $14,868 million.\n", "DISNEY_Q4_release.pdf"),
+    ])
+    def test_an_unnamed_document_of_the_registrant_still_speaks_for_it(self, release, source):
+        # The follow-up review: a release with no recorded registrant whose
+        # text or file name holds a word of the registrant's name counts with
+        # the registrant's filing, as before the per-registrant check.
+        table = {"text": "Values are as stated in the source, in millions.\n"
+                         "Revenues: Fiscal Year 2019=69,570 Fiscal Year 2018=59,434\n",
+                 "source_file": "10k_2019.pdf", "is_table": 1, "filing_company": "WALT DISNEY CO"}
+        claim = ("Disney reported revenues of $69,570 million and segment operating income of $14,868 million in "
+                 "fiscal 2019.")
+        checks = ground_texts([claim], ContextIndex([table, {"text": release, "source_file": source, "is_table": 0}]))[0]
+        assert all(c.is_confirmed for c in checks)
+
+    def test_a_renamed_registrant_is_one_registrant(self):
+        # SQUARE, INC and BLOCK, INC share their file number: "Block reported"
+        # names both filings. Without the keys the two names are two registrants.
+        t16 = {"text": "Values are as stated in the source, in thousands.\n"
+                       "Total net revenue: Fiscal Year 2016=1,708,721 Fiscal Year 2015=1,267,118\n",
+               "source_file": "10k_2016.pdf", "is_table": 1, "filing_company": "SQUARE, INC",
+               "filing_entity_keys": ["sec:1-37622", "name:square"]}
+        t20 = {"text": "Values are as stated in the source, in thousands.\n"
+                       "Total net revenue: Fiscal Year 2020=9,497,578 Fiscal Year 2019=4,713,500\n",
+               "source_file": "10k_2020.pdf", "is_table": 1, "filing_company": "BLOCK, INC",
+               "filing_entity_keys": ["sec:1-37622", "name:block"]}
+        claim = ("Block reported total net revenue of $1,708,721 thousand in fiscal 2016 and $9,497,578 thousand in "
+                 "fiscal 2020.")
+        assert all(c.is_confirmed for c in ground_texts([claim], ContextIndex([t16, t20]))[0])
+        for chunk in (t16, t20):
+            del chunk["filing_entity_keys"]
+        assert all(c.binding == "unbound" for c in ground_texts([claim], ContextIndex([t16, t20]))[0])
