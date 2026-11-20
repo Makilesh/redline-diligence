@@ -49,7 +49,7 @@ from starlette.datastructures import MutableHeaders
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from src.data_processing.injection_screen import flagged_locations, screen_text
+from src.data_processing.injection_screen import flagged_locations, screen_flattened
 from src.utils import metrics, runtime_status
 from src.utils.logger import setup_logger
 
@@ -578,9 +578,15 @@ _REDACTED = "internal error (details in the server log)"
 # Human-readable notes that embed an exception after a fixed phrase:
 #   "validation unavailable: RuntimeError: litellm.AuthenticationError: key=…"
 #   "… LLM judge failed (APIConnectionError: http://10.0.0.7:6333 …)"
-# The phrase is kept — it is the useful part — and everything after it is cut.
+#   "NLI unavailable: OSError: … /srv/models/… (proxy http://10.0.0.7:3128)"
+# The phrase is kept — it is the useful part, the failure class in words — and
+# everything after it is cut. The second form covers any note that opens with
+# "<component> unavailable:", as the code writes them (claim_checker's NLI note
+# had no entry here); it is anchored at the start so that a judge's reason
+# saying a figure "is unavailable: …" is never cut.
 _EXCEPTION_TAIL = re.compile(
-    r"(validation unavailable|LLM judge failed|judge failed|synthesis failed)\b.*",
+    r"(validation unavailable|LLM judge failed|judge failed|synthesis failed)\b.*"
+    r"|^([\w-]+ unavailable)\s*:.*",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -616,7 +622,7 @@ def scrub_public(value, _key: str | None = None):
     if isinstance(value, list | tuple):
         return [scrub_public(v, _key) for v in value]
     if isinstance(value, str) and _key in _NOTE_KEYS:
-        return _EXCEPTION_TAIL.sub(r"\1", value)
+        return _EXCEPTION_TAIL.sub(lambda m: m.group(1) or m.group(2), value)
     return value
 
 
@@ -710,12 +716,36 @@ _FREE_FORM = frozenset({
     "status_counts", "method_counts", "numeric_counts", "citation_counts",
 })
 
+# Mappings keyed by text rather than by a name: Laya's facet scores, keyed by
+# the question and Agent 1's sub-questions (quality_assessor's breakdown). The
+# keys are kept and screened like any text — a flagged one is withheld under a
+# placeholder of its own — and the scores pass.
+_TEXT_KEYED = frozenset({"answerability_facets"})
+
 # A key the code chose, not text it read ("Revenue | FY2023" is a label).
 _NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,63}")
 
 
+def _text_keyed(value: dict, field: str) -> dict:
+    """A text-keyed mapping with every key screened; no two keys made one."""
+    out: dict = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            continue
+        signals = screen_flattened(key)
+        if signals:
+            base = key = _withheld(signals)
+            n = 2
+            while key in out or key in value:
+                key, n = f"{base} #{n}", n + 1
+        out[key] = _classified(item, field)
+    return out
+
+
 def _classified(value, field: str):
     """`value`, as the field named `field`, reduced to its classified keys and mappings."""
+    if isinstance(value, dict) and field in _TEXT_KEYED:
+        return _text_keyed(value, field)
     if isinstance(value, dict):
         keep = _RECORD_FIELDS.get(field)
         if keep is None and field not in _FREE_FORM:
@@ -735,9 +765,16 @@ def _classified(value, field: str):
                 )
             out[key] = _classified(item, key)
         return out
+    if isinstance(value, set | frozenset):
+        # A set is no JSON value: listed, in a fixed order, and screened item by item.
+        value = sorted(value, key=repr)
     if isinstance(value, list | tuple):
         return [_classified(item, field) for item in value]
-    return value
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    # Nor is anything else (a date, an object): the text a client would have
+    # received — the stream sends json.dumps(default=str) — so the screen reads it.
+    return str(value)
 
 
 def _withheld(signals: list[str]) -> str:
@@ -746,13 +783,19 @@ def _withheld(signals: list[str]) -> str:
 
 
 def _withhold_flagged(value):
-    """Replaces every string the injection screen flags, keeping the rest as they are."""
+    """
+    Replaces every string the injection screen flags, keeping the rest as they are.
+
+    Screened flattened (screen_flattened): a string may have lost its line
+    breaks on the way here — a heading joined from two lines, a collapsed
+    claim — and with them the line start the role-label signal needs.
+    """
     if isinstance(value, dict):
         return {key: _withhold_flagged(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_withhold_flagged(item) for item in value]
     if isinstance(value, str):
-        signals = screen_text(value)
+        signals = screen_flattened(value)
         return _withheld(signals) if signals else value
     return value
 
