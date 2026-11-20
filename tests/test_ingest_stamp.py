@@ -15,6 +15,7 @@ In-memory Qdrant, stub vectors, no model weights.
 from __future__ import annotations
 
 import pytest
+from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 import src.data_processing.ingest_pipeline as ip
 from src.vector_db.constants import COLLECTION_NAME, PARENT_COLLECTION_NAME
@@ -130,3 +131,28 @@ class TestInterruptedReindex:
         assert len(fresh_parents) < len(leftover)
         assert rd.same(await rd.points(client), fresh_children)
         assert rd.same(await rd.points(client, PARENT_COLLECTION_NAME), fresh_parents)
+
+    @pytest.mark.asyncio
+    async def test_a_failed_delete_of_leftover_parents_does_not_fail_the_upload(self, monkeypatch, tmp_path):
+        """The document is whole and searchable by then: the delete is optional (Decision 88)."""
+        monkeypatch.setattr(ip, "QDRANT_BATCH_SIZE", 2)
+        path = rd.write_supply_agreement(tmp_path)
+        client = await rd.new_client()
+        with monkeypatch.context() as m:
+            m.setattr(ip, "SemanticChunker", rd.OldChunker)
+            m.setattr(ip, "DEFAULT_PARENT_TARGET_TOKENS", 1024)
+            old = await rd.index(client, path)
+        await client.delete(COLLECTION_NAME, points_selector=Filter(must=[
+            FieldCondition(key="doc_id", match=MatchValue(value=old["doc_id"]))]))
+        await rd.strip_stamp(client)
+        rd.fail_delete(client)
+
+        monkeypatch.setenv("STRICT_OPTIONAL_STEPS", "0")         # production: logged, counted, carried on
+        result = await rd.index(client, path)
+        assert result["previously_indexed"] is False
+        fresh_children, fresh_parents = await rd.fresh(path)
+        assert result["chunks_created"] == len(fresh_children)
+        assert rd.same(await rd.points(client), fresh_children)
+        parents = await rd.points(client, PARENT_COLLECTION_NAME)
+        assert set(fresh_parents) < set(parents)                 # the leftovers stayed, unstamped
+        assert {p.get("ingest_version") for i, (p, _) in parents.items() if i not in fresh_parents} == {None}
