@@ -1630,3 +1630,135 @@ All architecture decisions that deviated from or resolved ambiguities in p4.md a
 - **Not verified**: grouped search on a Qdrant server (`query_points_groups` searches iteratively there; local mode, which every number here used, scores every filtered point — exact), nor its time; the CPU host itself (two threads emulated on this machine); rates on disclosure schedules and summaries, which describe a clause in a line (the sample room's 75 cells are the only check); contracts other than CUAD's commercial agreements beyond the sample room's hand check — merger agreements (MAUD), NDAs (ContractNLI), credit agreements; CUAD's labels are one annotation per contract, so a clause its annotators missed counts as absent and lowers measured precision; per-item rates on the unseen contracts rest on 0-14 clauses an item; the consoles in a browser (vitest, the production build and Streamlit's AppTest only); several API workers (the cache and the one-build lock are per process).
 - **Guarded by**: `tests/test_checklist_report.py` (windows verbatim, bounded, overlapping, covering; a long sentence cut at spaces, a run without spaces cut hard, the window cap; rows are the contracts a question may read — superseded, PII-flagged, another deal's and a generated table narrative all in the store, a 10-Q exhibit filed as financial and a financial statement listed as excluded though both openings name parties, documents a caller names rows whatever their category; a cell is a verbatim window with its page and section; the status bands, an item's offset moving its scale, an item without a bar never not found; every reranker profile has a model with an offset for every item and no bar for the rare items; bge's found withdrawn and MiniLM's kept; one rerank call per batch; the read filter is the question's; items as a subset in checklist order, an unknown one refused; the document cap and the time budget cut whole rows and name the rest; a failing store and a failing reranker are errors; response bounds, a not-found cell's short passage and no alternates; alternates that do not repeat the evidence; a document with nothing retrieved is unclear, not absent; Laya read when its model exists, its unavailability falling back to the reranker's model, the CPU host not reading it by default, the calibration monotone in both scores; the cache answers an unchanged deal, another item set is another grid, an upload rebuilds, `register_document` drops the deal's grids, a held build slot; the route under public, private, sandbox and admin callers, the shared read limit, a malformed id, an unknown item without echoing it, an over-long `items`, a 503 that leaks nothing, a busy slot's Retry-After, `DELETE /deals` forgetting the grids); `tests/test_checklist_eval.py` (the metrics, the pre-registered thresholds, the 50-clause rule for an item's bar, found before not found, the evidence and its alternates, the seeded halves, gold spans on the stored text, the CPU host emulated with the GPU hidden by "-1"); `tests/test_console_checklist.py` (Streamlit: a row per contract and a status per item, a cell's passage with its place, a partial grid named, a grid that does not say it is whole, an unknown status read as unclear, document text never markup, the empty state, the app's deal view building the grid on request with the API down); `web/tests/checklist.test.tsx` (normalisation bounds, a missing or unknown cell read as unclear, cells in item order, a partial grid not taken for whole; the grid, a cell's passage verbatim with page and section and its alternates, the not-found and unclear wording, markup rendered as text, the partial notice, no contracts, the failed state and retry, fetched only when the tab opens); `tests/test_fuzz_properties.py` (`TestChecklistWindows`: windows verbatim, bounded, ordered, covering every non-space character).
 - **Impact**: src/reports/{__init__,checklist}.py, api/routes/deals.py, api/models/response_models.py, eval/run_checklist_eval.py, app/components/checklist.py, app/streamlit_app.py, web/{lib/types.ts,lib/normalize.ts,lib/api.ts,components/ChecklistPanel.tsx,components/DataRoomPanel.tsx,tests/checklist.test.tsx}, tests/{test_checklist_report,test_checklist_eval,test_console_checklist,test_fuzz_properties}.py, README.md
+
+## Decision 97: Re-ingest an existing index from its files — every point says which code wrote it, a read-only report says what each document needs, and the procedure matched a fresh ingest on 28 documents before it scales
+- **Date**: Session 21
+- **Context**: three changes reach only documents indexed after them: two to PDF extraction (a box around text is not a table, Decision 89; statements keep their period headers, titles and pages, Decision 93) and one to document identity (Decisions 86 and 89, which `identity_backfill` applies from the index). A live index had no way to say which of its documents predate them: point ids come from chunk positions (`chunk_id = {deal}_{doc}_{i:04d}`), not content, and only `sparse_encoding` recorded anything about the code that wrote a point. The owner's rule for the run: nothing irreversible that has not been presented first; snapshot, re-index, verify, roll back.
+- **Findings** (read in the code, then reproduced):
+  - *A re-index cut short after a chunking change leaves two documents in one.*
+    - `index_document` upserts children (100 a batch), then parents, then deletes the ids the new chunking no longer produces.
+    - On a failed upsert of a document already indexed it deletes nothing (audit I9: the serving copy must not be lost). The comment there called the result "the old copy with some chunks rewritten to the same content — a valid state". That holds only when the chunking is unchanged.
+    - Reproduced on main (b1159a0) with an "old code" that cuts a 13-article contract into 49 children / 12 parents, and the shipped code that cuts it into 13 / 5:
+      - child batch 3 failing left 9 new children and 39 old ones under one doc_id, 8 of them not held by the parent they name;
+      - the parent upsert failing left 13 new children on 12 old parents, 11 of them not held;
+      - the stale delete failing left 36 old children beside the 13 new ones: the same text twice, both searchable.
+    - Nothing reported it. The API answered 500 and wrote no audit line, `identity_index_status` saw an identity, and `sparse_index_status` counts only BM25 encodings.
+    - Indexing the same file again repairs all three: the next run upserts every new point and deletes the rest. Nothing said that it was needed.
+  - *A failed rollback's parents outlive the next upload.*
+    - A first ingest whose upsert fails deletes the document's children, then its parents. If that second delete fails, the parents stay with no child.
+    - The next upload of the file finds no child, takes the first-ingest path, and never deletes them. In the test below, 6 parents were left and 5 rewritten, so one orphan stayed.
+  - *The API keeps no original.* `POST /ingest` writes the upload to a temporary directory and deletes it, so re-ingestion needs the deal team's files. They map back by their bytes: `doc_id = uuid5(deal, sha256(bytes))`.
+  - *Re-ingesting with the upload defaults loses state the index holds.* `index_document` keeps a superseded document superseded, but it writes `supersedes_doc_id` and `is_current_version` from its arguments, and re-classifies the category unless one is given. A plain re-upload would drop a "supersedes" link, make an explicitly non-current document current, and could move an overridden category (and with it legal-mode chunking).
+  - *What else re-ingestion touches* (no code changed here):
+    - The document list is the API's in-memory registry, rebuilt from payloads at start; upload dates are not recoverable.
+    - `POST /ingest` replaces a re-uploaded document's record and drops the deal's cached tie-out (300 s, keyed by deal and chunk count) and checklist grids (600 s). An out-of-process re-ingest does not reach that process: one that keeps a deal's chunk count leaves a cached report stale until its time runs out, and the document list's injection label (Decision 83) and chunk counts stay the old ones until restart.
+    - The audit log is append-only.
+    - Postgres holds checkpoints of failed runs (old chunk text, 24 h) and quota counters, nothing that re-ingestion must update.
+- **Changes**:
+  - **The stamp.**
+    - `ingest_pipeline.INGEST_VERSION = 1`, stamped as `ingest_version` on every child and parent that `index_document` stores, beside `sparse_encoding`. `extract_and_chunk`'s payloads are unchanged.
+    - `CURRENT_SINCE = {"pdf": 1}` gives, per file type, the lowest version whose chunks are what the current code writes.
+    - An unstamped point counts as 0, so an unstamped PDF is "re-ingest": which code wrote it cannot be told, and Decisions 89 and 93 both changed PDF extraction. Other types have not changed since before the stamp.
+    - A future extraction change bumps the version and the affected types' entries. Old payloads still parse: nothing else reads the field.
+  - **`index_document`** also counts a document's parents when it has no children, and then runs the stale delete too. The failure comment and log now say what is left.
+  - **`src/vector_db/reingest_report.py`** (read-only; `python -m src.vector_db.reingest_report [--deal] [--files DIR] [--json]`):
+    - Per document: its file type, stamps, BM25 encoding and identity, and whether the identity backfill would change that identity.
+    - Whether its points form one document: one stamp, one version state, each child's id derived from its position, each child held by the parent it names, each parent holding only children that name it, no parent without a child.
+    - Its action: `reingest` (an extraction change after its stamp, an old BM25 encoding, or inconsistent points), `backfill_identity`, or `nothing`.
+    - Totals per deal by type, stamp, identity and action. `--files` matches originals by their bytes.
+  - **`src/vector_db/reingest_run.py`:**
+    - For each document the report marks and whose file is given, it calls `index_document` as `POST /ingest` does, under the stored name, category, version flag and supersedes link (`--reclassify` lets the classifier choose).
+    - It reads the document back and checks it as the report does, plus the current stamp on every point and the run's counts.
+    - A failed, inconsistent or unverifiable attempt is repeated (`--retries 2`). A file the pipeline refuses is not.
+    - Output: one JSON line per attempt (`--log`), one `document_reingested` audit event per document, `--dry-run`, and exit 1 if any document failed.
+  - **`identity_backfill`:** its scroll-and-compute half is `IdentityPlan`, which the report reads, so both name the same documents. Its behaviour is unchanged and its tests pass as they were.
+- **Method** (scratch notes, written before any store was opened or any batch drawn):
+  - *Batch*: dev documents only, by a stated rule.
+    - The 3 FinanceBench dev filings whose converter tables Decision 93 changed most: JPMorgan's 2023 Q2 and 2022 Q2 10-Qs and 2022 10-K (173, 150 and 138 tables).
+    - The first dev 8-K and earnings release (Foot Locker, PepsiCo), and Decision 89's two collapsed-column cases (Adobe and Verizon 2022 10-Ks).
+    - From Decision 89's 232 CUAD dev contracts, by random.Random(97): 6 boxed (more than half their text in table cells; the rule reproduces Decision 89's 35), 5 not boxed, and one read in layout mode.
+    - The 9 sample-deal .txt files.
+    - 28 documents in all: 19 PDFs, 1,261 pages.
+  - *Old index*: one local store with three deals.
+    - The filings' points are copied from int9's `fb_main` (ded2751, pre-Decision-89 code), and the contracts' from pdf9's `store_pdf_base` (ded2751's processor and identity). Both were read from copies.
+    - The sample deal was indexed by an export of ded2751.
+    - Fixture check: ded2751's `extract_and_chunk` reproduces the copied payloads exactly (chunk ids, text hashes, parent links, identity, category) on all 12 contracts and 3 of the filings.
+  - *Procedure*, on a copy: snapshot (folder copy), report, the driver's dry run and run, the identity backfill, report.
+  - *Reference*: the same files, names and deals ingested fresh into an empty store by the current code.
+  - *Checks*, per document:
+    - C1: the children's and parents' id sets equal to the reference's.
+    - C2: every payload field equal (allowed in advance: the untouched .txt lack the new stamp).
+    - C3/C4: links, orphans, duplicates.
+    - C5: identity and `sparse_encoding`.
+    - C6: dense cosine ≥ 0.9999 and |Δ| ≤ 1e-3; sparse exact.
+    - C7: the deal tie-out equal.
+    - C8: the .txt points bitwise unchanged.
+    - C9: the report's verdicts.
+  - *Drills*, on the batch filing whose old chunking has the most children beyond the new one's:
+    - D1: child upsert batch 3 fails.
+    - D2: the parent upsert fails.
+    - D3: the stale delete fails.
+    - Pass = the report flags the document and one retry makes it equal to the reference.
+- **Measured** (local mode, the development laptop's GPU idle, LAYA off as for every benchmark store):
+  - *Report before*:
+    - The 19 PDFs are `reingest` (unstamped) and the 9 .txt are `nothing`. 28 of 28 files matched by bytes.
+    - Read from their old chunks, the backfill would have changed the identity of 3 old contracts. That is why the runbook re-ingests first.
+  - *Run*: 19 planned, 19 done at the first attempt, 0 failed.
+  - *Backfill afterwards*: 28 documents, 0 updated.
+  - *Report after*: 28 `nothing`, 0 inconsistent.
+  - *Checks*: all pass on all 28 documents.
+    - C1: 28/28.
+    - C2: the 19 re-ingested documents differ from the reference in no field; the 9 .txt only by the absent stamp.
+    - C3/C4: no problem in either store.
+    - C5: identities equal, and every child on the current BM25 encoding.
+    - C6: dense vectors bitwise equal (max |Δ| 0.0); sparse equal.
+    - C7: tie-out equal on all three deals. For the filings, 14 conflicts and 4 agreements on the old index became 58 and 14, the reference's.
+    - C8: the 9 .txt bitwise untouched, and the reference's .txt payloads equal the old ones except for the stamp. The PDF changes leave text files as they were.
+  - *Drills* (JPMorgan 2022 10-K: 2,418 old children → 2,344 new, parents 529 → 434):
+
+    | Drill | Left behind | Report | One retry (driver) |
+    |---|---|---|---|
+    | D1 child batch 3 fails | 200 new or identical children (batches 1–2) beside 2,218 old; all 529 parents old | reingest: child_not_held_by_parent, mixed_stamps, orphan_parent, parent_holds_other_children | 1 attempt, 119 s; equal to the reference |
+    | D2 parent upsert fails | 2,344 new or identical children beside 74 old; all 529 parents old | reingest: the same four | 1 attempt, 127 s; equal |
+    | D3 stale delete fails | 2,344 new or identical children beside 74 old; 434 new or identical parents beside 95 old | reingest: mixed_stamps, orphan_parent, parent_holds_other_children | 1 attempt, 115 s; equal |
+
+    "Equal" is C1, C2 and C6: the same ids, no field different, dense |Δ| ≤ 2.7e-8 (the local store renormalises an overwritten vector), sparse equal. The deal's other six filings were untouched in each drill.
+  - *Mixed window* of a successful re-index (first upsert → stale delete, local mode): from 0.07 s for a 7-chunk contract to 9.6 s for the 10-K (29 upserts), and under 1 s for every contract. Not measured on a server.
+  - *Cost on the GPU*: extraction 147 s, embedding 195 s (model load included), BM25 1.6 s, upserts 28 s, deletes 4 s. That is 0.12 s a page to extract and 25 ms a chunk to embed, 389 s for the batch, at a peak of 5.3 GB RAM and 3.4 GB GPU.
+  - *Cost on two CPU threads* (the laptop pinned to two cores, GPU hidden; x86, not the ARM host):
+    - Extraction 0.05–0.09 s a page: no slower than with eight cores, since it is single-threaded.
+    - bge-m3 1.31 s a chunk (96 seeded chunks); BM25 0.1 ms.
+    - Extrapolated: about 3 hours for the batch and about 18 hours for the 84 FinanceBench filings, against about 47 minutes on the GPU.
+  - *Rollback* (local mode, the runbook's commands):
+    - The post-run store had 8,511 children and 1,441 parents, 8,475 and 1,547 of them changed. It was replaced by the snapshot folder.
+    - Every point of both collections (id, payload, dense, sparse) then equalled the old index's, and the four store files hashed as the snapshot's. Reading the restored store changed no file.
+- **Gates**:
+  - Offline suite (`STRICT_OPTIONAL_STEPS=1`): 2,445 passed, 7 deselected (main 2,406 + 39 new). The first commit alone: 2,414. Ruff clean.
+  - With main's `index_document` given only the two constants, 16 of the 39 new tests fail: every test of the stamp, of the detection, of the leftover parents and of the driver's read-back.
+  - No new parser of document or question text, so no fuzz property. `-m models` was not run, since no code those tests cover changed; the validation itself ran the real bge-m3 and BM25 through `index_document`.
+- **Resolution**: adopted: the stamp, the leftover-parent delete, the report and the driver, with the runbook in DEPLOYMENT.md ("Re-ingesting an existing index"). Not decided here, and left to the owner: whether, when and on which live deals to run it. It needs the deal team's files and a write freeze, and on the CPU host it takes hours per large deal.
+- **Not verified**:
+  - Anything on a Qdrant server: the snapshot, download and restore commands (written from the snapshot API's documentation, not run), the one-off-container invocations, the mixed window and write costs there.
+  - The two-core ARM host. The CPU figures are an x86 two-thread emulation, and the full-corpus times are extrapolated.
+  - Deals larger than the batch; the full 84 filings were not re-ingested.
+  - DOCX, XLSX and PPTX documents (none in the batch). Their extraction is unchanged since before the stamp, so the report marks them `nothing`.
+  - Superseded and explicitly non-current documents on real data (unit tests only).
+  - Laya on. Every store here was built with LAYA off; with Laya the category and PII may differ between runs.
+  - Re-indexing while the API serves: the window was measured, but its effect on answers was not.
+  - That the stamp is bumped when it should be. It is a constant someone must change with the extraction, and no test can tell that a change altered chunks.
+- **Guarded by**:
+  - `tests/test_ingest_stamp.py`:
+    - every child and parent is stamped, with any sparse function, and extraction's payloads are not;
+    - after a chunking change, each of the three interrupted re-indexes leaves two stamps, and indexing again equals a fresh ingest;
+    - with the chunking unchanged, an interrupted re-index leaves the same content;
+    - parents a failed rollback left are deleted by the next upload.
+  - `tests/test_reingest.py`:
+    - The report flags each interrupted re-index and clears after the retry, and catches new children on old parents.
+    - Each consistency invariant is named, and none on a complete document.
+    - Actions by type, stamp, BM25 encoding and identity; the report is read-only.
+    - Files are matched by bytes, not names, and per deal; the command line works; old payloads without the new fields still read.
+    - The driver re-ingests only what is marked and has a file, under the stored name, category and version state (`--reclassify` otherwise), and retries until the document is whole.
+    - It retries a failed read-back, rebuilds a document left with parents only, reports a document that keeps failing, does not retry a refused file, and leaves documents without files alone.
+    - It records audit events and returns the right exit codes.
+  - `tests/fixtures/reingest_docs.py`: the shared "old code" and failing clients.
+- **Impact**: src/data_processing/ingest_pipeline.py, src/vector_db/{identity_backfill,reingest_report,reingest_run}.py, tests/test_{ingest_stamp,reingest}.py, tests/fixtures/reingest_docs.py, DEPLOYMENT.md, README.md
