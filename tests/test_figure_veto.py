@@ -499,20 +499,18 @@ class TestHeadedVeto:
         assert report.claim_checks[0]["status"] == "supported" and report.validation_status == "passed"
 
 
-# ── Known defects ─────────────────────────────────────────────────────────────
-# The behaviour grounding should have, failing today for the reason given.
-# Strict: the fix that makes one pass fails it until its marker is removed.
+# ── Defects Decision 90 found ─────────────────────────────────────────────────
+# Pinned as a strict xfail until Decision 94 fixed it.
 
 
-class TestKnownDefects:
-    @pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-        "Decision 90 finding: on a row-by-row line read without a unique column "
-        "header, figure_periods gives every figure the LAST column's year — the "
-        "period after '7,207' ties with the one before it and wins"))
+class TestFoundDefects:
     def test_a_row_by_row_figure_belongs_to_the_period_before_its_equals_sign(self):
+        # On a row-by-row line read without a unique column header, every
+        # figure took the LAST column's year: the period after "7,207" tied
+        # with the one before it and won, so the 2019 figure was bound for 2018
+        # — a wrong figure confirmed. A period before "=" labels its figure.
         index = ContextIndex([{"text": ROW_BY_ROW, "source_file": "f.pdf"}])
         [[wrong]] = ground_texts(["Operating income was $7,207 in fiscal 2018."], index)
         [[right]] = ground_texts(["Operating income was $7,207 in fiscal 2019."], index)
-        # Today: the 2019 figure is bound for 2018 — a wrong figure confirmed.
-        assert wrong.binding != "bound"
+        assert wrong.binding == "conflict"
         assert right.binding == "bound"

@@ -562,6 +562,193 @@ class TestTableRows:
                 assert " ".join(body[start:end].split()) in lines
 
 
+# Decision 94: tables as the converter writes them — row-by-row, narrative and
+# grid lines under a title and the converter's unit note.
+_TABLE_COLUMNS = st.one_of(
+    st.sampled_from([
+        "2019", "2018", "Fiscal Year 2019", "Fiscal Years 2014", "For the Years Ended December 31, 2018",
+        "At December 31, 2017", "YEAR ENDED MAY 31, 2019", "2019 (1)", "Column 2", "% Column 3",
+        "Three months ended June 30, 2019", "52 Weeks Ended February 1, 2020", "FY2023",
+    ]),
+    domain_text(3),
+)
+_TABLE_CELLS = st.one_of(
+    st.sampled_from(["7,207", "$ 4,147,065", "(1,570)", "—", "-", "12.5%", "0.8", "$452.8", "", "2019"]),
+    domain_text(2),
+)
+_TABLE_LABELS = st.one_of(
+    st.sampled_from([
+        "Revenue", "Short-term investments " + "." * 61, "Notional value settled (2)", "Net (income) loss",
+        "Earnings before income taxes and after-tax earnings from joint ventures", "Revenue ........ $ 4,795,511",
+        ". . . . .", "Operations:",
+    ]),
+    domain_text(5),
+)
+_UNIT_NOTES = st.one_of(
+    st.sampled_from([
+        "Values are as stated in the source, in millions.", "*Values are as stated in the source, in USD thousands "
+        "(rows 31-60 of 90).*", "Values are as stated in the source; the table gives no currency or scale.",
+        "Values are as stated in the source, in billions; per-share and percentage rows are not in billions.", "",
+    ]),
+    st.sampled_from(["Values are as stated in the source, in millions.",
+                     "VALUES ARE AS STATED IN THE SOURCE, IN THOUSANDS."]).map(lookalike),
+)
+
+
+@st.composite
+def _converter_table(draw) -> str:
+    columns = draw(st.lists(_TABLE_COLUMNS, min_size=1, max_size=4))
+    lines = [draw(st.sampled_from(["ACME CORP", "CVS HEALTH CORPORATION", ""])), draw(_UNIT_NOTES)]
+    form = draw(st.sampled_from(["row_by_row", "narrative", "markdown"]))
+    if form == "markdown":
+        lines += ["", "| Line Item | " + " | ".join(columns) + " |", "|" + "---|" * (len(columns) + 1)]
+    for _ in range(draw(st.integers(1, 4))):
+        label, cells = draw(_TABLE_LABELS), [draw(_TABLE_CELLS) for _ in columns]
+        if form == "row_by_row":
+            lines.append(f"{label}: " + " ".join(f"{c}={v}" for c, v in zip(columns, cells)))
+        elif form == "narrative":
+            lines.append(f"{label}: " + "; ".join(f"{c}: {v}" for c, v in zip(columns, cells)))
+        else:
+            lines.append(f"| {label} | " + " | ".join(v or "-" for v in cells) + " |")
+    return "\n".join(lines) + "\n"
+
+
+class TestConverterTables:
+    """How grounding reads the converter's tables (Decision 94)."""
+
+    @given(st.one_of(_converter_table(), st.tuples(_converter_table(), domain_text(10)).map("".join)))
+    @example("Operating income: 2019=7,207 2018=7,820\n")
+    @example("Notional value settled (2): 2021=— 2020=1,600\n")
+    def test_every_figure_is_dated_from_the_text_it_sits_in(self, text):
+        from src.verification.numeric_grounding import _figure_periods
+
+        index = ContextIndex([{"text": text, "source_file": "a.pdf", "is_table": 1}])
+        for fig in index.figures:
+            start, end = fig.row_span
+            assert 0 <= start <= fig.mention.start < fig.mention.end <= end <= len(text)
+            # A period is a year the text states: from a label, a header, or
+            # a period next to the figure.
+            assert not fig.period or (re.fullmatch(r"(?:19|20)\d{2}", fig.period) and fig.period[2:] in text)
+            assert not fig.header_line or (fig.period and fig.header_line in text)
+        spans = [(m.start, m.end) for m in extract_numbers(text, claims_only=False)]
+        periods, labelled, labels_cells = _figure_periods(text, spans)
+        assert len(periods) == len(labelled) == len(spans)
+        assert labels_cells or not any(labelled)
+        for (s, _e), period, lab in zip(spans, periods, labelled):
+            # A labelled figure's period is written before it.
+            assert not lab or (period and period[2:] in text[:s])
+
+    @given(st.one_of(_converter_table().map(lambda t: t.split("\n")[3] if t.count("\n") > 3 else t),
+                     domain_text(12), st.text(st.sampled_from("|\\ a1"), max_size=30)))
+    def test_pipe_cells_and_cell_headers(self, line):
+        from src.verification.numeric_grounding import _cell_header, _pipe_cells
+
+        cells = _pipe_cells(line)
+        assert all(0 <= a <= b <= len(line) for a, b in cells)
+        assert all(b <= c for (_, b), (c, _) in zip(cells, cells[1:]))
+        for a, b in cells:
+            # No cell holds an unescaped pipe.
+            assert all(ch != "|" or (a + j > 0 and line[a + j - 1] == "\\") for j, ch in enumerate(line[a:b]))
+        header = _cell_header(line)
+        if header:
+            assert len(header) == len(cells) - 1 >= 2 and len(set(header)) == len(header)
+            assert all(re.fullmatch(r"(?:19|20)\d{2}", year) and year[2:] in line for year in header)
+
+    @given(st.one_of(_converter_table(), domain_text(20)))
+    def test_row_by_row_and_unit_notes(self, text):
+        from src.utils.casefold import ascii_lower
+        from src.verification.numeric_grounding import (
+            PERIOD_RE,
+            SCALE_HINT_WORDS,
+            UNIT_NOTE_RE,
+            _is_converter_row,
+            _is_row_by_row,
+        )
+
+        for line in text.split("\n"):
+            if _is_row_by_row(line):
+                cut = line.index(": ")
+                assert "=" in line[cut + 2:]
+            if _is_converter_row(line) and not _is_row_by_row(line.lstrip()):
+                # A narrative row: a second colon after a column that names a period.
+                rest = line.lstrip()
+                rest = rest[rest.index(": ") + 2:]
+                assert ": " in rest and PERIOD_RE.search(rest[: rest.index(": ")])
+        for m in UNIT_NOTE_RE.finditer(text):
+            assert ascii_lower(m.group(1)) in SCALE_HINT_WORDS
+
+
+# Decision 94's revision: claims about a figure's direction, sign and company.
+_CLAIM_WORDS = st.one_of(
+    st.sampled_from([
+        "Net sales", "rose", "fell", "increased", "decreased 4.2%", "year over year", "to", "by", "from",
+        "$16,865.2", "$15,740.4 million", "(2,131.0)", "-$5.0", "in fiscal 2019", "FY2018", "net loss",
+        "net earnings", "PepsiCo", "General Mills", "Coca-Cola", "reported", "of", "(loss)", "income (loss)",
+        "(increase) decrease", ".", ";", "\n",
+    ]),
+    domain_text(2),
+)
+_CLAIMS = st.lists(_CLAIM_WORDS, max_size=14).map(" ".join)
+
+
+class TestClaimReadings:
+    """What a claim says of its figure's direction, sign and company (Decision 94's revision)."""
+
+    @given(_CLAIMS)
+    @example("Net sales increased 7.1% year over year to $16,865.2 million in fiscal 2019.")
+    def test_direction_and_names(self, claim):
+        from src.verification.numeric_grounding import _level_direction, _name_words, _NOT_A_NAME
+
+        for mention in extract_numbers(claim, claims_only=False):
+            assert _level_direction(claim, mention) in (-1, 0, 1)
+        for word in _name_words(claim):
+            assert word in claim and any(c.isupper() for c in word) and not any(c.isdigit() for c in word)
+            assert word.lower() not in _NOT_A_NAME
+
+    @given(st.one_of(_TABLE_LABELS, domain_text(6), _CLAIMS))
+    def test_signed_labels_and_printed_signs(self, text):
+        from src.verification.numeric_grounding import (
+            _SIGN_PAIRS,
+            _paren_depths,
+            _printed_negative,
+            _sign_pair,
+        )
+
+        pair = _sign_pair(text)
+        assert pair is None or (frozenset(pair) in _SIGN_PAIRS and pair[0] != pair[1])
+        mentions = extract_numbers(text, claims_only=False)
+        depths = _paren_depths(text, [m.start for m in mentions])
+        assert all(d >= 0 for d in depths) and len(depths) == len(mentions)
+        for m in mentions:
+            if _printed_negative(text, m):
+                assert "(" in text[: m.start] or any(s in text[: m.start] for s in "-−–")
+
+    @given(st.one_of(_TABLE_LABELS, domain_text(6), _CLAIMS),
+           st.sampled_from(["", "qoe_fy2023.txt", "GENERALMILLS_2019_10K.pdf", "Q3_2023.xlsx", "a/b\\c_2021.pdf"]))
+    def test_a_chunks_period_is_one_it_states(self, body, source):
+        from src.verification.numeric_grounding import _chunk_period, _periods_in
+
+        period = _chunk_period(body, source)
+        if period:
+            stated = {y for _, _, y in _periods_in(body)} or {
+                y for _, _, y in _periods_in(source.replace("_", " ").replace(".", " "))}
+            assert stated == {period}
+
+    @given(st.tuples(_converter_table(), _CLAIMS, st.sampled_from(["", "GENERAL MILLS, INC.", "THE COCA-COLA COMPANY"])))
+    def test_a_withheld_claim_names_its_filer(self, case):
+        from src.verification.numeric_grounding import ground_texts
+
+        text, claim, filer = case
+        chunk = {"text": text, "source_file": "GENERALMILLS_2019_10K.pdf", "is_table": 1, "filing_company": filer}
+        for checks in ground_texts([claim], ContextIndex([chunk])):
+            for check in checks:
+                # A company note is only written about a filing whose registrant
+                # the payload names; a conflict note only on a figure found.
+                assert "documents holding this figure" not in check.binding_note or (
+                    filer and filer in check.binding_note)
+                assert check.binding != "conflict" or check.status in ("grounded", "derived")
+
+
 # What a model's JSON may hold where a number belongs: JSON integers have no
 # length limit, and float() refuses one past ~308 digits.
 _JSON_VALUES = st.one_of(
