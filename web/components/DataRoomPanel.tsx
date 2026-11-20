@@ -7,11 +7,13 @@ import {
   FileText,
   FileWarning,
   History,
+  ListChecks,
   Scale,
   ShieldAlert,
   TriangleAlert,
 } from "lucide-react";
 
+import ChecklistPanel from "@/components/ChecklistPanel";
 import TieOutPanel from "@/components/TieOutPanel";
 import { prettyFilename } from "@/lib/citations";
 import type { DocumentRecord, RiskSignal, Severity } from "@/lib/types";
@@ -20,9 +22,11 @@ import { signalLabels } from "@/lib/verification";
 interface DataRoomPanelProps {
   documents: DocumentRecord[];
   risks: RiskSignal[];
-  /** The deal the figure tie-out is read for; the tab says to pick one without it. */
+  /** The deal the tie-out and the checklist read; their tabs say to pick one without it. */
   dealId?: string | null;
 }
+
+type Tab = "documents" | "risk" | "tieout" | "checklist";
 
 const SEVERITY_STYLE: Record<Severity, { dot: string; text: string; bg: string }> = {
   high: { dot: "bg-bad", text: "text-bad", bg: "bg-bad/10" },
@@ -156,11 +160,11 @@ function DocumentList({ documents }: { documents: DocumentRecord[] }) {
 }
 
 export default function DataRoomPanel({ documents, risks, dealId = null }: DataRoomPanelProps) {
-  const [tab, setTab] = useState<"documents" | "risk" | "tieout">("documents");
+  const [tab, setTab] = useState<Tab>("documents");
   const highRisk = risks.filter((r) => r.severity === "high").length;
 
   const tabs: {
-    id: "documents" | "risk" | "tieout";
+    id: Tab;
     label: string;
     icon: typeof History;
     count?: number;
@@ -182,6 +186,8 @@ export default function DataRoomPanel({ documents, risks, dealId = null }: DataR
     // No count: the report reads the whole deal, so it is fetched only when
     // this tab is opened.
     { id: "tieout", label: "Tie-out", icon: Scale },
+    // The same for the checklist grid (Decision 95), which reranks every contract.
+    { id: "checklist", label: "Checklist", icon: ListChecks },
   ];
 
   return (
@@ -243,8 +249,10 @@ export default function DataRoomPanel({ documents, risks, dealId = null }: DataR
             <DocumentList documents={documents} />
           ) : tab === "risk" ? (
             <RiskList risks={risks} />
-          ) : (
+          ) : tab === "tieout" ? (
             <TieOutPanel dealId={dealId} />
+          ) : (
+            <ChecklistPanel dealId={dealId} />
           )}
         </motion.div>
       </AnimatePresence>

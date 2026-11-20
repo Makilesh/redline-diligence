@@ -13,6 +13,7 @@
 
 import { ApiError, errorFromResponse, toApiError } from "./errors";
 import {
+  normalizeChecklist,
   normalizeIngestResult,
   normalizePlannedStages,
   normalizeQueryResponse,
@@ -22,6 +23,7 @@ import {
 import { SseParser } from "./sse";
 import type {
   BudgetStatus,
+  ChecklistReport,
   Deal,
   DocumentRecord,
   IngestResult,
@@ -121,6 +123,17 @@ export const getBudget = () => getJson<BudgetStatus>("/budget");
 export async function getTieOut(dealId: string): Promise<TieOutReport | null> {
   const raw = await getJson<unknown>(`/deals/${encodeURIComponent(dealId)}/tie-out`, 45_000);
   return raw === null ? null : normalizeTieOut(raw);
+}
+
+/**
+ * The deal's checklist review grid (Decision 95), or null when it cannot be
+ * had — optional for the page, like the tie-out. The server reranks every
+ * contract against every item within a 60 s budget, after waiting up to 30 s
+ * for another grid's build, hence the long timeout.
+ */
+export async function getChecklist(dealId: string): Promise<ChecklistReport | null> {
+  const raw = await getJson<unknown>(`/deals/${encodeURIComponent(dealId)}/checklist`, 120_000);
+  return raw === null ? null : normalizeChecklist(raw);
 }
 
 /**

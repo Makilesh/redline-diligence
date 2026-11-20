@@ -307,6 +307,69 @@ export interface TieOutReport {
   elapsed_ms: number;
 }
 
+/** A window of a contract, verbatim (`GET /deals/{id}/checklist`). Document text: rendered as text. */
+export interface ChecklistPassage {
+  text: string;
+  page_number: number | null;
+  section_heading: string;
+  chunk_id: string;
+  /** Reranker score on the common scale, 0-1. */
+  score: number;
+}
+
+export type ChecklistStatus = "found" | "not_found" | "unclear";
+
+/** One contract's answer to one checklist item (Decision 95). */
+export interface ChecklistCell {
+  item_id: string;
+  status: ChecklistStatus;
+  score: number | null;
+  /** Laya's P(the passage states it), when the grid read it. */
+  answerability: number | null;
+  /** The best evidence in the contract; null when nothing was retrieved. */
+  passage: ChecklistPassage | null;
+  alternates: ChecklistPassage[];
+}
+
+/** A contract and its cells, in the order of the report's items. */
+export interface ChecklistRow {
+  doc_id: string;
+  source_file: string;
+  document_category: string;
+  cells: ChecklistCell[];
+}
+
+/** A checklist item and how many contracts carry it. */
+export interface ChecklistColumn {
+  id: string;
+  label: string;
+  question: string;
+  found: number;
+  unclear: number;
+  not_found: number;
+}
+
+/**
+ * The checklist review grid: the deal's contracts against a diligence
+ * checklist, each cell the best evidence passage and a status. Deterministic;
+ * no model wrote any of it.
+ */
+export interface ChecklistReport {
+  deal_id: string;
+  items: ChecklistColumn[];
+  rows: ChecklistRow[];
+  documents_total: number;
+  documents_checked: number;
+  documents_not_checked: string[];
+  documents_excluded: { source_file: string; document_category: string }[];
+  excluded_total: number;
+  truncated: boolean;
+  truncation_reason: string;
+  reranker: string;
+  answerability: boolean;
+  elapsed_ms: number;
+}
+
 /**
  * An indexed document the upload looks related to. A proposal only: nothing
  * has been superseded, and the UI must not present it as if it had.
