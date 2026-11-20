@@ -1681,7 +1681,7 @@ All architecture decisions that deviated from or resolved ambiguities in p4.md a
     - LegalBench-RAG's 21,033 short lines: 2 new flags, both benign.
     - FinanceBench headings were not measured.
   - **Streamlit follow-up:** the reviewer walked about 200 console calls and found no remaining image or raw-HTML path.
-  - **Pre-existing, outside this decision:** the console puts the `?deal_id=` value into the API paths it calls with the admin key.
+  - **Pre-existing, now fixed:** the console put a typed or `?deal_id=` deal id straight into the API paths it calls with the admin key, so a crafted link holding "/", ".." or "?" could steer those requests to another endpoint. It now accepts only the API's own `DEAL_ID_PATTERN`; a test keeps the two equal, and an end-to-end test opens a crafted link (`tests/test_console_deal_id.py`).
   - **Not changed (Decision 76's limits):** role labels the screen never flags, even on their own line. Examples are "System:", "USER:", "[SYSTEM]:", a full-width colon, or a zero-width or Cyrillic letter inside the word.
 - **Impact**: api/security.py, api/routes/query.py, api/models/response_models.py (description only), README.md, tests/{test_public_trace,test_injection_public_trace}.py, tests/test_fuzz_properties.py, app/{markdown_safety,styles,streamlit_app}.py, app/components/{answer_display,verification,citation_viewer,risk_dashboard,version_browser,document_uploader,agent_trace_viewer}.py, tests/test_console_images.py, src/data_processing/injection_screen.py, web/components/PipelineTimeline.tsx, web/tests/pipelineTimeline.test.tsx
 

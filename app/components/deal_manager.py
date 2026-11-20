@@ -2,10 +2,29 @@
 Deal manager component — deal CRUD UI.
 """
 
+import re
+
 import streamlit as st
 import requests
 
 from src.utils.admin_client import admin_headers
+
+# The API's DEAL_ID_PATTERN (api/models/request_models.py; a test keeps the two
+# equal). A deal id typed in or taken from a `?deal_id=` link goes into the
+# paths this console requests with the admin key, so anything else — "/", "..",
+# "?" — could point those requests at another endpoint.
+_DEAL_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def valid_deal_id(value: str | None) -> str | None:
+    """`value` when it is a well-formed deal id, else None (with a warning if it was given)."""
+    value = (value or "").strip()
+    if not value:
+        return None
+    if _DEAL_ID.match(value):
+        return value
+    st.warning("That is not a deal id: letters, digits, '_' and '-' only, up to 64 characters.")
+    return None
 
 
 def render_deal_manager(api_url: str) -> str | None:
@@ -74,7 +93,7 @@ def render_deal_manager(api_url: str) -> str | None:
     # Manual deal ID entry as fallback
     manual_id = st.text_input("Or enter Deal ID directly", placeholder="UUID")
     if manual_id:
-        return manual_id
+        return valid_deal_id(manual_id)
 
     # `?deal_id=...` deep link, last.
     #
@@ -84,4 +103,4 @@ def render_deal_manager(api_url: str) -> str | None:
     # deal without a running API: every other path here depends on GET /deals, so
     # those tests silently required the backend and passed or failed on whether
     # an unrelated server happened to be up.
-    return st.query_params.get("deal_id") or None
+    return valid_deal_id(st.query_params.get("deal_id"))
