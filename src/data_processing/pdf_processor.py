@@ -48,6 +48,7 @@ import fitz  # PyMuPDF
 from src.data_processing.errors import DocumentExtractionError, NoExtractableContentError
 from src.data_processing.legal_clause_segmenter import LegalClauseSegmenter
 from src.data_processing.multi_page_table_stitcher import MultiPageTableStitcher
+from src.utils.fail_open import fail_open
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -634,8 +635,13 @@ class PDFProcessor:
         # was: its rows may run into the next statement, which the first
         # page's title does not name.
         regions = table.get("regions") or []
-        extent = (regions[0][1][0], regions[0][1][2]) if regions and regions[0][1] else None
-        title = self._title_lines(recent, len(recent), 0, extent) if page_range[0] == page_range[-1] else []
+        bbox = regions[0][1] if regions and regions[0][1] else None
+        extent = (bbox[0], bbox[2]) if bbox else None
+        # Optional (Decision 88): a title that cannot be read is no title.
+        title = fail_open(
+            "pdf_table_title", self._title_lines, recent, len(recent), 0, extent, bbox[1] if bbox else None,
+            default=[],
+        ) if page_range[0] == page_range[-1] else []
         caption = " ".join(title + [u for u in units if u not in title])
         return PDFSection(
             text="\n".join(rows_text),
@@ -913,7 +919,8 @@ class PDFProcessor:
             elif source is not None or borrowed is not None:
                 above = top - (len(caption_rows) if borrowed is None else 0)
                 extent = (rows[i].cells[0].x0, max(anchors))
-                title = " ".join(self._title_lines(rows, above, floor, extent))
+                title = " ".join(fail_open("pdf_table_title", self._title_lines, rows, above, floor, extent,
+                                           default=[]))
                 if not title and borrowed is not None:
                     title = borrowed.title
             if source is not None and header_index is not None:
@@ -974,13 +981,18 @@ class PDFProcessor:
         return -1
 
     def _title_lines(self, rows: list[_Row], index: int, floor: int = 0,
-                     extent: tuple[float, float] | None = None) -> list[str]:
+                     extent: tuple[float, float] | None = None, top: float | None = None) -> list[str]:
         """
         The title printed right above a table's header: up to four short lines,
         none a sentence, read upwards from row `index` (exclusive) and no
         further than `floor`, in reading order; with `extent`, the table's left
         and right edges, a line set wholly beside the table (the other column
-        of a two-column page) ends it.
+        of a two-column page) ends it; with `top`, the table's top on its
+        page, a line at or below it ends it, as one printed on an earlier
+        page: over a ruled grid that opens its page, the rows since the last
+        heading end with the previous page's last line ("See accompanying
+        notes…", a running footer), and no line of the grid's own page
+        comes after it to show the page break.
 
         A statement's title ("ADOBE SYSTEMS INCORPORATED" / "CONSOLIDATED
         STATEMENTS OF CASH FLOWS") is printed over its column header, often in
@@ -1001,6 +1013,8 @@ class PDFProcessor:
             text = row.text.strip()
             if k + 1 < len(rows) and row.top > rows[k + 1].top:
                 break  # the previous page: rows since a heading can run across a page break
+            if top is not None and row.top >= top:
+                break  # the previous page's last lines, over a ruled grid that opens its page
             if extent is not None and all(c.x1 < extent[0] or c.x0 > extent[1] for c in row.cells):
                 break  # the other column of the page
             if not found and (self._period_row(row) or not _CAPTION.search(text) and all(

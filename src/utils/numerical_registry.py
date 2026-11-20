@@ -1019,7 +1019,10 @@ class NumericalRegistry:
         section = str(chunk.get("section_heading") or "")
 
         periods: list[str | None] = list(inherited or [])
-        bases: list[str] = [""] * len(periods)  # what each column's figures are (column_basis)
+        # What each column's figures are (column_basis); a table continued
+        # from the chunk before keeps its header's (see _Header).
+        carried = getattr(inherited, "bases", None)
+        bases: list[str] = list(carried) if carried and len(carried) == len(periods) else [""] * len(periods)
         context: list[str] = []  # header lines printed above a period header
         for line in text.splitlines():
             if not line.strip() or _RULE_LINE.match(line):
@@ -1110,7 +1113,7 @@ class NumericalRegistry:
                     section_heading=section,
                     basis=bases[i] if i < len(bases) else "",
                 ))
-        return periods
+        return _Header(periods, bases)
 
     def _register_keyed_row(self, line: str, source: str, page, interim: bool = False,
                             section: str = "", horizon: tuple[int, int, int] | None = None) -> bool:
@@ -1437,17 +1440,36 @@ def _distinct_values(entries: list[NumericalEntry]) -> list[NumericalEntry]:
     return distinct
 
 
+class _Header(list):
+    """
+    The period keys in force at the end of a chunk's text, with what each
+    column's figures are (column_basis). The next chunk of the same table
+    starts under both: with the keys alone, a balance sheet continued in
+    the next chunk met a cash-flow line of the same name again.
+    """
+
+    def __init__(self, keys=(), bases=()):
+        super().__init__(keys)
+        bases = list(bases)
+        self.bases = bases if len(bases) == len(self) else [""] * len(self)
+
+
 def _header_bases(line: str, context: list[str]) -> list[str]:
     """
     What each period column of a text header holds (see column_basis): flows
     under a span on the line or the lines above it, balances under a date, ""
-    otherwise.
+    otherwise. A date printed before the first year only ("December 31,
+    2023  2022") heads every column, as _header_keys reads it.
     """
     tokens = list(_PERIOD.finditer(line))
     if _SPAN.search("\n".join([*context, line])):
         return ["flow"] * len(tokens)
-    shared = any(_MONTH_DAY.search(c) for c in context)
-    return ["balance" if shared or _date_before(line, t.start()) else "" for t in tokens]
+    if any(_MONTH_DAY.search(c) for c in context):
+        return ["balance"] * len(tokens)
+    dated = [_date_before(line, t.start()) for t in tokens]
+    if dated and dated[0] and not any(dated[1:]):
+        return ["balance"] * len(tokens)
+    return ["balance" if d else "" for d in dated]
 
 
 def _bases_clash(a: NumericalEntry, b: NumericalEntry) -> bool:
@@ -1471,9 +1493,26 @@ def _basis_parts(entries: list[NumericalEntry]) -> tuple[list[list[NumericalEntr
     return parts, "" in bases
 
 
+# What a statement prints in a value column for nil or "not meaningful": the
+# converter keeps such a cell as printed, with no value.
+_NIL_MARKS = {"-", "—", "–", "−", "n/a", "na", "n.a.", "nm", "n.m.", "n/m"}
+
+
 def _has_values(row: dict) -> bool:
-    """Whether a structured row states any figure (a subheading, "Swaptions:", states none)."""
-    return any(isinstance(c, dict) and "normalized_value" in c for c in (row.get("values") or {}).values())
+    """
+    Whether a structured row states a figure, or a nil in a value column: a
+    subheading ("Swaptions:") states neither. A row of dashes
+    ("Amortization of intangibles  —  —") is a line item with nothing to
+    compare, not a subheading over the rows below it.
+    """
+    for cell in (row.get("values") or {}).values():
+        if not isinstance(cell, dict):
+            continue
+        if "normalized_value" in cell:
+            return True
+        if str(cell.get("raw") or "").replace("$", " ").strip().lower() in _NIL_MARKS:
+            return True
+    return False
 
 
 def _repeated_labels(rows: list[dict]) -> set[str]:

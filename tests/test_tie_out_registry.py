@@ -386,6 +386,31 @@ class TestIdentity:
         [agreement] = result.agreements
         assert {e.source_file for e in agreement.entries} == {"awk_2020.pdf", "awk_2021.pdf"}
 
+    def test_a_date_before_the_first_year_makes_every_column_a_balance(self):
+        # "December 31, 2023  2022" keys both columns as balances; the 2022 one is a balance too.
+        balances = text_chunk("a.pdf", "December 31, 2023  2022\nAccrued taxes  50  45\n")
+        flows = text_chunk("b.pdf", "Year Ended December 31, 2022\nAccrued taxes  3\n")
+        assert not tie([balances, flows]).conflicts
+
+    def test_a_table_continued_in_the_next_chunk_keeps_its_columns_basis(self):
+        head = text_chunk("a.pdf", "December 31, 2023  2022\nAccrued taxes  50  45\n",
+                          table_id="t9", chunk_index=0)
+        rest = text_chunk("a.pdf", "Deferred revenue  12  10\n", table_id="t9", chunk_index=1)
+        flows = text_chunk("b.pdf", "Year Ended December 31, 2023\nDeferred revenue  3\n")
+        registry, _ = NumericalRegistry.from_documents([head, rest, flows])
+        assert {e.basis for e in registry._entries[("deferred revenue", "FY2023")]} == {"balance", "flow"}
+        assert not registry.tie_out().conflicts
+
+    def test_a_row_of_nils_is_a_line_item_not_a_subheading(self):
+        chunk = rows_chunk("a.pdf", [
+            ("Swaptions:", {}),
+            ("Notional value sold", {"2021": cell("2,000")}),
+            ("Amortization of intangibles", {"2021": {"raw": "—"}, "2020": {"raw": "$ —"}}),
+            ("Notional value sold (2)", {"2021": cell("1,000")}),
+        ])
+        registry, _ = NumericalRegistry.from_documents([chunk])
+        assert {label for label, _ in registry._entries} == {"swaptions notional value sold"}
+
     def test_a_balance_still_meets_a_figure_whose_header_does_not_say(self):
         result = tie([
             rows_chunk("a.pdf", [("Total deferred tax assets", {"December 31, 2020": cell("1,083")})]),

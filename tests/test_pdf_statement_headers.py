@@ -583,6 +583,28 @@ class TestTitles:
         current = [row(label("(In millions)"), top=80.0)]
         assert PDFProcessor()._title_lines(previous + current, 2) == ["(In millions)"]
 
+    def test_a_ruled_grid_opening_its_page_takes_no_title_from_the_page_before(self):
+        # The previous page's last line, then a grid at the top of the next page.
+        recent = [row(label("See accompanying notes to consolidated financial statements"), top=740.0)]
+        grid = {"headers": [], "rows": [["Net revenue", "3,930", "3,777"]], "page_range": [57, 57],
+                "regions": [(57, (50.0, 72.0, 560.0, 400.0))]}
+        assert PDFProcessor()._ruled_section(grid, "", recent).caption == ""
+        own = [row(label("CONSOLIDATED BALANCE SHEETS"), top=40.0)]
+        assert PDFProcessor()._ruled_section(grid, "", recent + own).caption == "CONSOLIDATED BALANCE SHEETS"
+
+    def test_a_title_that_cannot_be_read_is_no_title(self, monkeypatch):
+        # Decision 88: reading a title is optional; the default is the caption without one.
+        monkeypatch.setenv("STRICT_OPTIONAL_STEPS", "0")
+        processor = PDFProcessor()
+
+        def unreadable(*args, **kwargs):
+            raise ValueError("unreadable")
+
+        monkeypatch.setattr(processor, "_title_lines", unreadable)
+        recent = _page([row(label("Consolidated Statements of Operations")), row(label("(In millions)"))])
+        grid = {"headers": [], "rows": [["Operating revenues", "3,930"]], "page_range": [86, 86]}
+        assert processor._ruled_section(grid, "", recent).caption == "(In millions)"
+
     def test_a_ruled_grid_on_one_page_takes_the_title_over_its_header(self):
         recent = _page([
             row(label("American Water Works Company, Inc. and Subsidiary Companies")),
