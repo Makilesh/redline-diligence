@@ -91,13 +91,20 @@ def test_the_framed_contract_keeps_its_identity(framed):
 
 
 class _Page:
-    """What PyMuPDF's page.get_text("dict") gives for single-span lines (a built-in font cannot carry U+037E)."""
+    """What PyMuPDF's page.get_text("dict") gives for single-span lines (a built-in font cannot carry U+037E),
+    and "rawdict", which gives each character with its box instead of the span's text."""
 
     def __init__(self, lines: list[tuple[float, str]]):
         self.lines = lines
 
     def get_text(self, kind, sort=False):
-        return {"blocks": [{"lines": [{"spans": [{"text": text, "size": 10.0}], "bbox": (72.0, y, 400.0, y + 10.0)}
+        def span(text: str) -> dict:
+            if kind == "rawdict":
+                return {"chars": [{"c": ch, "bbox": (72.0 + 5 * n, 0.0, 77.0 + 5 * n, 10.0)}
+                                  for n, ch in enumerate(text)], "size": 10.0}
+            return {"text": text, "size": 10.0}
+
+        return {"blocks": [{"lines": [{"spans": [span(text)], "bbox": (72.0, y, 400.0, y + 10.0)}
                                       for y, text in self.lines]}]}
 
 

@@ -42,26 +42,30 @@ def statement(tmp_path_factory):
 
 
 class TestBorderlessStatement:
-    def test_statement_is_one_table_across_both_pages(self, statement):
+    def test_each_page_of_the_statement_is_a_table_cited_at_its_page(self, statement):
+        # Decision 93: a statement continued on the next page is one table per
+        # page, each cited at the page its rows are printed on, each under the
+        # statement's header and named by its title.
         tables = _tables(statement)
-        assert len(tables) == 1
-        reps = next(iter(tables.values()))
-        grid = reps["markdown"][0]
-        assert grid["page_range"] == [1, 2]
-        assert grid["scale_label"] == "thousands"
-        text = grid["text"]
-        # Every row keeps its own figures in its own columns, page 2 included.
-        assert "| Year Ended December 31, 2023 | Year Ended December 31, 2022 |" in text
-        assert "| Total revenues | 452,800 | 387,100 | 341,900 |" in text
-        assert "| Cost of revenues | (181,100) | (158,300) | (143,600) |" in text
-        assert "| Net income (loss) | 33,200 | 21,900 | (2,000) |" in text
-        assert "| Diluted earnings (loss) per share | 1.38 | 0.92 | (0.09) |" in text
-        assert "(in thousands, except per share data)" in text
-        assert sx.STATEMENT_FOOTNOTE in text
+        assert len(tables) == 2
+        first, second = (reps["markdown"][0] for reps in tables.values())
+        assert first["page_number"] == 1 and first["page_range"] == [1, 1]
+        assert second["page_number"] == 2 and second["page_range"] == [2, 2]
+        for grid in (first, second):
+            assert grid["scale_label"] == "thousands"
+            assert "| Year Ended December 31, 2023 | Year Ended December 31, 2022 |" in grid["text"]
+            assert sx.STATEMENT_TITLE in grid["text"]
+            assert "(in thousands, except per share data)" in grid["text"]
+        # Every row keeps its own figures in its own columns, on its own page.
+        assert "| Total revenues | 452,800 | 387,100 | 341,900 |" in first["text"]
+        assert "| Cost of revenues | (181,100) | (158,300) | (143,600) |" in first["text"]
+        assert "| Net income (loss) | 33,200 | 21,900 | (2,000) |" in second["text"]
+        assert "| Diluted earnings (loss) per share | 1.38 | 0.92 | (0.09) |" in second["text"]
+        assert sx.STATEMENT_FOOTNOTE in second["text"]
 
     def test_scale_applies_to_amounts_only(self, statement):
-        reps = next(iter(_tables(statement).values()))
-        rows = {r["line_item"]: r for c in reps["row_by_row"] for r in c["structured_rows"]}
+        rows = {r["line_item"]: r for reps in _tables(statement).values()
+                for c in reps["row_by_row"] for r in c["structured_rows"]}
         revenue = rows["Total revenues"]["values"]["Year Ended December 31, 2023"]
         assert revenue["normalized_value"] == pytest.approx(452_800_000)
         assert revenue["period"] == "FY2023"
