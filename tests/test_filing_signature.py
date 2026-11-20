@@ -128,6 +128,40 @@ class TestSignaturePage:
     def test_nothing_but_a_labelled_name_is_read(self, block):
         assert _signed(block) == ""
 
+    @pytest.mark.parametrize("block", [
+        # Decision 98's review: an abbreviation's period is not the sentence's full stop.
+        f"{SENTENCE[:-1]}, in Washington, D.C. FANNIE MAE (Registrant)",
+        f"{SENTENCE[:-1]}, in the U.S. ACME CORP (Registrant)",
+        # No full stop at all: the name's own periods are not one either.
+        f"{SENTENCE[:-1]} AMAZON.COM, INC. (Registrant)",
+        f"{SENTENCE[:-1]} ACME HOLDINGS INC. SUBSIDIARY CO (Registrant)",
+        # A page break's running header or a heading before the name.
+        f"{SENTENCE} Table of Contents ACME CORP (Registrant)",
+        f"{SENTENCE} SIGNATURES ACME CORP (Registrant)",
+        f"{SENTENCE} Index ACME CORP (Registrant)",
+        f"{SENTENCE} Page ACME CORP (Registrant)",
+        # Prose, and a sentence break inside what is left.
+        f"{SENTENCE} The following is the Company's report ACME (Registrant)",
+        f"{SENTENCE} Paul, State of Minnesota. 3M COMPANY (Registrant)",
+        f"{SENTENCE} acme corp (Registrant)",
+    ])
+    def test_what_is_not_a_name_alone_gives_none(self, block):
+        assert _signed(block) == ""
+
+    @pytest.mark.parametrize("tail, name", [
+        (", in the City of St. Paul, State of Minnesota. 3M COMPANY", "3M COMPANY"),
+        (", in the City of St. Louis, State of Missouri. EMERSON ELECTRIC CO.", "EMERSON ELECTRIC CO"),
+        (". J. C. PENNEY COMPANY, INC.", "J. C. PENNEY COMPANY, INC"),
+        (". COCA-COLA FEMSA, S.A.B. DE C.V.", "COCA-COLA FEMSA, S.A.B. DE C.V"),
+        (". AT&T INC.", "AT&T INC"),
+        (". NESTLÉ S.A.", "NESTLÉ S.A"),
+        (". AMAZON.COM, INC.", "AMAZON.COM, INC"),
+        (". eBay Inc.", "eBay Inc"),
+        (". McDonald's Corporation", "McDonald's Corporation"),
+    ])
+    def test_names_with_periods_initials_and_marks(self, tail, name):
+        assert _signed(f"{SENTENCE[:-1]}{tail}\n(Registrant)\nBy: /s/ A. Person") == name
+
     def test_blocks_naming_two_registrants_give_none(self):
         other = SIGNATURES.replace("THE COCA-COLA COMPANY", "COCA-COLA ENTERPRISES, INC.")
         assert _signed(SIGNATURES + "\n" + other) == ""
@@ -208,3 +242,21 @@ class TestDownstream:
         del chunk["filing_company"]
         [[check]] = ground_texts([claim], ContextIndex([chunk]))
         assert check.is_confirmed
+
+    def test_naming_one_registrant_does_not_vouch_for_anothers_figures(self):
+        # Decision 98's review: once both filings name their registrant, a claim
+        # naming Coca-Cola must not be confirmed by PepsiCo's figure.
+        pep = {"text": "Values are as stated in the source, in millions.\n"
+                       "Net revenue: Fiscal Year 2017=63,525 Fiscal Year 2016=62,799\n",
+               "source_file": "filing_a.pdf", "is_table": 1, "filing_company": "PepsiCo, Inc"}
+        ko = {"text": "Values are as stated in the source, in millions.\n"
+                      "Goodwill: Fiscal Year 2017=9,401 Fiscal Year 2016=10,629\n",
+              "source_file": "filing_b.pdf", "is_table": 1, "filing_company": "THE COCA-COLA COMPANY"}
+        claim = "Coca-Cola reported net revenue of $63,525 and goodwill of $9,401 in fiscal 2017."
+        checks = ground_texts([claim], ContextIndex([pep, ko]))[0]
+        assert all(c.binding == "unbound" and "PepsiCo, Inc" in c.binding_note for c in checks)
+        # Naming both registrants, or each figure's own, confirms.
+        both = "Coca-Cola's goodwill was $9,401 and PepsiCo's net revenue $63,525 in fiscal 2017."
+        assert all(c.is_confirmed for c in ground_texts([both], ContextIndex([pep, ko]))[0])
+        own = "Coca-Cola reported goodwill of $9,401 in fiscal 2017."
+        assert all(c.is_confirmed for c in ground_texts([own], ContextIndex([pep, ko]))[0])

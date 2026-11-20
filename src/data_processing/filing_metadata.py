@@ -165,10 +165,33 @@ _TRANSLATION_MARKER = re.compile(r"\(\s*Translation\s+of\s+(?:the\s+)?registrant
 # label (31 of the 42 SEC forms among FinanceBench's dev filings: "NIKE, INC.
 # By: /s/ ...", "Date: ... SQUARE, INC."); without it nothing marks where the
 # name ends, so they give none.
+#
+# The sentence ends at "authorized." or after a clause that opens with a comma
+# (", on February 9, 2023.", ", in the City of St. Paul, State of
+# Minnesota."). Inside the clause a period after a single letter ("D.C.",
+# "U.S.") or "St." / "Mt." / "Ft." is an abbreviation, never the full stop,
+# and the clause cannot run into a parenthesis: so "in Washington, D.C. FANNIE
+# MAE (Registrant)" and a sentence with no full stop ("…authorized AMAZON.COM,
+# INC. (Registrant)") give nothing rather than "C. FANNIE MAE" or "COM, INC"
+# (Decision 98's review).
 _SIGNED = re.compile(
     r"\bhas\s+duly\s+caused\s+this\s+(?:\S+\s+){0,6}?to\s+be\s+signed\s+on\s+(?:its\s+)?behalf\s+(?:by|of)\s+"
-    r"the\s+undersigned,?\s+(?:there|here)unto\s+duly\s+authori[sz]ed\b[^.]{0,120}\.",
+    r"the\s+undersigned,?\s+(?:there|here)unto\s+duly\s+authori[sz]ed"
+    r"(?:[,;](?:[^.(]|\.(?=\S)|(?<=\b[A-Za-z])\.|(?<=\bSt)\.|(?<=\bMt)\.|(?<=\bFt)\.){0,120}?)?"
+    r"(?<!\b[A-Za-z])(?<!\bSt)(?<!\bMt)(?<!\bFt)\.(?=\s|$)",
     re.IGNORECASE)
+# What may not sit in a name alone: a running header or heading carried over a
+# page break ("Table of Contents", "SIGNATURES", "Index", "Page").
+_SIGNED_NOT_NAME = re.compile(r"\b(?:table\s+of\s+contents|contents|index|signatures?|page)\b", re.IGNORECASE)
+# A full stop inside a name follows an initial or a dotted abbreviation ("J. C.
+# PENNEY", "S.A.B. DE C.V.") or a corporate one ("Co.", "Inc."); after any
+# other word it ends a sentence ("Paul, State of Minnesota. 3M COMPANY").
+_NAME_ABBREVIATION = re.compile(r"[A-Za-z](?:\.[A-Za-z])*|co|cos|inc|corp|ltd|bros|mfg|intl|st|no", re.IGNORECASE)
+# Words of a name printed in lower case: connectives, particles and a possessive.
+_NAME_LOWER_WORDS = frozenset({
+    "and", "of", "the", "de", "del", "della", "des", "du", "la", "le", "y", "et", "und", "van", "von", "der", "for",
+    "s",
+})
 _SIGNED_LABEL = re.compile(r"\(\s*Registrant\s*\)", re.IGNORECASE)
 # The label follows the name; it must start this close to the sentence's end.
 _SIGNED_NAME_CHARS = 100
@@ -395,10 +418,27 @@ def _signature_name(sections: list[dict]) -> str:
         if not label:
             continue
         name = text[m.end(): label.start()].strip(" _.,:;()|-–—")
-        key = normalize_company_name(name)
-        if key and re.search(r"[A-Za-z]{2}", name) and not _NAME_SPLIT.search(name) and "/" not in name:
-            names.setdefault(key, name)
+        if _is_name_alone(name):
+            names.setdefault(normalize_company_name(name), name)
     return next(iter(names.values())) if len(names) == 1 else ""
+
+
+def _is_name_alone(name: str) -> bool:
+    """
+    Whether text read between a signature block's sentence and its label is a
+    registrant's name and nothing else: letters; no number, field, "/s/" or
+    bracket (_NAME_SPLIT); no running header; no sentence break; every word
+    written as a name is ("Best Buy Co., Inc", "eBay Inc", "3M COMPANY"), but
+    for connectives ("of", "and", "de").
+    """
+    if not normalize_company_name(name) or not re.search(r"[^\W\d_]{2}", name):
+        return False
+    if _NAME_SPLIT.search(name) or "/" in name or _SIGNED_NOT_NAME.search(name):
+        return False
+    if any(not _NAME_ABBREVIATION.fullmatch(m.group(1)) for m in re.finditer(r"([^\s.]+(?:\.[^\s.]+)*)\.\s", name)):
+        return False
+    return all(any(c.isupper() for c in word) or word.lower() in _NAME_LOWER_WORDS
+               for word in re.findall(r"[^\W\d_]+", name))
 
 
 def _quarter_of_10q(text: str, end: date) -> int | None:

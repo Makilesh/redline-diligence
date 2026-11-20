@@ -1227,20 +1227,35 @@ class TestFilingSignature:
         if changed:
             assert "filing_company" not in bare and meta["filing_form"] != "earnings_release" and not table
 
-    @given(_SIGNATURE_PAGES)
-    @example("has duly caused this report to be signed on its behalf by the undersigned, thereunto duly "
-             "authorized. THE COCA-COLA COMPANY (Registrant)")
-    def test_a_signature_name_is_a_labelled_name(self, page):
-        from src.data_processing.filing_metadata import (
-            _NAME_SPLIT,
-            _SIGNED_LABEL,
-            _signature_name,
-            normalize_company_name,
-        )
+    @given(st.sampled_from([
+               "the Registrant has duly caused this report to be signed on its behalf by the undersigned, thereunto "
+               "duly authorized",
+               "PepsiCo has duly caused this Annual Report on Form 10-K to be signed on behalf of the undersigned, "
+               "thereunto duly authorized",
+               "the registrant has duly caused this report to be signed on its behalf by the undersigned hereunto "
+               "duly authorized"]),
+           st.sampled_from(["", ", on February 9, 2023", ", in the City of St. Paul, State of Minnesota",
+                            ", in Washington, D.C", ", in the U.S", ", on the 24th day of February, 2021"]),
+           st.sampled_from([".", ""]),
+           st.sampled_from(["", "Table of Contents", "SIGNATURES", "Index", "Page 112", "112",
+                            "Date: February 23, 2018", "By: /s/ A. Person", "The following is the Company's report",
+                            "in the City of Paris.", "Minnesota."]),
+           st.sampled_from(["THE COCA-COLA COMPANY", "3M COMPANY", "AT&T INC.", "J. C. PENNEY COMPANY, INC.",
+                            "COCA-COLA FEMSA, S.A.B. DE C.V.", "AMAZON.COM, INC.", "NESTLÉ S.A.", "eBay Inc.",
+                            "Best Buy Co., Inc."]),
+           st.sampled_from(["(Registrant)", "(REGISTRANT)"]),
+           st.one_of(st.sampled_from(["", "By: /s/ JAMES QUINCEY Date: February 23, 2018"]), domain_text(3)))
+    def test_a_signature_name_is_the_printed_name_alone(self, sentence, clause, stop, junk, name, label, tail):
+        # Built from known parts, a page's signature name is the printed name
+        # exactly or nothing: never a piece of a clause, a header, a field or
+        # prose around it. A clean page (a full stop, nothing but the name
+        # before the label) is read whatever the name's own periods, initials
+        # and marks (Decision 98's review).
+        from src.data_processing.filing_metadata import _signature_name
 
-        name = _signature_name([{"text": page, "page_number": 90}])
-        if name:
-            text = re.sub(r"\s+", " ", page)
-            assert name in text and normalize_company_name(name)
-            assert not _NAME_SPLIT.search(name) and "/" not in name
-            assert _SIGNED_LABEL.search(text, text.index(name) + len(name))
+        page = f"{sentence}{clause}{stop} {junk} {name} {label} {tail}"
+        printed = name.strip(" _.,:;()|-–—")
+        read = _signature_name([{"text": page, "page_number": 90}])
+        assert read in ("", printed)
+        if stop and not junk and clause not in (", in Washington, D.C", ", in the U.S"):
+            assert read == printed

@@ -2869,31 +2869,41 @@ def _company_withheld(index: "ContextIndex", text: str, chunk_ids: list[int]) ->
     ("COCACOLA_2017_10K.pdf" for "Coca-Cola") — and the claim writes a name
     those chunks never hold ("PepsiCo reported goodwill of $5,821.1 …" over
     General Mills' balance sheet). Documents with no registrant are never
-    withheld on this ground.
+    withheld on this ground. When the figures come from several registrants'
+    filings, each is checked on its own: naming one does not vouch for
+    another's figures.
 
     Args:
         index: The context.
         text: The claim.
         chunk_ids: The chunks its confirmed figures were found in.
     """
-    filers = sorted({index.chunk_filers.get(ci, "") for ci in chunk_ids} - {""})
-    if not filers or any(_names_filer(text, filer) for filer in filers):
-        return ""
     names = _name_words(text)
     if not names:
         return ""
     squashed = _squash(text)
+    # Each registrant on its own (Decision 98's review): a claim that names one
+    # filing's registrant does not vouch for figures it confirms from another's
+    # ("Coca-Cola reported net revenue of $63,525", PepsiCo's figure).
+    by_filer: dict[str, list[int]] = {}
     for ci in chunk_ids:
-        source = re.split(r"[\\/]", index.chunk_evidence.get(ci, "").split("\n", 1)[0])[-1]
-        stem = _squash(re.split(r"[_\W\d]", source + "_")[0])
-        if len(stem) > 2 and stem in squashed:
-            return ""
-    evidence = "\n".join(index.chunk_evidence.get(ci, "") for ci in chunk_ids)
-    held, held_squashed = set(_WORD_RE.findall(ascii_lower(evidence))), _squash(evidence)
-    absent = [w for w in names if ascii_lower(w) not in held and _squash(w) not in held_squashed]
-    if not absent:
-        return ""
-    return f"the documents holding this figure are {filers[0]}'s, and the statement names {absent[0]}"
+        filer = index.chunk_filers.get(ci, "")
+        if filer:
+            by_filer.setdefault(filer, []).append(ci)
+    for filer in sorted(by_filer):
+        if _names_filer(text, filer):
+            continue
+        own = by_filer[filer]
+        stems = [_squash(re.split(r"[_\W\d]", re.split(r"[\\/]", index.chunk_evidence.get(ci, "").split("\n", 1)[0])[-1]
+                                  + "_")[0]) for ci in own]
+        if any(len(stem) > 2 and stem in squashed for stem in stems):
+            continue
+        evidence = "\n".join(index.chunk_evidence.get(ci, "") for ci in own)
+        held, held_squashed = set(_WORD_RE.findall(ascii_lower(evidence))), _squash(evidence)
+        absent = [w for w in names if ascii_lower(w) not in held and _squash(w) not in held_squashed]
+        if absent:
+            return f"the documents holding this figure are {filer}'s, and the statement names {absent[0]}"
+    return ""
 
 
 def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericCheck]]:
