@@ -988,3 +988,75 @@ def test_the_lookalike_strategy_still_matches(word):
     # which is what makes it reach the code behind the match.
     assert re.fullmatch(word, lookalike(word), re.IGNORECASE)
     assert any(c in lookalike(word) for c in CASE_LOOKALIKES)
+
+
+# Decision 98: the registrant's name read from a filing's signature page when
+# its cover prints none.
+_SIGNATURE_PARTS = st.one_of(
+    st.sampled_from([
+        "Pursuant to the requirements of Section 13 or 15(d) of the Securities Exchange Act of 1934,",
+        "the Registrant has duly caused this report to be signed on its behalf by the undersigned,",
+        "PepsiCo has duly caused this Annual Report on Form 10-K to be signed on behalf of the undersigned",
+        "thereunto duly authorized.", "hereunto duly authorized, on February 9, 2023.", "thereunto duly authorized",
+        "THE COCA-COLA COMPANY", "JPMorgan Chase & Co.", "3M COMPANY", "THE COMPANY", "(Registrant)",
+        "(REGISTRANT)", "By: /s/ JAMES QUINCEY", "Date: February 23, 2018", "SIGNATURES", "165", ".", "\n",
+    ]),
+    domain_text(3),
+)
+_SIGNATURE_PAGES = st.lists(_SIGNATURE_PARTS, max_size=16).map(" ".join)
+_FILING_COVERS = st.one_of(
+    st.sampled_from([
+        "UNITED STATES SECURITIES AND EXCHANGE COMMISSION Washington, D.C. 20549 FORM 10-K For the fiscal year "
+        "ended December 31, 2017 Commission File Number 001-02217 (Exact name of Registrant as specified in its "
+        "charter)",
+        "UNITED STATES SECURITIES AND EXCHANGE COMMISSION Washington, D.C. 20549 FORM 10-Q For the quarterly period "
+        "ended June 30, 2023 Commission file number 1-3285 3M COMPANY (Exact name of registrant as specified in its "
+        "charter)",
+        "SECURITIES AND EXCHANGE COMMISSION Washington FORM 8-K Date of report: May 20, 2022",
+        "BOLINGBROOK, Ill.--(BUSINESS WIRE)-- Beauty Shop, Inc. (NASDAQ: BSHP) today announced financial results "
+        "for the fourth quarter ended January 28, 2023.",
+    ]),
+    domain_text(12),
+)
+
+
+class TestFilingSignature:
+    @given(_FILING_COVERS, _SIGNATURE_PAGES, st.booleans())
+    @example("UNITED STATES SECURITIES AND EXCHANGE COMMISSION Washington, D.C. 20549 FORM 10-K For the fiscal year "
+             "ended December 31, 2017 Commission File Number 001-02217 (Exact name of Registrant as specified in its "
+             "charter)",
+             "the Registrant has duly caused this report to be signed on its behalf by the undersigned, thereunto "
+             "duly authorized. THE COCA-COLA COMPANY (Registrant) By: /s/ JAMES QUINCEY", False)
+    def test_the_signature_page_fills_only_a_missing_name(self, cover, page, table):
+        from unittest import mock
+
+        import src.data_processing.filing_metadata as fm
+
+        sections = [{"text": cover, "page_number": 1}, {"text": page, "page_number": 90, "is_table": int(table)}]
+        meta = fm.extract_filing_metadata(sections)
+        with mock.patch.object(fm, "_signature_name", return_value=""):
+            bare = fm.extract_filing_metadata(sections)
+        changed = {k for k in set(meta) | set(bare) if meta.get(k) != bare.get(k)}
+        # The cover's fields and keys never change; a name is only ever added,
+        # to an SEC form whose cover printed none, from a page read as text.
+        assert changed <= {"filing_company"}
+        if changed:
+            assert "filing_company" not in bare and meta["filing_form"] != "earnings_release" and not table
+
+    @given(_SIGNATURE_PAGES)
+    @example("has duly caused this report to be signed on its behalf by the undersigned, thereunto duly "
+             "authorized. THE COCA-COLA COMPANY (Registrant)")
+    def test_a_signature_name_is_a_labelled_name(self, page):
+        from src.data_processing.filing_metadata import (
+            _NAME_SPLIT,
+            _SIGNED_LABEL,
+            _signature_name,
+            normalize_company_name,
+        )
+
+        name = _signature_name([{"text": page, "page_number": 90}])
+        if name:
+            text = re.sub(r"\s+", " ", page)
+            assert name in text and normalize_company_name(name)
+            assert not _NAME_SPLIT.search(name) and "/" not in name
+            assert _SIGNED_LABEL.search(text, text.index(name) + len(name))

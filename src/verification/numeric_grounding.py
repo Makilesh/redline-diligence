@@ -2835,8 +2835,9 @@ def _names_filer(text: str, filer: str) -> bool:
     """
     True when a claim names a filing's registrant: all the distinctive words of
     its name ("Kraft Heinz"), the name run together ("CocaCola"), or its first
-    word not followed by another name ("Adobe reported" for ADOBE SYSTEMS
-    INCORPORATED, but not "General Motors" for GENERAL MILLS, INC.).
+    word, written with a capital as a name is, not followed by another name
+    ("Adobe reported" for ADOBE SYSTEMS INCORPORATED, but not "General Motors"
+    nor "selling, general, and administrative" for GENERAL MILLS, INC.).
     """
     own = [w for w in _WORD_RE.findall(ascii_lower(filer)) if w not in _CORPORATE_WORDS and len(w) > 1]
     if not own:
@@ -2845,6 +2846,8 @@ def _names_filer(text: str, filer: str) -> bool:
     if all(w in words for w in own) or "".join(own) in _squash(text):
         return True
     for m in re.finditer(rf"(?<![A-Za-z]){re.escape(own[0])}(?![A-Za-z])", text, re.IGNORECASE):
+        if not any(c.isupper() for c in m.group(0)):
+            continue
         after = re.match(r"[\s&-]*([A-Za-z]+)", text[m.end():])
         if after is None or not after.group(1)[0].isupper() or ascii_lower(after.group(1)) in _NOT_A_NAME:
             return True
