@@ -37,12 +37,21 @@ years are named either way), and an estimate as "FY2024E". A bare year in a
 documents print quarters and year-to-date columns under the same years. A line
 of prose that happens to name a year is not a header.
 
+Which line item a figure is (Decision 93): a figure read under a balance date
+is never compared with one read under a year's or a quarter's span, though
+both may be keyed "FY2020"; a line item a table prints more than once, under
+different subheadings, is read with its subheading ("Swaptions: Pre-tax gain
+recognized in Interest expense"); and a table is read once — where its
+structured rows carry its periods, its markdown and narrative forms are not
+read again. A month/day/year date ("3/25/2023") is read as the date.
+
 CRITICAL: Compare normalised values only. Raw values across documents with
 different scale factors produce false inconsistencies.
 """
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from itertools import combinations
@@ -123,6 +132,12 @@ _MONTH_DAY = re.compile(
     rf"\b(?P<m>{_MONTH_WORD})\.?\s+(?P<d>\d{{1,2}})\b(?!,?\s*(?:19|20)\d{{2}})",
     re.IGNORECASE,
 )
+# A day and month, a year after it or not: a column headed by a date.
+_MONTH_DAY_ANY = re.compile(rf"\b{_MONTH_WORD}\.?\s+\d{{1,2}}\b", re.IGNORECASE)
+# A date written month/day/year, as PepsiCo's releases head their columns
+# ("12 Weeks Ended 3/25/2023").
+_NUMERIC_DATE = re.compile(r"(?<![\d/])\d{1,2}/\d{1,2}/(?:19|20)\d{2}(?![\d/])")
+_NUMERIC_DATE_BEFORE_YEAR = re.compile(r"(?<![\d/])(?P<m>\d{1,2})/(?P<d>\d{1,2})/$")
 # What a column's figures cover. A quarter is three months, a 13-week quarter
 # too; "52 weeks" and "twelve months" are a year.
 _SPAN = re.compile(
@@ -311,12 +326,43 @@ def _month_day(month: str, day: str) -> tuple[int, int] | None:
 
 def _date_before(line: str, start: int) -> tuple[int, int] | None:
     """The (month, day) printed immediately before position `start`, if any."""
+    numeric = _NUMERIC_DATE_BEFORE_YEAR.search(line[max(0, start - 6):start])
+    if numeric:
+        # "12 Weeks Ended 3/25/2023": a US filing's month/day/year.
+        month, day = int(numeric.group("m")), int(numeric.group("d"))
+        return (month, day) if 1 <= month <= 12 and 1 <= day <= 31 else None
     found = _DATE_BEFORE_YEAR.search(line[max(0, start - 24):start])
     if not found:
         return None
     if found.group("m1"):
         return _month_day(found.group("m1"), found.group("d1"))
     return _month_day(found.group("m2"), found.group("d2"))
+
+
+def column_basis(header: str) -> str:
+    """
+    What a column's figures are, as its header says: "flow" under a span (a
+    year, quarter or year-to-date ended), "balance" under a date with no span
+    ("December 31, 2020", "At May 31, 2023"), "" when the header does not say
+    (a bare year, "FY2023").
+
+    The registry keys a 31 December balance in an annual document as that
+    fiscal year, so that it meets the same balance printed under "2020"; it
+    then met a cash-flow line of the same name too — American Water Works'
+    "Accrued taxes", a balance of 50 against a change of 3 (Decision 93).
+    Figures of the two kinds are never compared.
+
+    Args:
+        header: Column header, with any header lines over it.
+
+    Returns:
+        "flow", "balance" or "".
+    """
+    if _SPAN.search(header):
+        return "flow"
+    if _MONTH_DAY_ANY.search(header) or _NUMERIC_DATE.search(header):
+        return "balance"
+    return ""
 
 
 def _span_kind(match: re.Match) -> str | None:
@@ -514,6 +560,8 @@ class NumericalEntry:
     raw_text: str = ""
     # Where the figure sits in its document, for a reader without page numbers.
     section_heading: str = ""
+    # "flow" or "balance" when its column header says which (column_basis).
+    basis: str = ""
 
     @property
     def tolerance(self) -> float:
@@ -627,6 +675,10 @@ class NumericalRegistry:
 
     def __init__(self):
         self._entries: dict[tuple[str, str], list[NumericalEntry]] = {}
+        # Per table (document, table_id): the line items it prints more than
+        # once, and the subheading in force where its last chunk read ended.
+        self._repeats: dict[tuple[str, str], set[str]] = {}
+        self._subheadings: dict[tuple[str, str], tuple[int, str]] = {}
 
     def __len__(self) -> int:
         return sum(len(v) for v in self._entries.values())
@@ -638,6 +690,11 @@ class NumericalRegistry:
         Args:
             entry: NumericalEntry to register.
         """
+        if not math.isfinite(entry.normalized_value):
+            # A run of digits too long for a float is no figure: compared, its
+            # infinite value made a conflict's spread NaN (found by the fuzz
+            # profile, on main's registry too).
+            return
         key = (normalize_metric_label(entry.metric_name), entry.fiscal_year)
         bucket = self._entries.setdefault(key, [])
         for i, existing in enumerate(bucket):
@@ -665,8 +722,11 @@ class NumericalRegistry:
             Populated NumericalRegistry.
         """
         registry = cls()
+        registry._prepare(chunks)
+        ranges = _structured_ranges(chunks)
         for chunk in chunks:
-            registry.add_chunk(chunk)
+            if not _read_elsewhere(chunk, ranges):
+                registry.add_chunk(chunk)
         return registry
 
     @classmethod
@@ -685,7 +745,9 @@ class NumericalRegistry:
         and a table section that prints no header of its own reads the
         document's only one — the sample financials' "KEY FINANCIAL METRICS"
         rows sit under the "FY2023  FY2022" of the statements above them. A
-        document that prints more than one period header lends none.
+        document that prints more than one period header lends none. A table
+        is read once (see _read_elsewhere), and a line item it repeats under
+        subheadings is read with its subheading (see _register_structured).
 
         Args:
             chunks: Child chunk payloads of one deal. Documents (by
@@ -698,6 +760,8 @@ class NumericalRegistry:
             `should_stop` ended the build.
         """
         registry = cls()
+        registry._prepare(chunks)
+        ranges = _structured_ranges(chunks)
         documents: dict[str, list[dict]] = {}
         for chunk in chunks:
             documents.setdefault(str(chunk.get("source_file") or "unknown"), []).append(chunk)
@@ -714,6 +778,8 @@ class NumericalRegistry:
             scheme = _document_scheme(ordered)
             last_header: dict[str, list[str | None]] = {}
             for chunk in ordered:
+                if _read_elsewhere(chunk, ranges):
+                    continue
                 table_id = chunk.get("table_id") or ""
                 inherited = last_header.get(table_id) if table_id else None
                 if inherited is None and chunk.get("is_table"):
@@ -722,6 +788,28 @@ class NumericalRegistry:
                 if table_id and trailing:
                     last_header[table_id] = trailing
         return registry, len(documents)
+
+    def _prepare(self, chunks: list[dict]) -> None:
+        """Notes, per table, the line items it prints more than once (see _register_structured)."""
+        rows_by_table: dict[tuple[str, str], list[dict]] = {}
+        for chunk in chunks:
+            if chunk.get("table_id") and chunk.get("structured_rows"):
+                rows_by_table.setdefault(_table_key(chunk), []).extend(chunk["structured_rows"])
+        for key, rows in rows_by_table.items():
+            self._repeats[key] = _repeated_labels(rows)
+
+    def _subheading_before(self, chunk: dict) -> str:
+        """The subheading over a chunk's first row: its table's previous chunk's last, when read just before."""
+        span = _row_range(chunk)
+        carried = self._subheadings.get(_table_key(chunk)) if chunk.get("table_id") else None
+        if carried and span and carried[0] == span[0] - 1:
+            return carried[1]
+        return ""
+
+    def _subheading_after(self, chunk: dict, subheading: str) -> None:
+        span = _row_range(chunk)
+        if chunk.get("table_id") and span:
+            self._subheadings[_table_key(chunk)] = (span[1], subheading)
 
     def add_chunk(self, chunk: dict, inherited: list[str | None] | None = None) -> list[str | None]:
         """
@@ -748,18 +836,42 @@ class NumericalRegistry:
         return trailing
 
     def _register_structured(self, chunk: dict, source: str, page) -> None:
-        """Registers figures from structured payload fields, when present."""
+        """
+        Registers figures from structured payload fields, when present.
+
+        A line item a table prints more than once, under different subheadings
+        (Verizon's "Pre-tax gain recognized in Interest expense" under
+        "Treasury Rate Locks:" and under "Swaptions:"), is that subheading's
+        line: it is read as "Swaptions: Pre-tax gain recognized in Interest
+        expense", and when its subheading is not within reach (an earlier chunk
+        of the table that was not read) it is not read at all. Read by its
+        label alone, the 2021 10-K's swaptions row met the 2022 10-K's
+        interest-rate-swaps row as one figure (Decision 93).
+        """
         interim = _is_interim(chunk)
         horizon = _horizon(chunk)
         section = str(chunk.get("section_heading") or "")
-        for row in chunk.get("structured_rows") or []:
+        rows = chunk.get("structured_rows") or []
+        repeated = self._repeats.get(_table_key(chunk)) if chunk.get("table_id") else None
+        if repeated is None:
+            repeated = _repeated_labels(rows)
+        subheading = self._subheading_before(chunk)
+        for row in rows:
             label = str(row.get("line_item", "")).strip()
             if not label:
                 continue
             cells = list((row.get("values") or {}).items())
+            if not _has_values(row):
+                subheading = label
+                continue
             if _rebased_index([c.get("raw_value") for _, c in cells
                                if isinstance(c, dict) and "normalized_value" in c]):
                 continue
+            name = label
+            if normalize_metric_label(label) in repeated:
+                if not subheading:
+                    continue
+                name = f"{subheading.rstrip(' :')}: {label}"
             # The row's column headers, read once: dates of events are no periods.
             events = _event_dates([column_period(str(col), interim) for col, _ in cells])
             for index, (col, cell) in enumerate(cells):
@@ -774,6 +886,11 @@ class NumericalRegistry:
                 period = None if events else self._structured_period(cells, index, interim)
                 if period and _is_future(period, horizon):
                     continue
+                # The basis of the column the period was read from ("$" cells
+                # push an amount one column right of its header).
+                header = str(col)
+                if period and index and column_period(header, interim) != period:
+                    header = str(cells[index - 1][0])
                 raw_str = repr(raw)
                 decimals = len(raw_str.split(".")[1]) if "." in raw_str and not raw_str.endswith(".0") else 0
                 # Converter rows state the printed precision and whether the
@@ -783,7 +900,7 @@ class NumericalRegistry:
                     decimals = cell["decimals"]
                 kind = cell.get("kind") if cell.get("kind") in ("percent", "multiple") else "currency"
                 self.register(NumericalEntry(
-                    metric_name=label,
+                    metric_name=name,
                     raw_value=raw,
                     normalized_value=value,
                     currency=cell.get("currency", "USD") or "USD",
@@ -802,11 +919,13 @@ class NumericalRegistry:
                     # Two spaces before the value: find_inconsistencies reports
                     # what follows them as the figure "as printed".
                     raw_text=(
-                        f"{label}  {cell['raw']}" if isinstance(cell.get("raw"), str)
-                        else f"{label} {col}={raw}"
+                        f"{name}  {cell['raw']}" if isinstance(cell.get("raw"), str)
+                        else f"{name} {col}={raw}"
                     ),
                     section_heading=section,
+                    basis=column_basis(header),
                 ))
+        self._subheading_after(chunk, subheading)
 
         if chunk.get("metric_name") and chunk.get("normalized_value") is not None:
             try:
@@ -900,6 +1019,7 @@ class NumericalRegistry:
         section = str(chunk.get("section_heading") or "")
 
         periods: list[str | None] = list(inherited or [])
+        bases: list[str] = [""] * len(periods)  # what each column's figures are (column_basis)
         context: list[str] = []  # header lines printed above a period header
         for line in text.splitlines():
             if not line.strip() or _RULE_LINE.match(line):
@@ -920,6 +1040,7 @@ class NumericalRegistry:
                 remainder = _PERIOD.sub(" ", line)
                 if not extract_numbers(remainder, claims_only=False):
                     periods = _header_keys(line, context, interim) if _reads_like_header(line) else []
+                    bases = _header_bases(line, context) if periods else []
                     context = []
                     continue
 
@@ -987,6 +1108,7 @@ class NumericalRegistry:
                     scale_known=scale_known,
                     raw_text=f"{label}  {num.raw}" + ("%" if percent_cell else ""),
                     section_heading=section,
+                    basis=bases[i] if i < len(bases) else "",
                 ))
         return periods
 
@@ -1074,7 +1196,7 @@ class NumericalRegistry:
             max_dev = 0.0
             for i, a in enumerate(entries):
                 for b in entries[i + 1:]:
-                    if a.source_file == b.source_file or _values_agree(a, b):
+                    if a.source_file == b.source_file or _bases_clash(a, b) or _values_agree(a, b):
                         continue
                     base = max(abs(a.normalized_value), 1e-9)
                     dev = abs(a.normalized_value - b.normalized_value) / base * 100
@@ -1166,26 +1288,29 @@ class NumericalRegistry:
                 if is_generic_label(metric):
                     result.generic += 1
                     continue
-                by_source: dict[str, list[NumericalEntry]] = {}
-                for entry in group:
-                    by_source.setdefault(entry.source_file, []).append(entry)
-                if len(by_source) < 2:
-                    result.single_source += 1
-                    continue
-                stated = [_distinct_values(es) for es in by_source.values()]
-                if any(len(values) > 1 for values in stated):
-                    result.ambiguous += 1
-                    continue
-                figures = [values[0] for values in stated]
-                conflict = any(not _values_agree(a, b) for a, b in combinations(figures, 2))
-                result.figures.append(FigureTieOut(
-                    metric_name=figures[0].metric_name,
-                    fiscal_year=period,
-                    kind=kind,
-                    status="conflict" if conflict else "agree",
-                    entries=figures,
-                    max_deviation_pct=_spread_pct(figures) if conflict else 0.0,
-                ))
+                parts, left_out = _basis_parts(group)
+                result.ambiguous += left_out
+                for part in parts:
+                    by_source: dict[str, list[NumericalEntry]] = {}
+                    for entry in part:
+                        by_source.setdefault(entry.source_file, []).append(entry)
+                    if len(by_source) < 2:
+                        result.single_source += 1
+                        continue
+                    stated = [_distinct_values(es) for es in by_source.values()]
+                    if any(len(values) > 1 for values in stated):
+                        result.ambiguous += 1
+                        continue
+                    figures = [values[0] for values in stated]
+                    conflict = any(not _values_agree(a, b) for a, b in combinations(figures, 2))
+                    result.figures.append(FigureTieOut(
+                        metric_name=figures[0].metric_name,
+                        fiscal_year=period,
+                        kind=kind,
+                        status="conflict" if conflict else "agree",
+                        entries=figures,
+                        max_deviation_pct=_spread_pct(figures) if conflict else 0.0,
+                    ))
         result.figures.sort(key=lambda f: (
             f.status != "conflict",
             -f.max_deviation_pct,
@@ -1310,3 +1435,110 @@ def _distinct_values(entries: list[NumericalEntry]) -> list[NumericalEntry]:
         if not any(_values_agree(entry, d) for d in distinct):
             distinct.append(entry)
     return distinct
+
+
+def _header_bases(line: str, context: list[str]) -> list[str]:
+    """
+    What each period column of a text header holds (see column_basis): flows
+    under a span on the line or the lines above it, balances under a date, ""
+    otherwise.
+    """
+    tokens = list(_PERIOD.finditer(line))
+    if _SPAN.search("\n".join([*context, line])):
+        return ["flow"] * len(tokens)
+    shared = any(_MONTH_DAY.search(c) for c in context)
+    return ["balance" if shared or _date_before(line, t.start()) else "" for t in tokens]
+
+
+def _bases_clash(a: NumericalEntry, b: NumericalEntry) -> bool:
+    """True for a balance and a flow: never one figure, whatever their labels and periods."""
+    return {a.basis, b.basis} == {"flow", "balance"}
+
+
+def _basis_parts(entries: list[NumericalEntry]) -> tuple[list[list[NumericalEntry]], bool]:
+    """
+    A figure's entries split into what can be compared: all of them, or — when
+    both balances and flows are among them — the flows apart from the balances.
+    Entries whose basis is unknown then fit neither, and are left out.
+
+    Returns:
+        (parts, left_out): left_out is True when entries were left out.
+    """
+    bases = {e.basis for e in entries}
+    if not {"flow", "balance"} <= bases:
+        return [entries], False
+    parts = [[e for e in entries if e.basis == basis] for basis in ("flow", "balance")]
+    return parts, "" in bases
+
+
+def _has_values(row: dict) -> bool:
+    """Whether a structured row states any figure (a subheading, "Swaptions:", states none)."""
+    return any(isinstance(c, dict) and "normalized_value" in c for c in (row.get("values") or {}).values())
+
+
+def _repeated_labels(rows: list[dict]) -> set[str]:
+    """The line items, other than generic ones, that one table prints on more than one row."""
+    counts: dict[str, int] = {}
+    for row in rows:
+        if _has_values(row):
+            label = normalize_metric_label(str(row.get("line_item", "")))
+            counts[label] = counts.get(label, 0) + 1
+    return {label for label, n in counts.items() if n > 1 and not is_generic_label(label)}
+
+
+def _row_range(chunk: dict) -> tuple[int, int] | None:
+    """The (first, last) table rows a chunk holds, when it says."""
+    span = chunk.get("table_row_range")
+    if isinstance(span, (list, tuple)) and len(span) == 2:
+        try:
+            return int(span[0]), int(span[1])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+# The text forms of a converted table's rows, besides the row-by-row chunks that
+# carry them as structured_rows.
+_TEXT_FORMS = {"table_markdown", "table_narrative"}
+
+
+def _table_key(chunk: dict) -> tuple[str, str]:
+    """A table's identity: its document and its table_id."""
+    return str(chunk.get("source_file") or ""), str(chunk.get("table_id") or "")
+
+
+def _structured_ranges(chunks: list[dict]) -> dict[tuple[str, str], list[tuple[int, int]]]:
+    """
+    Per table_id, the row ranges read from structured_rows whose columns name a
+    period. Rows under "Column 2", "Column 3" are still read from their text
+    too: a ruled grid's years printed above its rules reach only the text, as
+    its caption, and American Water's rate-case tables were compared on them.
+    """
+    ranges: dict[str, list[tuple[int, int]]] = {}
+    for chunk in chunks:
+        span = _row_range(chunk)
+        if not (chunk.get("table_id") and chunk.get("structured_rows") and span):
+            continue
+        interim = _is_interim(chunk)
+        headers = {str(col) for row in chunk["structured_rows"] for col in (row.get("values") or {})}
+        if any(column_period(header, interim) for header in headers):
+            ranges.setdefault(_table_key(chunk), []).append(span)
+    return ranges
+
+
+def _read_elsewhere(chunk: dict, ranges: dict[tuple[str, str], list[tuple[int, int]]]) -> bool:
+    """
+    True for a markdown or narrative form of table rows whose structured rows
+    are read too: one table is read once. Read twice, the two forms could key
+    one figure two ways — Best Buy's cash-flow rows as of the balance date
+    "2017-01-28" from the rows and as "FY ending 2017-01" from the grid, whose
+    label column printed "Fiscal Years Ended" — and the tie-out counted four
+    conflicts twice (Decision 93).
+    """
+    if chunk.get("structured_rows") or chunk.get("content_type") not in _TEXT_FORMS:
+        return False
+    span = _row_range(chunk)
+    covered = ranges.get(_table_key(chunk)) if chunk.get("table_id") else None
+    if not span or not covered:
+        return False
+    return all(any(a <= n <= b for a, b in covered) for n in range(span[0], span[1] + 1))

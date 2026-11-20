@@ -83,6 +83,14 @@ PAYLOAD_FIELDS = [
     "scale_factor",
     "content_type",
     "filing_form",
+    # The last day a filing reports on: a schedule after it (a debt maturity)
+    # is not tied out. The route did not ask for these, so the registry never
+    # saw them here and compared such schedules (Decision 93).
+    "filing_period_end",
+    "filing_fiscal_years",
+    # Which rows a table chunk holds: a table is read once, from its structured
+    # rows, not again from its markdown grid.
+    "table_row_range",
     "metric_name",
     "normalized_value",
     "raw_value",

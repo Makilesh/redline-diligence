@@ -12,6 +12,7 @@ import pytest
 
 from src.utils.numerical_registry import (
     NumericalRegistry,
+    column_basis,
     column_period,
     is_generic_label,
     normalize_metric_label,
@@ -355,3 +356,110 @@ class TestDocumentOrder:
         registry, read = NumericalRegistry.from_documents(
             [statement("a.txt", "$1"), statement("b.txt", "$2")], should_stop=lambda: next(calls))
         assert read == 1 and {e.source_file for es in registry._entries.values() for e in es} == {"a.txt"}
+
+
+# ==============================================================================
+# Which line item a figure is (Decision 93)
+# ==============================================================================
+
+
+def cell(raw: str, scale: float = 1e6) -> dict:
+    value = float(raw.strip("()").replace(",", ""))
+    return {"raw": raw, "raw_value": value, "normalized_value": value * scale, "scale_factor": scale}
+
+
+def rows_chunk(source: str, rows: list[tuple[str, dict]], table_id: str = "t1", span=(1, 20), **extra) -> dict:
+    structured = [{"line_item": label, "values": values} for label, values in rows]
+    return {"source_file": source, "table_id": table_id, "is_table": 1, "table_row_range": list(span),
+            "structured_rows": structured, "content_type": "table_row_by_row", "chunk_index": 0, **extra}
+
+
+class TestIdentity:
+    def test_a_balance_and_a_flow_of_one_name_are_never_one_figure(self):
+        balance = {"December 31, 2020": cell("50")}
+        result = tie([
+            rows_chunk("awk_2020.pdf", [("Accrued taxes", balance)]),
+            rows_chunk("awk_2021.pdf", [("Accrued taxes", balance)]),
+            rows_chunk("awk_2022.pdf", [("Accrued taxes", {"For the Years Ended December 31, 2020": cell("3")})]),
+        ])
+        assert not result.conflicts
+        [agreement] = result.agreements
+        assert {e.source_file for e in agreement.entries} == {"awk_2020.pdf", "awk_2021.pdf"}
+
+    def test_a_balance_still_meets_a_figure_whose_header_does_not_say(self):
+        result = tie([
+            rows_chunk("a.pdf", [("Total deferred tax assets", {"December 31, 2020": cell("1,083")})]),
+            rows_chunk("b.pdf", [("Total deferred tax assets", {"2020": cell("1,083")})]),
+        ])
+        assert [f.status for f in result.figures] == ["agree"]
+
+    def test_a_line_item_repeated_under_subheadings_is_read_with_its_subheading(self):
+        older = rows_chunk("vz_2021.pdf", [
+            ("Treasury Rate Locks:", {}),
+            ("Pre-tax gain recognized in Interest expense", {"2020": cell("15")}),
+            ("Swaptions:", {}),
+            ("Pre-tax gain recognized in Interest expense (2)", {"2021": cell("11")}),
+        ])
+        newer = rows_chunk("vz_2022.pdf", [
+            ("Interest Rate Swaps:", {}),
+            ("Pre-tax gain recognized in Interest expense", {"2021": cell("2")}),
+        ])
+        result = tie([older, newer])
+        assert not result.conflicts
+        registry, _ = NumericalRegistry.from_documents([older])
+        assert {label for label, _ in registry._entries} == {
+            "treasury rate locks pre tax gain recognized in interest expense",
+            "swaptions pre tax gain recognized in interest expense"}
+
+    def test_a_repeated_line_item_whose_subheading_is_out_of_reach_is_not_read(self):
+        tail = rows_chunk("vz_2021.pdf", [
+            ("Pre-tax gain recognized in Interest expense", {"2021": cell("11")}),
+            ("Pre-tax gain recognized in Interest expense (2)", {"2021": cell("4")}),
+        ], span=(21, 22))
+        assert len(NumericalRegistry.from_chunks([tail])) == 0
+
+    def test_a_subheading_carries_to_the_next_chunk_of_its_table(self):
+        head = rows_chunk("a.pdf", [("Swaptions:", {}), ("Notional value sold", {"2021": cell("2,000")})],
+                          span=(1, 2), chunk_index=0)
+        rest = rows_chunk("a.pdf", [("Notional value sold (2)", {"2021": cell("1,000")})], span=(3, 3), chunk_index=1)
+        registry, _ = NumericalRegistry.from_documents([rest, head])
+        assert ("swaptions notional value sold", "FY2021") in registry._entries
+
+    def test_a_table_is_read_once_from_its_structured_rows(self):
+        dates = {"January 28, 2017": cell("(185)"), "January 30, 2016": cell("123")}
+        rows = rows_chunk("bby_2017.pdf", [("Receivables", dates)], span=(1, 1))
+        grid = {"source_file": "bby_2017.pdf", "table_id": "t1", "is_table": 1, "table_row_range": [1, 1],
+                "content_type": "table_markdown", "chunk_index": 1,
+                "text": "| Fiscal Years Ended | January 28, 2017 | January 30, 2016 |\n|---|---|---|\n"
+                        "| Receivables | (185) | 123 |\n"}
+        registry, _ = NumericalRegistry.from_documents([rows, grid])
+        assert sorted(period for label, period in registry._entries if label == "receivables") == [
+            "2016-01-30", "2017-01-28"]
+
+    def test_a_grid_whose_rows_name_no_period_is_still_read_from_its_text(self):
+        rows = rows_chunk("awk.pdf", [("Total general rate case authorizations",
+                                       {"Column 2": cell("56"), "Column 3": cell("45")})], span=(1, 1))
+        grid = {"source_file": "awk.pdf", "table_id": "t1", "is_table": 1, "table_row_range": [1, 1],
+                "content_type": "table_markdown", "chunk_index": 1,
+                "text": "(In millions)  2020  2019\n| General rate cases | Column 2 | Column 3 |\n"
+                        "| Total general rate case authorizations | 56 | 45 |\n"}
+        registry, _ = NumericalRegistry.from_documents([rows, grid])
+        assert ("total general rate case authorizations", "FY2020") in registry._entries
+
+    def test_a_number_too_long_for_a_float_is_no_figure(self):
+        header = "Three Months Ended  August 31, 2022\n"
+        result = tie([text_chunk("a.pdf", header + "Net revenue  " + "7" * 400 + "\n"),
+                      text_chunk("b.pdf", header + "Net revenue  0\n")])
+        assert result.figures == []
+
+    @pytest.mark.parametrize("header, interim, key, basis", [
+        ("12 Weeks Ended 3/25/2023", True, "3M ending 2023-03-25", "flow"),
+        ("3/25/2023", True, "2023-03-25", "balance"),
+        ("12/31/2022", False, "FY2022", "balance"),
+        ("For the Years Ended December 31, 2020", False, "FY2020", "flow"),
+        ("At December 31, 2020", False, "FY2020", "balance"),
+        ("2020", False, "FY2020", ""),
+    ])
+    def test_column_period_and_basis(self, header, interim, key, basis):
+        assert column_period(header, interim) == key
+        assert column_basis(header) == basis
