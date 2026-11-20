@@ -49,6 +49,7 @@ from starlette.datastructures import MutableHeaders
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from src.data_processing.injection_screen import flagged_locations, screen_text
 from src.utils import metrics, runtime_status
 from src.utils.logger import setup_logger
 
@@ -617,6 +618,189 @@ def scrub_public(value, _key: str | None = None):
     if isinstance(value, str) and _key in _NOTE_KEYS:
         return _EXCEPTION_TAIL.sub(r"\1", value)
     return value
+
+
+# ==============================================================================
+# The public form of the agent trace (Decision 96)
+# ==============================================================================
+
+# The data room comes from the counterparty, and the trace goes to every
+# caller. Decision 82 kept the text of instruction-like passages out of the
+# summaries it added — their place and signals instead — and recorded that the
+# trace still quoted it (`suspected_injection[].excerpts`,
+# `injection_tainted_sentences[].sentence`). A caller that hands the response
+# to its own model (an integration, an agent framework, a copilot reading the
+# API) reads such text in a field labelled as this system's own account of
+# what it did, which is what makes it persuasive to that model.
+#
+# Public callers get the trace through an allow-list, not more deny-list
+# entries. The deny-list above has not changed since it was written (2a6b5bd).
+# Trace fields that carry document or answer text were added on top of it —
+# the two quotes (6d49dd1), citation_mismatches[].claim (e028b07) — or merged
+# in beside it (section_tables_missing, 8b0022c), none with an entry, and
+# Decision 82 found the quotes by audit. Here a key nobody has classified is
+# left out, so the default for a new field is "not shown" rather than "passed
+# on". Admin callers get the trace as written, and injection_review is still
+# built from it.
+
+# The records of the public form and the keys each keeps: every key the
+# pipeline writes today (the agents' trace entries, orchestrator._attach_perf
+# and _summarize_stage) except the two quotes of flagged text, which no record
+# names. A caller gets where that text is and why it was flagged instead.
+_RECORD_FIELDS: dict[str, frozenset[str]] = {
+    # An agent_trace entry, whichever node wrote it.
+    "agent_trace": frozenset({
+        "agent", "model", "perf", "elapsed_ms", "skipped", "reason", "degraded", "error",
+        "input_query", "output",
+        "retrieval_passes", "sub_questions", "reranked_count", "sources", "retrieved_chunk_ids",
+        "table_siblings_missing", "section_tables_missing",
+        "method", "figures", "cross_checked", "inconsistencies",
+        "score", "answerability", "answerability_veto", "laya_ms", "laya_pairs",
+        "iteration", "rewritten_query",
+        "answer_length", "revision", "revision_items", "streamed", "max_tokens", "finish_reason",
+        "length_retries", "answer_truncated", "forced_refusal", "synthesis_failed",
+        "content_rejections",
+        "nli_model", "nli_enabled", "llm_model", "llm_calls", "validation_status",
+        "validation_unavailable", "confidence_score", "flags_count", "claims_checked",
+        "status_counts", "method_counts", "numeric_counts", "notes", "citation_counts",
+        "citation_mismatches", "suspected_injection", "injection_cited_chunks",
+        "injection_tainted_figures", "injection_tainted_sentences", "attempt", "claim_checks",
+        "force_refusal",
+    }),
+    # A /query/stream `stage` event, and its detail.
+    "stage": frozenset({
+        "seq", "agent", "label", "description", "summary", "detail", "duration_ms", "elapsed_ms",
+        "perf",
+    }),
+    "detail": frozenset({
+        "query_type", "sub_questions", "filters", "model", "reranked_count", "retrieval_passes",
+        "sources", "elapsed_ms", "figures", "cross_checked", "inconsistencies", "method", "score",
+        "missing_aspects", "breakdown", "answerability", "answerability_veto", "rewritten_query",
+        "iteration", "citation_count", "answer_length", "revision", "answer_truncated",
+        "validation_status", "confidence_score", "hallucination_flags", "status_counts",
+        "method_counts", "numeric_counts", "claim_checks", "nli_model", "llm_model", "llm_calls",
+        "force_refusal",
+    }),
+    # Records inside them.
+    "perf": frozenset({
+        "duration_ms", "llm_calls", "prompt_tokens", "completion_tokens", "models",
+        "finish_reasons", "fallbacks",
+    }),
+    "claim_checks": frozenset({
+        "claim", "status", "method", "score", "evidence_source", "citation_mismatch",
+        "injection_suspect",
+    }),
+    "citation_mismatch": frozenset({"figure", "found_in"}),
+    "citation_mismatches": frozenset({"claim", "figures", "found_in", "cited"}),
+    "suspected_injection": frozenset({"source_file", "page_number", "section_heading", "signals"}),
+    "injection_tainted_sentences": frozenset({"figure", "source_file"}),
+    "inconsistencies": frozenset({
+        "metric", "fiscal_year", "values_found", "discrepancy_type", "severity",
+        "max_deviation_pct", "explanation", "method",
+    }),
+    "values_found": frozenset({"source", "value", "as_printed", "page"}),
+}
+
+# Mappings kept with any key that is a name: counts by name, the quality
+# breakdown and filters, and Agent 1's reading of the question, which never
+# sees a document (Decision 76). Any other mapping is a record nobody has
+# classified and reaches a public caller empty.
+_FREE_FORM = frozenset({
+    "output", "extracted_entities", "metadata_filters", "filters", "breakdown",
+    "status_counts", "method_counts", "numeric_counts", "citation_counts",
+})
+
+# A key the code chose, not text it read ("Revenue | FY2023" is a label).
+_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,63}")
+
+
+def _classified(value, field: str):
+    """`value`, as the field named `field`, reduced to its classified keys and mappings."""
+    if isinstance(value, dict):
+        keep = _RECORD_FIELDS.get(field)
+        if keep is None and field not in _FREE_FORM:
+            return {}
+        out = {}
+        for key, item in value.items():
+            if not (isinstance(key, str) and _NAME.fullmatch(key)):
+                continue
+            if keep is not None and key not in keep:
+                continue
+            if key == "suspected_injection":
+                # Decision 82's location form, item by item: file, page and
+                # signals, and the heading unless it is itself the instruction.
+                item = (
+                    [loc for entry in item for loc in flagged_locations([entry])]
+                    if isinstance(item, list) else []
+                )
+            out[key] = _classified(item, key)
+        return out
+    if isinstance(value, list | tuple):
+        return [_classified(item, field) for item in value]
+    return value
+
+
+def _withheld(signals: list[str]) -> str:
+    """What a public caller gets in place of a string the injection screen flags."""
+    return f"(withheld: instruction-like text; signals: {', '.join(signals)})"
+
+
+def _withhold_flagged(value):
+    """Replaces every string the injection screen flags, keeping the rest as they are."""
+    if isinstance(value, dict):
+        return {key: _withhold_flagged(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_withhold_flagged(item) for item in value]
+    if isinstance(value, str):
+        signals = screen_text(value)
+        return _withheld(signals) if signals else value
+    return value
+
+
+def public_trace(trace) -> list[dict]:
+    """
+    The agent trace as a public caller gets it (Decision 96).
+
+    Three steps, each catching what the one before it cannot. Only classified
+    keys and mappings are kept (_RECORD_FIELDS, _FREE_FORM), and the
+    validator's flagged passages become Decision 82's locations. Exception
+    text is redacted (scrub_public). And every string the injection screen
+    flags is replaced by a placeholder naming its signals: a heading, a file
+    name, a claim, a model's missing aspects or rewritten query that repeats
+    planted words, in whatever field holds it. The screen is narrow
+    (Decision 76), so the last step is a label on what it catches, not a
+    filter of what document text a classified field may hold — file names,
+    headings and the answer's claims stay, as they do in the citations.
+
+    Args:
+        trace: agent_trace as the pipeline wrote it; not modified.
+
+    Returns:
+        A new list of entries; [] for anything that is not a list.
+    """
+    if not isinstance(trace, list | tuple):
+        return []
+    entries = [entry for entry in trace if isinstance(entry, dict)]
+    return _withhold_flagged(scrub_public(_classified(entries, "agent_trace")))
+
+
+def public_stage(payload) -> dict:
+    """
+    A /query/stream `stage` event as a public caller gets it: the same three
+    steps as public_trace. The detail repeats trace fields (the validator's
+    flags and claims, the sources) and adds a few of its own — the quality
+    assessor's missing aspects, the financial verifier's inconsistencies with
+    their labels as printed.
+
+    Args:
+        payload: The event as stream_query yields it; not modified.
+
+    Returns:
+        A new dict; {} for anything that is not one.
+    """
+    if not isinstance(payload, dict):
+        return {}
+    return _withhold_flagged(scrub_public(_classified(payload, "stage")))
 
 
 # ==============================================================================

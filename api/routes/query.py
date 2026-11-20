@@ -35,6 +35,8 @@ from api.security import (
     ClientContext,
     acquire_pipeline_slot,
     public_error_detail,
+    public_stage,
+    public_trace,
     query_rate_limit,
     read_rate_limit,
     require_readable_deal,
@@ -151,14 +153,19 @@ def _build_response(
         "generated_answer", ""
     )
 
-    timings = node_timings(result.get("agent_trace", []))
+    trace = result.get("agent_trace", [])
+    # Public callers get the trace's public form (Decision 96): classified
+    # fields only, the flagged passages as places and signals, no exception
+    # text. The timings are read from what the caller gets, so a field added
+    # to `perf` later cannot reach them unclassified either.
+    shown_trace = public_trace(trace) if public else trace
+    timings = node_timings(shown_trace)
 
     # Diagnostic fields can carry exception text the agents recovered from;
     # only admin callers get it verbatim (see security.scrub_public).
     diagnostics = {
         "hallucination_flags": result.get("hallucination_flags", []),
         "claim_checks": result.get("claim_checks", []),
-        "agent_trace": result.get("agent_trace", []),
     }
     if public:
         diagnostics = scrub_public(diagnostics)
@@ -177,14 +184,16 @@ def _build_response(
         total_latency_ms=result.get("total_latency_ms", 0.0),
         session_id=session_id,
         rewrite_iterations=result.get("rewrite_iteration", 0),
-        agent_trace=diagnostics["agent_trace"],
+        agent_trace=shown_trace,
         is_refusal=is_refusal,
         context_quality_score=result.get("context_quality_score", 0.0),
         outcome=result.get("outcome") or run_outcome(result),
         node_timings=timings,
         llm_calls=sum(row["llm_calls"] for row in timings),
         request_id=request_id,
-        injection_review=_injection_review(result.get("agent_trace", [])),
+        # From the trace as written: the review needs the validator's own
+        # entry, and carries locations only.
+        injection_review=_injection_review(trace),
     )
 
 
@@ -588,8 +597,10 @@ async def query_stream_endpoint(
                     outcome = "timeout" if code == "timeout" else "error"
                     yield error_frame(code)
                 elif event == "stage" and not client.is_admin:
-                    # Stage details repeat the validator's flags and notes.
-                    yield _sse(event, scrub_public(payload))
+                    # Stage details repeat the validator's flags and notes and
+                    # the trace's sources, and add the assessor's missing
+                    # aspects: the same public form as the trace (Decision 96).
+                    yield _sse(event, public_stage(payload))
                 else:
                     yield _sse(event, payload)
         except Exception as e:

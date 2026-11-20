@@ -97,7 +97,14 @@ class QueryResponse(BaseModel):
     total_latency_ms: float = Field(..., description="Total pipeline latency")
     session_id: str = Field(..., description="Session ID for this query")
     rewrite_iterations: int = Field(0, description="Number of query rewrites performed")
-    agent_trace: list[dict] = Field(default_factory=list, description="Agent execution trace")
+    agent_trace: list[dict] = Field(
+        default_factory=list,
+        description=(
+            "Agent execution trace. Public callers get its public form (Decision 96): classified "
+            "fields only, flagged passages as location and signals, any string the injection "
+            "screen flags withheld. Admin callers get it as written"
+        ),
+    )
     is_refusal: bool = Field(
         False,
         description="True when the pipeline refused to answer for lack of usable context",
