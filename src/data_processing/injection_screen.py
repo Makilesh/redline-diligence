@@ -192,8 +192,11 @@ def screen_text(text: str) -> list[str]:
 
 
 # The words that open a role label. role_marker reads one only where a line
-# starts; text that has lost its line breaks carries it in mid-line.
-_ROLE_WORD = re.compile(r"(?<!\w)(?=(?:SYSTEM|ASSISTANT|DEVELOPER|Assistant|Human)\b)")
+# starts; text that has lost its line breaks carries it in mid-line. Leading
+# underscores ("_SYSTEM:") are part of the label: role_marker accepts them at a
+# line start, and `_` is a word character, so the lookbehind alone would miss
+# them (follow-up review of Decision 96).
+_ROLE_WORD = re.compile(r"(?<!\w)(?=_*(?:SYSTEM|ASSISTANT|DEVELOPER|Assistant|Human)\b)")
 
 
 def screen_flattened(text: str) -> list[str]:

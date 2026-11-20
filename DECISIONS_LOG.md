@@ -1672,4 +1672,15 @@ All architecture decisions that deviated from or resolved ambiguities in p4.md a
     - The property's `@example` of a two-line heading.
 
     With the fix, those tests and the injection, surface and API-security suites pass: 185 passed, 3 xfailed. The rest of the gates are in the round's report.
+- **Follow-up review** (the same reviewer, at 70bfcba; every probe above re-run, with line-break variants `\r`, ` `, `\x85`, tab, " — " and "—"):
+  - **Fixed:** findings 1, 3, 4, 6 and 7b.
+  - **One gap remained, and is now closed:** a role label opened by underscores in a joined heading, such as "NORTHWIND SYSTEMS INC. — _SYSTEM: …". `_ROLE_WORD` now allows leading underscores; both cases fail on the previous regex. "Executive_Assistant: x" still stays a locator.
+  - **Cost, measured:** `screen_flattened` now withholds a role word followed by a colon anywhere in a diagnostic string, for example "ERP SYSTEM: SAP" or "Executive Assistant: Maria Lopez".
+    - The sample deal's 73 headings and 907 lines: no new flag.
+    - LegalBench-RAG's 3,610 distinct headings: no new flag.
+    - LegalBench-RAG's 21,033 short lines: 2 new flags, both benign.
+    - FinanceBench headings were not measured.
+  - **Streamlit follow-up:** the reviewer walked about 200 console calls and found no remaining image or raw-HTML path.
+  - **Pre-existing, outside this decision:** the console puts the `?deal_id=` value into the API paths it calls with the admin key.
+  - **Not changed (Decision 76's limits):** role labels the screen never flags, even on their own line. Examples are "System:", "USER:", "[SYSTEM]:", a full-width colon, or a zero-width or Cyrillic letter inside the word.
 - **Impact**: api/security.py, api/routes/query.py, api/models/response_models.py (description only), README.md, tests/{test_public_trace,test_injection_public_trace}.py, tests/test_fuzz_properties.py, app/{markdown_safety,styles,streamlit_app}.py, app/components/{answer_display,verification,citation_viewer,risk_dashboard,version_browser,document_uploader,agent_trace_viewer}.py, tests/test_console_images.py, src/data_processing/injection_screen.py, web/components/PipelineTimeline.tsx, web/tests/pipelineTimeline.test.tsx
