@@ -102,7 +102,13 @@ Two consequences worth stating plainly:
   can stay as they are: the rule also rebuilds statements whose columns
   pdfplumber had collapsed into one, but on FinanceBench's dev questions a
   re-ingested index was level with the old one (evidence page in the final
-  context +2.7 points [−2.5, +8.5]).
+  context +2.7 points [−2.5, +8.5]). Decision 93 changed filings again
+  (statements keep their period headers, titles and pages), and a filing
+  indexed before it keeps the old tables until it is re-ingested. Since
+  Decision 97 every point records the `ingest_version` that wrote it, and
+  `python -m src.vector_db.reingest_report` lists the documents that need
+  re-ingesting; the procedure, with its snapshot and rollback, is
+  [below](#re-ingesting-an-existing-index).
 - **MiniLM is still the best fit for two cores, not the best small reranker.**
   Six Apache-2.0 alternatives were measured on the same emulated host
   (Decision 77). Only `ettin-reranker-68m-v1` beat it on LegalBench-RAG's dev
@@ -451,6 +457,188 @@ diagnosis, and a deal's are deleted with the deal.
 in `PUBLIC_DEAL_IDS` (default `aurora_vertex_2024`) and their own sandbox
 deals; any other deal answers 404 without the admin key.
 
+## Re-ingesting an existing index
+
+Three changes take effect only on documents indexed after them: two to PDF
+extraction (a box around text is not a table, Decision 89; statements keep
+their period headers, titles and pages, Decision 93) and one to document
+identity (Decisions 86 and 89). The identity backfill applies the last from
+the index; the PDF changes need each PDF indexed again **from its file**.
+This is the procedure, validated on a batch of 28 documents (Decision 97).
+Every phase ends with a check, and every phase can be rolled back to the
+snapshot taken in phase 0.
+
+**What it needs.**
+
+- **The original files.** The API keeps none: an upload is written to a
+  temporary directory and deleted once indexed. The deal team provides them
+  (the data room export). A file is matched to its document by its bytes —
+  `doc_id` is derived from the deal and the file's SHA-256 — so a renamed
+  copy is found and an edited, re-saved or re-exported one is not (the report
+  lists it as matching nothing). Text files must be the bytes that were
+  uploaded: a Windows checkout of `data/sample_deal` has CRLF line ends and a
+  Linux one LF, and they are different documents.
+- **A write freeze.** Stop the API for the whole run. A re-ingest writes a
+  document's points in batches: until its stale points are deleted, a query
+  can meet old and new chunks of that document together (measured in local
+  mode: up to 9.6 s for a 2,344-chunk 10-K, under a second for a contract;
+  not measured on a server). The API's in-memory document list and its cached
+  tie-out and checklist reports also describe the old chunks until it
+  restarts.
+- **The API's environment.** Run the tools with the same `.env` as the API
+  (Laya, PII and category settings decide what is indexed); in production,
+  in a one-off container of the API image.
+
+In production (the compose files of this guide), on the server:
+
+```bash
+C="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+ORIG=/srv/originals            # the original files, any layout
+```
+
+### Phase 0 · Freeze and snapshot
+
+```bash
+$C stop api
+mkdir -p qdrant-backup && sudo chown 1000:1000 qdrant-backup   # the API image runs as uid 1000
+for c in manda_due_diligence manda_parent_chunks; do
+  $C run --rm --no-deps -T -v "$PWD/qdrant-backup:/backup" api python - "$c" <<'PY'
+import json, sys, urllib.request
+c = sys.argv[1]
+base = f"http://qdrant:6333/collections/{c}"
+snap = json.load(urllib.request.urlopen(urllib.request.Request(f"{base}/snapshots", method="POST"), timeout=3600))["result"]
+urllib.request.urlretrieve(f"{base}/snapshots/{snap['name']}", f"/backup/{c}.snapshot")
+count = json.load(urllib.request.urlopen(f"{base}", timeout=60))["result"]["points_count"]
+json.dump({**snap, "points_count": count}, open(f"/backup/{c}.json", "w"))
+print(c, snap["name"], snap["size"], "bytes,", count, "points")
+PY
+done
+```
+
+Check: both `.snapshot` files exist with the sizes printed, and
+`qdrant-backup/*.json` records each collection's point count. The snapshot
+files live outside the Qdrant container, whose own snapshot directory
+(`/qdrant/snapshots`) is not on a volume.
+
+Local mode (`QDRANT_MODE=local`): stop the API, then copy the store folder,
+`cp -a "$QDRANT_LOCAL_PATH" "$QDRANT_LOCAL_PATH.before-reingest"`. Check: the
+copy's size equals the original's.
+
+### Phase 1 · Report (read-only)
+
+```bash
+$C run --rm --no-deps -v "$ORIG:/originals:ro" -v "$PWD/qdrant-backup:/backup" api \
+  python -m src.vector_db.reingest_report --files /originals --json /backup/report-before.json
+```
+
+For every document: its file type, the `ingest_version` stamp its points
+carry (0: indexed before this decision), its identity, whether its points
+form one consistent document, and its action — `reingest`, `backfill_identity`
+or `nothing` — with the file found for it. A PDF without a stamp is marked
+`reingest`: which code wrote it cannot be told, and Decisions 89 and 93 both
+changed PDF extraction. Other formats are unchanged since before the stamp.
+Check: the documents marked `reingest` are the PDFs you expect, and
+`to re-ingest with no file` is 0 — or each document listed there is one you
+accept leaving as it is (it keeps working, on the old extraction). Decide
+which deals to run; `--deal <id>` limits every command below.
+
+### Phase 2 · Re-ingest
+
+```bash
+$C run --rm --no-deps -v "$ORIG:/originals:ro" -v "$PWD/qdrant-backup:/backup" api \
+  python -m src.vector_db.reingest_run --files /originals --dry-run
+$C run --rm --no-deps -v "$ORIG:/originals:ro" -v "$PWD/qdrant-backup:/backup" api \
+  python -m src.vector_db.reingest_run --files /originals --log /backup/reingest.jsonl
+```
+
+Each marked document is indexed again by `index_document` — the function
+`POST /ingest` calls — under the name, category, version flag and
+`supersedes` link the index holds for it (`--reclassify` lets the classifier
+choose the category instead, as a new upload does). It is then read back: all
+its points must carry the current stamp, its children and parents must link,
+and the counts must be the run's. A document that fails or comes back
+inconsistent is indexed again (`--retries`, default 2): a complete run
+replaces every point of it, whatever an interrupted one left. Each document
+is a `document_reingested` event in the audit log. Check: the command exits
+0, its summary shows `"failed": []`, and `done` equals `planned`.
+
+### Phase 3 · Identity backfill
+
+```bash
+$C run --rm --no-deps api python -m src.vector_db.identity_backfill --dry-run
+$C run --rm --no-deps api python -m src.vector_db.identity_backfill
+```
+
+Run it after phase 2, not before: on a PDF that still has its old chunks it
+reads the old text (on the batch it would have rewritten the identity of 3 of
+the 12 contracts from their old chunks, before re-ingestion replaced it).
+Check: `failed` is 0. The documents
+just re-ingested are among `unchanged` (ingestion wrote the same identity);
+`updated` counts the others whose identity the current extractor reads
+differently (6 of 712 documents on the LegalBench-RAG index, Decision 89).
+
+### Phase 4 · Report again, then restart
+
+```bash
+$C run --rm --no-deps -v "$PWD/qdrant-backup:/backup" api \
+  python -m src.vector_db.reingest_report --json /backup/report-after.json
+$C up -d api
+curl -H "X-Admin-Key: $ADMIN_API_KEY" https://<name>.duckdns.org/ready
+```
+
+Check: every re-ingested document is now `nothing` and `inconsistent` is 0
+in every deal; `/ready` has an empty `degraded` list (no stale BM25 points,
+no `identity_backfill_needed`); the deal's document list and tie-out load.
+Expect the tie-out to change: on the batch's seven filings it went from 14
+conflicts and 4 agreements to 58 and 14 (as a fresh index of the same files
+gives), because Decision 93's headers give more figures a period.
+
+### Rollback (from any phase)
+
+Server — stop the API, then put both collections back exactly as
+snapshotted (the collection is deleted first, so that nothing written since
+survives; the snapshot is on the host, so deleting loses nothing):
+
+```bash
+$C stop api
+for c in manda_due_diligence manda_parent_chunks; do
+  $C run --rm --no-deps -v "$PWD/qdrant-backup:/backup:ro" api sh -c "
+    curl -fsS -X DELETE http://qdrant:6333/collections/$c &&
+    curl -fsS -X POST 'http://qdrant:6333/collections/$c/snapshots/upload?priority=snapshot' \
+         -F snapshot=@/backup/$c.snapshot &&
+    curl -fsS http://qdrant:6333/collections/$c"
+done
+$C up -d api
+```
+
+Check: each collection's `points_count` equals the one in
+`qdrant-backup/<collection>.json`, and the report (with the same `--files`)
+equals `report-before.json`. Restore onto the same Qdrant minor version (a snapshot
+moves at most one minor version). Before phase 2, you can rehearse the
+restore without touching the live collections by uploading each snapshot to a
+new name (`.../collections/<collection>_restore_check/snapshots/upload?priority=snapshot`),
+comparing its `points_count`, and deleting it.
+
+Local mode — stop the API, then
+`rm -rf "$QDRANT_LOCAL_PATH" && cp -a "$QDRANT_LOCAL_PATH.before-reingest" "$QDRANT_LOCAL_PATH"`.
+
+What a rollback does not undo: the audit log keeps its `document_reingested`
+lines (append-only), and Postgres is untouched either way (it holds
+checkpoints of failed runs, which keep the old chunks' text for their 24 h,
+and the quota counters).
+
+**Cost.** Embedding dominates. On the development laptop's GPU (RTX 5070 Ti,
+local mode; 19 PDFs, 1,261 pages, 8,400 chunks): extraction 0.12 s a page,
+bge-m3 25 ms a chunk, writes 3.8 ms a chunk — 389 s for the batch, at a peak
+of 5.3 GB of RAM and 3.4 GB of GPU memory; all 84 FinanceBench filings would
+take about 47 minutes (extrapolated). On two CPU threads — the same laptop
+pinned to two cores, x86, not the ARM host — extraction is no slower
+(0.05–0.09 s a page) but bge-m3 takes 1.31 s a chunk: about 3 hours for the
+batch, and about 18 hours for the 84 filings (extrapolated from the batch's
+chunks per filing; at the 1.5–3 s a chunk given for two cores above, 20–40
+hours). Plan a large deal on the CPU host as an overnight maintenance window,
+one deal at a time (`--deal`), each with its own report before and after.
+
 ## Not yet verified
 
 - **The image has not been built on ARM.** The dependency set was checked
@@ -462,3 +650,8 @@ deals; any other deal answers 404 without the admin key.
   with fastembed 0.5+. The merged compose file and the Caddyfile were validated
   (`docker compose config`, `caddy validate`).
 - **Quality Assessor floor recalibration** for the MiniLM reranker — see step 9.
+- **Re-ingestion on a Qdrant server.** The procedure above ran in local mode
+  only (Decision 97). Its snapshot, download and restore commands follow
+  Qdrant's snapshot API documentation and were not run, nor were the
+  one-off-container invocations, the mixed-chunk window or the write costs
+  on a server, or the two-core ARM host's embedding time.
