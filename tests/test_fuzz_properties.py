@@ -813,6 +813,175 @@ class TestModelOutput:
         assert isinstance(_as_score(reply.get("context_quality_score")), float)
 
 
+# ---------------------------------------------------------------------------
+# pdf_processor: statement rows and their period headers (Decision 93)
+# ---------------------------------------------------------------------------
+
+# What a statement page's cells hold: labels, figures, signs printed apart from
+# them, nils, periods and the header lines over them, and the cells PyMuPDF
+# glues together.
+_CELL_TEXTS = st.one_of(
+    st.sampled_from([
+        "Net income", "Total", "ASSETS", "Revenue:", "Cash and equivalents", "(Dollars in millions)",
+        "5,070", "(1,234)", "—", "–", "$", "US$", "€", "$ 4,466", "12.5%", "7.5x", "3", "0.29", "�",
+        "2023", "2022", "FY2021", "Q4 2023", "December 28, 2019", "Dec. 31, 2019", "3/25/2023",
+        "Years Ended", "Three months ended June 30,", "May 31,", "13 Weeks Ended", "(Unaudited)",
+        "5,070 $", "— $", "1,603,451  1,499,218", "December 28, 2019  December 29, 2018",
+        "January 28,  January 29,", "2023  2022", "Three Months Ended  Six Months Ended",
+        "CONSOLIDATED BALANCE SHEETS", "2022 vs. 2021",
+    ]),
+    domain_text(3),
+)
+_COLUMNS = st.sampled_from([60.0, 360.0, 420.0, 480.0, 540.0])
+
+
+@st.composite
+def _statement_rows(draw):
+    """A page of rows: cells at column positions, each multi-word cell with its words' edges."""
+    from src.data_processing.pdf_processor import _Cell, _Row
+
+    rows = []
+    for n in range(draw(st.integers(0, 14))):
+        cells = []
+        for _ in range(draw(st.integers(1, 6))):
+            text = " ".join(draw(_CELL_TEXTS).split()) or "x"
+            x1 = draw(_COLUMNS) + draw(st.floats(-12, 12))
+            width = draw(st.floats(0, 160))
+            x0 = x1 - width
+            words, position = [], 0
+            for word in text.split(" "):
+                start = text.index(word, position)
+                position = start + len(word)
+                words.append((word, x0 + width * start / len(text), x0 + width * position / len(text)))
+            cells.append(_Cell(text, x0, x1, tuple(words) if len(words) > 1 else None))
+        cells.sort(key=lambda c: c.x0)
+        rows.append(_Row(cells, 100.0 + 14 * n, 109.0 + 14 * n, draw(st.sampled_from([8.5, 9.0]))))
+    return rows
+
+
+class TestStatementRows:
+    @given(_statement_rows(), _statement_rows(), st.sampled_from([(), (50.0,), (900.0,)]))
+    def test_borderless_tables(self, rows, previous, ruled_tops):
+        from src.data_processing.pdf_processor import _PERIODS_IN, PDFProcessor
+
+        processor = PDFProcessor()
+        carried = processor._carried(previous, processor._borderless_tables(previous), [])
+        page_text = {c.text for r in rows for c in r.cells} | {
+            w[0] for r in rows for c in r.cells for w in (c.words or ())}
+        for table in processor._borderless_tables(rows, carried, ruled_tops):
+            assert 0 <= table.start <= table.end <= len(rows)
+            assert table.rows and all(len(r) == len(table.header) for r in table.rows)
+            names = table.header[1:]
+            if table.anchors:
+                # A named column names a period printed on the page (or the
+                # previous page's statement it continues), and no two columns
+                # share a name.
+                assert len(table.anchors) == len(names) == len(set(names))
+                assert all(_PERIODS_IN.search(name) for name in names), names
+            else:
+                assert names == [f"Column {n + 2}" for n in range(len(names))]
+            for data in table.rows:
+                for value in data[1:]:
+                    # Figures are the page's own text: a cell, a word, or a
+                    # currency sign joined to one.
+                    assert not value or value in page_text or value.split(" ", 1)[-1] in page_text, value
+                    assert not value or processor._is_value(value), value
+
+    @given(_statement_rows())
+    def test_period_cells(self, rows):
+        from src.data_processing.pdf_processor import _DATE, _PERIOD, PDFProcessor
+
+        for row in rows:
+            periods = PDFProcessor._period_cells(row)
+            if periods is None:
+                continue
+            assert len(periods) >= 2
+            for cell in periods:
+                assert _PERIOD.match(cell.text) or _DATE.match(cell.text), cell.text
+                assert min(c.x0 for c in row.cells) - 1e-6 <= cell.x0 <= cell.x1 + 1e-6
+
+    @given(st.text(st.sampled_from("ab1,$ \xa0\t"), max_size=30))
+    def test_words(self, text):
+        from src.data_processing.pdf_processor import _words
+
+        chars = [{"c": ch, "bbox": (float(n), 0.0, n + 0.5, 1.0)} for n, ch in enumerate(text)]
+        found = _words(chars)
+        assert [w[0] for w in found] == text.split()
+        assert all(w[1] <= w[2] for w in found)
+        assert [w[1] for w in found] == sorted(w[1] for w in found)
+
+    @given(_statement_rows(), st.integers(0, 12), st.integers(0, 12))
+    def test_title_lines(self, rows, index, floor):
+        from src.data_processing.pdf_processor import PDFProcessor
+
+        index, floor = min(index, len(rows)), min(floor, index, len(rows))
+        title = PDFProcessor()._title_lines(rows, index, floor)
+        # A title is a few single-cell lines from just above `index`, in reading
+        # order, none of them a sentence.
+        assert len(title) <= 4
+        texts = [r.text.strip() for r in rows[floor:index] if len(r.cells) == 1]
+        # In reading order: the title is a subsequence of those lines (a line may
+        # repeat, so positions are not read with list.index).
+        remaining = iter(texts)
+        assert all(any(t == text for text in remaining) for t in title)
+        assert not any(t.endswith((".", ":")) or len(t) > 120 for t in title)
+
+    @given(st.lists(_CELL_TEXTS, min_size=1, max_size=4), _CELL_TEXTS)
+    def test_label_column_span(self, names, label):
+        from src.data_processing.pdf_processor import PDFProcessor
+
+        new_names, new_label = PDFProcessor._label_column_span(list(names), label)
+        assert len(new_names) == len(names)
+        if new_names != list(names):
+            # The span heads every column; the label column keeps only its unit note.
+            span = new_names[0][: len(new_names[0]) - len(names[0])].strip()
+            assert span and all(n == f"{span} {old}" for n, old in zip(new_names, names))
+            assert all(part in label for part in new_label.split(") (") if part)
+        else:
+            assert new_label == label
+
+    @given(_HEADER_LINES)
+    def test_column_basis(self, line):
+        from src.utils.numerical_registry import _SPAN, column_basis
+
+        basis = column_basis(line)
+        assert basis in {"flow", "balance", ""}
+        assert (basis == "flow") == bool(_SPAN.search(line))
+
+    @given(st.integers(1, 12), st.integers(1, 28), st.integers(1990, 2030), st.booleans())
+    def test_a_numeric_date_is_read_as_the_date(self, month, day, year, span):
+        from src.utils.numerical_registry import column_period
+
+        header = ("13 Weeks Ended " if span else "") + f"{month}/{day}/{year}"
+        expected = f"{year}-{month:02d}-{day:02d}"
+        assert column_period(header, True) == (f"3M ending {expected}" if span else expected)
+
+    @given(st.lists(st.tuples(
+        st.sampled_from(["a.pdf", "b.pdf", "c.pdf"]),
+        st.lists(st.tuples(
+            st.sampled_from(["Swaptions:", "Accrued taxes", "Pre-tax gain", "Pre-tax gain (2)", "Total", "Receivables"]),
+            st.sampled_from(["December 31, 2020", "For the Years Ended December 31, 2020", "2020", "Column 2"]),
+            st.sampled_from(["50", "3", "(16)", "134"]),
+        ), max_size=6),
+        st.sampled_from([(1, 6), (7, 12)]),
+    ), max_size=5))
+    def test_tie_out_never_mixes_a_balance_and_a_flow(self, tables):
+        from src.utils.numerical_registry import NumericalRegistry
+
+        chunks = []
+        for n, (source, rows, span) in enumerate(tables):
+            structured = [{"line_item": label, "values": {} if label.endswith(":") else {header: {
+                "raw": raw, "raw_value": float(raw.strip("()")), "normalized_value": float(raw.strip("()")) * 1e6,
+                "scale_factor": 1e6}}} for label, header, raw in rows]
+            chunks.append({"source_file": source, "table_id": "t1", "table_row_range": list(span),
+                           "structured_rows": structured, "chunk_index": n, "is_table": 1})
+        result = NumericalRegistry.from_documents(chunks)[0].tie_out()
+        for figure in result.figures:
+            assert len({e.source_file for e in figure.entries}) == len(figure.entries) >= 2
+            assert {e.basis for e in figure.entries} != {"flow", "balance"}
+            assert not figure.metric_name.endswith(":")
+
+
 @pytest.mark.parametrize("word", ["first", "second", "third", "millions", "thousands", "August"])
 def test_the_lookalike_strategy_still_matches(word):
     # The strategies' own helper: the replacement matches case-insensitively,

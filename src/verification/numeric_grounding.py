@@ -519,7 +519,10 @@ _SIGN_PLURALS = {
     "decreases": "decrease", "benefits": "benefit", "provisions": "provision", "inflows": "inflow",
     "outflows": "outflow", "surpluses": "surplus", "deficits": "deficit",
 }
-_SIGNED_LABEL_RE = re.compile(r"\b([A-Za-z]+)\s*\(\s*([A-Za-z]+)\s*\)|\(\s*([A-Za-z]+)\s*\)\s*([A-Za-z]+)\b")
+# A one-word parenthetical ("(loss)"), and the word right before or after it.
+_PAREN_WORD_RE = re.compile(r"\(\s*([A-Za-z]+)\s*\)")
+_WORD_BEFORE_RE = re.compile(r"\b([A-Za-z]+)\s*$")
+_WORD_AFTER_RE = re.compile(r"\s*([A-Za-z]+)\b")
 _WORD_RE = re.compile(r"[a-z]+")
 
 
@@ -529,14 +532,24 @@ def _sign_word(word: str) -> str:
 
 
 def _sign_pair(label: str) -> tuple[str, str] | None:
-    """(positive side, negative side) of a row label such as "Net income (loss)", else None."""
-    for m in _SIGNED_LABEL_RE.finditer(label):
-        if m.group(1):
-            positive, negative = _sign_word(m.group(1)), _sign_word(m.group(2))
-        else:
-            negative, positive = _sign_word(m.group(3)), _sign_word(m.group(4))
-        if frozenset((positive, negative)) in _SIGN_PAIRS:
-            return positive, negative
+    """
+    (positive side, negative side) of a row label such as "Net income (loss)",
+    else None. The word in parentheses is the negative side; the other is the
+    word right before it ("income (loss)") or right after it ("(loss)
+    income"). Read as one left-to-right pattern, "Net actuarial (loss)
+    income" matched "actuarial (loss)", no pair, and the parenthesis was
+    spent: General Mills' and American Water's statements print their pairs
+    negative side first after a word ("Net (loss) gain on ...", "Net
+    (decrease) increase in cash ..."), and claims of the wrong side passed
+    (round 11's integration).
+    """
+    for m in _PAREN_WORD_RE.finditer(label):
+        negative = _sign_word(m.group(1))
+        before = _WORD_BEFORE_RE.search(label[max(0, m.start() - 64): m.start()])
+        after = _WORD_AFTER_RE.match(label, m.end())
+        for side in (before, after):
+            if side and frozenset((_sign_word(side.group(1)), negative)) in _SIGN_PAIRS:
+                return _sign_word(side.group(1)), negative
     return None
 
 
