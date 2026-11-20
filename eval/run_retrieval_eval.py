@@ -42,6 +42,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from eval import gpu_state
 from eval import metrics as m
 from eval.corpus import (
     DEAL_ID,
@@ -648,6 +649,7 @@ def render_markdown(report: dict) -> str:
     ks = report["config"]["k"]
     aggs = report["aggregates"]
     ablations = [a for a in ABLATIONS if a in aggs]
+    gpu_note = gpu_state.note(report["environment"].get("gpu"))
     lines = [
         f"# Retrieval eval — {report['generated_at'][:10]}",
         "",
@@ -658,6 +660,7 @@ def render_markdown(report: dict) -> str:
         f"{report['environment']['device']} · LLM calls: 0 · fact-coverage ceiling "
         f"(facts present in any retrievable chunk): {_pct(report['fact_coverage_ceiling'])}%",
         "",
+        *([gpu_note, ""] if gpu_note else []),
         "Percentages. fact_cov = share of expected facts present in the top-k chunk "
         "texts (any file); ctx = the final context the synthesizer receives "
         "(reranked + parent/sibling expansion, formatted by the synthesizer). recall/MRR/nDCG use substring-derived "
@@ -972,6 +975,8 @@ async def run(args: argparse.Namespace) -> dict:
               f"missing {sub_info.get('missing_ids')} (treated as undecomposed)",
               file=sys.stderr)
 
+    # Before anything of ours loads: was another process computing on the GPU? (gpu_state)
+    gpu_before = gpu_state.sample_if(_device())
     started = time.perf_counter()
     print("[eval] indexing corpus into in-memory Qdrant ...", file=sys.stderr)
     client, documents = await build_index()
@@ -1111,6 +1116,8 @@ async def run(args: argparse.Namespace) -> dict:
             },
         }
     report["total_seconds"] = round(time.perf_counter() - started, 1)
+    report["environment"]["gpu"] = gpu_state.record(
+        gpu_before, gpu_state.sample_after(gpu_before))
     return report
 
 
