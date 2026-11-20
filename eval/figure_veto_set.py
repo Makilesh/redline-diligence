@@ -31,8 +31,30 @@ build     turns every converter table on a dev evidence page into claims:
           $Y."), and wrong ones in which one of the two figures is another
           year's or the neighbouring row's, or another company is named —
           the claims the single-figure set did not cover.
+          --kind grounding (Decision 94) builds claims for numeric grounding
+          from the converter tables of the dev filings that touch none of
+          Decision 90's evidence pages, so none of the tables Decision 90's
+          sets were built from. Per sampled (row, fiscal year) cell: the
+          figure as printed, and — in a currency row of a table whose
+          converter states a scale — the same with its scale word ("$1,488.4
+          million"); wrong by construction: another year's figure, the
+          neighbouring row's figure (each in both forms), the figure with
+          another scale word, and a per-share figure stated in the table's
+          scale. Only full fiscal-year columns are used (the converter's own
+          registry_period), and no claim is dropped for what grounding does
+          with it: grounding is what this set measures.
+          --kind grounding-cds builds, on the same tables and cells, the
+          kinds grounding cannot see, as Decision 90 built them: the filing's
+          own company or another dev company named, the true or the opposite
+          direction against the row's prior year, and the side of an "income
+          (loss)" pair the printed sign selects or the other.
 
-The plan, written before anything was scored, is in Decision 90.
+    python -m eval.figure_veto_set build --kind grounding --source D:/redline_data/veto10 \
+        --out D:/redline_data/ground11/set
+    python -m eval.figure_veto_set build --kind grounding-cds --source D:/redline_data/veto10 \
+        --out D:/redline_data/ground11/set_cds
+
+The plans, written before anything was scored, are in Decisions 90 and 94.
 """
 
 from __future__ import annotations
@@ -51,6 +73,11 @@ from pathlib import Path
 SEED = 20261119
 CELLS_PER_TABLE = 16
 PAIRS_PER_TABLE = 12
+# --kind grounding (Decision 94): its own seed, and fewer cells from each of
+# many more tables.
+GROUNDING_SEED = 20261120
+GROUNDING_CELLS_PER_TABLE = 4
+_SCALE_WORDS = {"thousands": "thousand", "millions": "million", "billions": "billion"}
 UNITS = ("currency", "per_share", "percent")
 _YEAR = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
 _GENERIC = re.compile(r"^Column \d+$")
@@ -362,6 +389,250 @@ def _two_rows(year: int, label_a: str, fig_a: str, label_b: str, fig_b: str, com
     return f"In fiscal {year}, {label_a} was {fig_a} and {label_b} was {fig_b}."
 
 
+_PRINTED_FIGURE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?")
+
+
+def fiscal_year_columns(columns: list[str]) -> dict[str, int]:
+    """column_years, kept to the columns the converter reads as one full
+    fiscal year of actuals (registry_period "FYyyyy"): a quarter's or a
+    budget's figure is not "fiscal 2019"'s."""
+    from src.data_processing.financial_table_converter import registry_period
+
+    return {col: year for col, year in column_years(columns).items()
+            if registry_period(col) == f"FY{year}"}
+
+
+def _printed(row: dict, col: str) -> dict | None:
+    """_numeric, and the cell prints one figure of its row's kind."""
+    cell = _numeric(row, col)
+    if cell is None:
+        return None
+    digits = re.sub(r"[^\d.,]", "", cell["raw"]).strip(".,")
+    kind = "percent" if row.get("unit") == "percent" else "currency"
+    if cell.get("kind") != kind or not _PRINTED_FIGURE.fullmatch(digits):
+        return None
+    return cell
+
+
+def grounding_claims_for_table(table_id: str, rows: list[dict], columns: list[str],
+                               scale_label: str) -> list[dict]:
+    """
+    Claims for numeric grounding from one table (--kind grounding).
+
+    For up to GROUNDING_CELLS_PER_TABLE seeded (row, fiscal year) cells:
+        supported/plain           "In fiscal Y, L was F."  (as printed)
+        supported/scaled          "In fiscal Y, L was F million."  (currency
+                                  row of a table stated in millions; the
+                                  table's own scale word)
+        contradicted/period       another year's figure of the row
+        contradicted/period_scaled    the same with the scale word
+        contradicted/neighbour    the neighbouring row's figure, same column
+        contradicted/neighbour_scaled the same with the scale word
+        contradicted/scale        the figure with another scale word
+        contradicted/unit         a per-share row's figure stated in the
+                                  table's scale
+    """
+    years = fiscal_year_columns(columns)
+    word = _SCALE_WORDS.get(scale_label, "")
+    cells = [(i, col) for i, row in enumerate(rows) if _eligible(row)
+             for col in years if _printed(row, col)]
+    rng = random.Random(f"{GROUNDING_SEED}:{table_id}")
+    out = []
+    for i, col in sorted(rng.sample(cells, min(GROUNDING_CELLS_PER_TABLE, len(cells)))):
+        row, cell = rows[i], _printed(rows[i], col)
+        unit, label, year = row["unit"], clean_label(row["line_item"]), years[col]
+        printed_in_row = {c.get("raw") for c in row["values"].values()}
+        base = {"table_id": table_id, "row": i, "column": col, "line_item": row["line_item"],
+                "year": year, "figure": cell["raw"], "unit": unit, "scale_label": scale_label}
+        scaled = bool(word) and unit == "currency"
+
+        def add(label_: str, kind: str, figure: str, base: dict = base, line: str = label, **extra) -> None:
+            out.append({**base, "label": label_, "kind": kind,
+                        "claim": f"In fiscal {base['year']}, {line} was {figure}.", **extra})
+
+        figure = render(cell, unit)
+        add("supported", "plain", figure)
+        if scaled:
+            add("supported", "scaled", f"{figure} {word}")
+            others = [w for w in _SCALE_WORDS.values() if w != word]
+            wrong = random.Random(f"{GROUNDING_SEED}:{table_id}:{i}:{col}:scale").choice(others)
+            add("contradicted", "scale", f"{figure} {wrong}", stated_scale=wrong)
+        if word and unit == "per_share":
+            add("contradicted", "unit", f"{figure} {word}")
+
+        # Another year's figure of the same row, attached to this year.
+        for other in sorted((c for c in years if c != col and _printed(row, c)),
+                            key=lambda c: (abs(years[c] - year), years[c] > year)):
+            alt = _printed(row, other)
+            if alt["raw"] != cell["raw"]:
+                add("contradicted", "period", render(alt, unit), source_column=other)
+                if scaled:
+                    add("contradicted", "period_scaled", f"{render(alt, unit)} {word}", source_column=other)
+                break
+
+        # The neighbouring row's figure in the same column, attached to this row.
+        for k in [*range(i + 1, len(rows)), *range(i - 1, -1, -1)]:
+            other_row = rows[k]
+            alt = _printed(other_row, col) if _eligible(other_row) else None
+            if alt and other_row["unit"] == unit and alt["raw"] not in printed_in_row:
+                add("contradicted", "neighbour", render(alt, unit), source_row=k)
+                if scaled:
+                    add("contradicted", "neighbour_scaled", f"{render(alt, unit)} {word}", source_row=k)
+                break
+    return out
+
+
+def cds_claims_for_table(table_id: str, rows: list[dict], columns: list[str], company: str,
+                         others: list[str]) -> list[dict]:
+    """
+    Claims of the kinds grounding cannot see (--kind grounding-cds), in
+    Decision 90's construction:
+        supported/company, contradicted/company     the filing's own company, or
+                                                    another dev company, named
+        supported/direction, contradicted/direction  the true or the opposite
+                                                    verb against the row's prior
+                                                    year (both printed positive)
+        supported/sign, contradicted/sign           the side of an "income
+                                                    (loss)" pair the printed
+                                                    sign selects, or the other
+    Company and direction claims are made on the seeded cells of
+    grounding_claims_for_table; sign claims on every signed cell of the table,
+    since the seeded cells hold few (11 pairs on the set's 337 tables, 52 with
+    every cell; decided before anything was scored).
+    """
+    years = fiscal_year_columns(columns)
+    cells = [(i, col) for i, row in enumerate(rows) if _eligible(row)
+             for col in years if _printed(row, col)]
+    rng = random.Random(f"{GROUNDING_SEED}:{table_id}")
+    seeded = set(rng.sample(cells, min(GROUNDING_CELLS_PER_TABLE, len(cells))))
+    signed = {(i, col) for i, col in cells if sign_sides(clean_label(rows[i]["line_item"]))}
+    out = []
+    for i, col in sorted(seeded | signed):
+        row, cell = rows[i], _printed(rows[i], col)
+        unit, label, year = row["unit"], clean_label(row["line_item"]), years[col]
+        base = {"table_id": table_id, "row": i, "column": col, "line_item": row["line_item"],
+                "year": year, "figure": cell["raw"], "unit": unit}
+
+        def add(label_: str, kind: str, text: str, base: dict = base, **extra) -> None:
+            out.append({**base, "label": label_, "kind": kind, "claim": text, **extra})
+
+        figure = render(cell, unit)
+        if (i, col) in seeded:
+            add("supported", "company", f"{company} reported {label} of {figure} in fiscal {year}.")
+            swap = random.Random(f"{GROUNDING_SEED}:{table_id}:{i}:{col}:company").choice(others)
+            add("contradicted", "company", f"{swap} reported {label} of {figure} in fiscal {year}.", named=swap)
+
+        prior = next((c for c, y in years.items() if y == year - 1), None)
+        prev = _printed(row, prior) if prior else None
+        if (i, col) in seeded and prev and cell["raw_value"] > 0 and prev["raw_value"] > 0 \
+                and prev["raw_value"] != cell["raw_value"]:
+            true, false = ("rose", "fell") if cell["raw_value"] > prev["raw_value"] else ("fell", "rose")
+            head = f"{label[:1].upper()}{label[1:]}"
+            add("supported", "direction", f"{head} {true} to {figure} in fiscal {year}.", prior=prev["raw"])
+            add("contradicted", "direction", f"{head} {false} to {figure} in fiscal {year}.", prior=prev["raw"])
+
+        sides = sign_sides(label)
+        if sides and cell["raw_value"] != 0:
+            magnitude = render({**cell, "raw_value": abs(cell["raw_value"])}, unit)
+            true, false = (sides[0], sides[1]) if cell["raw_value"] > 0 else (sides[1], sides[0])
+            add("supported", "sign", f"In fiscal {year}, {true} was {magnitude}.")
+            add("contradicted", "sign", f"In fiscal {year}, {false} was {magnitude}.")
+    return out
+
+
+def build_grounding(out: Path, source: Path, kind: str = "grounding") -> dict:
+    """
+    --kind grounding (or grounding-cds): claims.jsonl, pages.jsonl.gz and
+    build_summary.json under `out`, from the tables of the dev filings that
+    touch none of Decision 90's evidence pages. No grounding is run: what
+    grounding does with a claim is what the set measures, so none is dropped
+    for it.
+    """
+    from src.verification.claims import split_claims
+
+    out.mkdir(parents=True, exist_ok=True)
+    meta = json.loads((source / "fb_dev_meta.json").read_text(encoding="utf-8"))
+    chunks = [json.loads(line) for line in gzip.open(source / "fb_dev_chunks.jsonl.gz", "rt", encoding="utf-8")]
+    excluded = {tuple(p) for p in meta["evidence_pages"]}
+
+    def doc_of(chunk: dict) -> str:
+        name = chunk["source_file"]
+        return name[:-4] if name.lower().endswith(".pdf") else name
+
+    tables: dict[str, list[dict]] = defaultdict(list)
+    for c in chunks:
+        if c.get("table_id") and c.get("table_representation"):
+            tables[c["table_id"]].append(c)
+
+    stats: Counter = Counter()
+    claims: list[dict] = []
+    wanted_pages: set[tuple[str, int]] = set()
+    for table_id in sorted(tables):
+        table_chunks = tables[table_id]
+        doc = doc_of(table_chunks[0])
+        pages = set().union(*(chunk_pages(c) for c in table_chunks))
+        columns, rows = _table_rows(table_chunks)
+        if not rows or not pages:
+            continue
+        stats["tables"] += 1
+        if any((doc, p) in excluded for p in pages):
+            stats["tables_on_decision90_pages"] += 1
+            continue
+        if any(_GENERIC.match(col) for col in columns):
+            stats["tables_generic_columns"] += 1
+            continue
+        if len(fiscal_year_columns(columns)) < 2:
+            stats["tables_without_two_fiscal_years"] += 1
+            continue
+        scale_label = next((c.get("scale_label") for c in table_chunks
+                            if c.get("table_representation") == "row_by_row"), "") or ""
+        company = meta["company_of"].get(doc, doc)
+        if kind == "grounding-cds":
+            others = [c for c in meta["dev_companies"] if c != company]
+            made = cds_claims_for_table(table_id, rows, columns, company, others)
+        else:
+            made = grounding_claims_for_table(table_id, rows, columns, scale_label)
+        if not made:
+            stats["tables_without_eligible_cells"] += 1
+            continue
+        stats["tables_used"] += 1
+        stats[f"tables_scale_{scale_label or 'none'}"] += 1
+        page = min(pages)
+        wanted_pages.add((doc, page))
+        for claim in made:
+            claims.append({**claim, "doc": doc, "page": page, "company": company})
+
+    contexts = page_contexts(chunks, sorted(wanted_pages))
+    kept = []
+    for claim in claims:
+        claim["id"] = (f"{claim['doc']}|p{claim['page']}|{claim['table_id'][-4:]}|r{claim['row']}|"
+                       f"{claim['year']}|{claim['label'][:3]}-{claim['kind']}")
+        context = list(contexts[(claim["doc"], claim["page"])])
+        random.Random(f"{GROUNDING_SEED}:{claim['id']}").shuffle(context)
+        claim["context_ids"] = [c["chunk_id"] for c in context]
+        claim["answer"] = f"{claim['claim']} [📄 {claim['doc']}.pdf | p. {claim['page']}]"
+        if len(split_claims(claim["answer"])) != 1:  # a generation slip, by construction
+            stats["dropped_not_one_claim"] += 1
+            continue
+        stats[f"claims_{claim['label']}"] += 1
+        stats[f"kind_{claim['label']}_{claim['kind']}"] += 1
+        kept.append(claim)
+
+    with open(out / "claims.jsonl", "w", encoding="utf-8") as f:
+        for claim in kept:
+            f.write(json.dumps(claim, ensure_ascii=False) + "\n")
+    used = {(c["doc"], c["page"]) for c in kept}
+    with gzip.open(out / "pages.jsonl.gz", "wt", encoding="utf-8") as f:
+        for (doc, page) in sorted(used):
+            f.write(json.dumps({"doc": doc, "page": page, "chunks": contexts[(doc, page)]},
+                               ensure_ascii=False) + "\n")
+    summary = {"stats": dict(sorted(stats.items())), "filings_with_claims": len({c["doc"] for c in kept}),
+               "pages_with_claims": len(used), "tables_with_claims": len({c["table_id"] for c in kept}),
+               "excluded_pages": len(excluded)}
+    (out / "build_summary.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
+    return summary
+
+
 def page_contexts(chunks: list[dict], pages: list[tuple[str, int]]) -> dict[tuple[str, int], list[dict]]:
     """Every chunk the index holds for each page, in document order."""
     wanted = set(pages)
@@ -487,13 +758,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", required=True)
     p = sub.add_parser("build")
     p.add_argument("--out", required=True)
-    p.add_argument("--kind", choices=("single", "two-row"), default="single")
+    p.add_argument("--kind", choices=("single", "two-row", "grounding", "grounding-cds"), default="single")
     p.add_argument("--source", help="extract's output directory (default: --out)")
     args = parser.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if args.cmd == "extract":
         print(json.dumps(extract(Path(args.store), Path(args.out)), indent=1))
+    elif args.kind in ("grounding", "grounding-cds"):
+        summary = build_grounding(Path(args.out), Path(args.source) if args.source else Path(args.out), args.kind)
+        print(json.dumps(summary, indent=1))
     else:
         summary = build(Path(args.out), args.kind, Path(args.source) if args.source else None)
         print(json.dumps(summary["stats"], indent=1))

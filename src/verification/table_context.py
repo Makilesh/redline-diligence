@@ -37,9 +37,9 @@ from __future__ import annotations
 
 from src.verification.numeric_grounding import (
     _COLUMN_GAP_RE,
-    SCALE_HINT_RE,
     _is_rule_line,
     extract_numbers,
+    states_scale,
 )
 
 # A first line longer than this is prose, not a title; a unit line or header
@@ -157,10 +157,12 @@ def headed_parts(body: str, row_span: tuple[int, int], header_line: str = "",
         lines.append(_collapse(title))
 
     # Not another row of figures that happens to name a unit: that would show
-    # the model a second row's values.
+    # the model a second row's values. The converter's note counts whether or
+    # not it knows the currency ("…, in millions." as well as "…, in USD
+    # millions."), as it does for grounding (Decision 94).
     unit = next(
         (ln for ln in reversed(above)
-         if SCALE_HINT_RE.search(ln) and not (_columned(ln) and extract_numbers(ln, claims_only=False))),
+         if states_scale(ln) and not (_columned(ln) and extract_numbers(ln, claims_only=False))),
         "",
     )
     if unit.strip() and len(unit.split()) <= CONTEXT_MAX_WORDS:
