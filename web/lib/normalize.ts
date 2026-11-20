@@ -10,6 +10,12 @@
  */
 
 import type {
+  ChecklistCell,
+  ChecklistColumn,
+  ChecklistPassage,
+  ChecklistReport,
+  ChecklistRow,
+  ChecklistStatus,
   Citation,
   CitationMismatch,
   ClaimCheck,
@@ -392,6 +398,118 @@ export function normalizeTieOut(raw: unknown): TieOutReport | null {
     // A report that does not say it read everything is not taken to have.
     truncated: raw.truncated !== false,
     truncation_reason: str(raw.truncation_reason),
+    elapsed_ms: num(raw.elapsed_ms),
+  };
+}
+
+// The server caps these too (src/reports/checklist.py); the client does not
+// rely on it, because the passages and names are document text.
+export const CHECKLIST_LIMITS = {
+  items: 30,
+  rows: 200,
+  passage: 800,
+  alternate: 240,
+  alternates: 2,
+  source: 200,
+  section: 120,
+  label: 80,
+  question: 400,
+  documents: 50,
+} as const;
+
+const CHECKLIST_STATUSES: readonly ChecklistStatus[] = ["found", "not_found", "unclear"];
+
+function normalizeChecklistPassage(raw: unknown, limit: number): ChecklistPassage | null {
+  if (!isBag(raw) || !str(raw.text).trim()) return null;
+  return {
+    text: clip(raw.text, limit),
+    page_number: numOrNull(raw.page_number),
+    section_heading: clip(raw.section_heading, CHECKLIST_LIMITS.section),
+    chunk_id: str(raw.chunk_id),
+    score: num(raw.score),
+  };
+}
+
+function normalizeChecklistCell(raw: unknown, itemId: string): ChecklistCell {
+  const bag = isBag(raw) ? raw : {};
+  return {
+    item_id: itemId,
+    // An unrecognised status is neither found nor absent: it is read as unclear.
+    status: oneOf(bag.status, CHECKLIST_STATUSES) ?? "unclear",
+    score: numOrNull(bag.score),
+    answerability: numOrNull(bag.answerability),
+    passage: normalizeChecklistPassage(bag.passage, CHECKLIST_LIMITS.passage),
+    alternates: list(bag.alternates)
+      .slice(0, CHECKLIST_LIMITS.alternates)
+      .map((a) => normalizeChecklistPassage(a, CHECKLIST_LIMITS.alternate))
+      .filter((a): a is ChecklistPassage => a !== null),
+  };
+}
+
+function normalizeChecklistColumn(raw: unknown): ChecklistColumn | null {
+  if (!isBag(raw) || !str(raw.id)) return null;
+  return {
+    id: clip(raw.id, 64),
+    label: clip(raw.label, CHECKLIST_LIMITS.label) || clip(raw.id, 64),
+    question: clip(raw.question, CHECKLIST_LIMITS.question),
+    found: num(raw.found),
+    unclear: num(raw.unclear),
+    not_found: num(raw.not_found),
+  };
+}
+
+/**
+ * Normalises a `GET /deals/{id}/checklist` grid. Each row's cells are put in
+ * the order of the items; a cell the row lacks is unclear, never absent.
+ *
+ * @returns The typed grid, or null when the payload is not one (no deal_id).
+ */
+export function normalizeChecklist(raw: unknown): ChecklistReport | null {
+  if (!isBag(raw) || typeof raw.deal_id !== "string") return null;
+  const items = list(raw.items)
+    .slice(0, CHECKLIST_LIMITS.items)
+    .map(normalizeChecklistColumn)
+    .filter((c): c is ChecklistColumn => c !== null);
+  const rows: ChecklistRow[] = list(raw.rows)
+    .slice(0, CHECKLIST_LIMITS.rows)
+    .filter(isBag)
+    .map((row) => {
+      const byItem = new Map<string, unknown>();
+      for (const cell of list(row.cells)) {
+        if (isBag(cell) && typeof cell.item_id === "string" && !byItem.has(cell.item_id)) {
+          byItem.set(cell.item_id, cell);
+        }
+      }
+      return {
+        doc_id: str(row.doc_id),
+        source_file: clip(row.source_file, CHECKLIST_LIMITS.source),
+        document_category: clip(row.document_category, 40),
+        cells: items.map((item) => normalizeChecklistCell(byItem.get(item.id), item.id)),
+      };
+    });
+  return {
+    deal_id: raw.deal_id,
+    items,
+    rows,
+    documents_total: num(raw.documents_total),
+    // What is shown is what was checked.
+    documents_checked: rows.length,
+    documents_not_checked: stringList(raw.documents_not_checked)
+      .slice(0, CHECKLIST_LIMITS.documents)
+      .map((d) => clip(d, CHECKLIST_LIMITS.source)),
+    documents_excluded: list(raw.documents_excluded)
+      .filter(isBag)
+      .slice(0, CHECKLIST_LIMITS.documents)
+      .map((d) => ({
+        source_file: clip(d.source_file, CHECKLIST_LIMITS.source),
+        document_category: clip(d.document_category, 40),
+      })),
+    excluded_total: num(raw.excluded_total),
+    // A grid that does not say it checked every contract is not taken to have.
+    truncated: raw.truncated !== false,
+    truncation_reason: str(raw.truncation_reason),
+    reranker: clip(raw.reranker, 64),
+    answerability: raw.answerability === true,
     elapsed_ms: num(raw.elapsed_ms),
   };
 }
