@@ -1,17 +1,17 @@
 {
- "generated_at": "2026-11-14T18:59:45+00:00",
- "command": "python -m eval.run_verification_eval --no-nli --update-baseline eval/verification_baseline.json",
+ "generated_at": "2026-11-20T01:11:02+00:00",
+ "command": "python -m eval.run_verification_eval --no-nli --update-baseline eval/verification_baseline.json --output-dir .scratch_ground11/baseline_run",
  "nli": "off",
  "splits": {
   "dev": {
    "false_pass_rate": 0.0299,
    "false_alarm_rate": 0.0,
-   "supported_pass_rate": 0.4862
+   "supported_pass_rate": 0.4771
   },
   "test": {
    "false_pass_rate": 0.0667,
    "false_alarm_rate": 0.0,
-   "supported_pass_rate": 0.4554
+   "supported_pass_rate": 0.4455
   }
  },
  "random_figure_grounding": {
