@@ -10,6 +10,8 @@ Anything unrecognised reads as the less favourable verdict.
 
 Every string that reaches `unsafe_allow_html` here is escaped: claim text,
 evidence and file names come from the model and from counterparty documents.
+And every one of them is made inert before it is shown (app/markdown_safety.py):
+markdown renders images, which load with no click (Decision 96).
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import html
 
 import streamlit as st
 
+from app.markdown_safety import inert_markdown
 from app.styles import escape_currency, pill
 
 CLAIM_STATUSES = ("supported", "contradicted", "unsupported", "unverified")
@@ -355,20 +358,21 @@ def _render_claim(check: dict) -> None:
     if check.get("injection_suspect") is True:
         header += f"<span class='dd-cite-meta'>· {INJECTION_SUSPECT}</span>"
     st.markdown(header, unsafe_allow_html=True)
-    st.markdown(escape_currency(html.escape(check.get("claim") or "")))
+    st.markdown(inert_markdown(escape_currency(html.escape(check.get("claim") or ""))))
     note = citation_note(check)
     if note:
-        st.caption(escape_currency(html.escape(note)))
+        st.caption(inert_markdown(escape_currency(html.escape(note))))
 
     reason = check.get("reason") or ""
     if reason and check.get("status") != "supported":
-        st.caption(escape_currency(html.escape(reason)))
+        st.caption(inert_markdown(escape_currency(html.escape(reason))))
 
     figures = [f for f in check.get("numbers") or [] if isinstance(f, dict) and f.get("raw")]
     if figures:
         st.caption(
             " · ".join(
-                escape_currency(f"{html.escape(str(f['raw']))} ({_figure_note(f)})") for f in figures
+                inert_markdown(escape_currency(f"{html.escape(str(f['raw']))} ({_figure_note(f)})"))
+                for f in figures
             )
         )
 
@@ -380,6 +384,6 @@ def _render_claim(check: dict) -> None:
     )
     if check.get("evidence"):
         passage = " ".join(str(check["evidence"]).split())
-        st.markdown("> " + escape_currency(html.escape(passage)))
+        st.markdown("> " + inert_markdown(escape_currency(html.escape(passage))))
     if location:
-        st.caption(f"Source: {html.escape(location)}")
+        st.caption(f"Source: {inert_markdown(html.escape(location))}")

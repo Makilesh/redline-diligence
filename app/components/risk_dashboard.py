@@ -6,6 +6,7 @@ import html
 
 import streamlit as st
 
+from app.markdown_safety import inert_markdown
 from app.styles import escape_currency, pill
 
 # Display metadata per signal type. Keys mirror RISK_PATTERNS in
@@ -91,11 +92,14 @@ def render_risk_dashboard(risk_signals: list[dict]) -> None:
                 page = item.get("page_number")
                 desc = item.get("description", "No description")
 
-                # source is a document file name: escaped, as this is raw HTML.
+                # source is a document file name: escaped, as this is raw HTML,
+                # and inert, as markdown still renders inside the span.
                 st.markdown(
                     pill(str(severity).upper(), SEVERITY_PILL.get(severity, "muted"))
-                    + f"<span class='dd-cite-src'>{html.escape(str(source))}</span>"
-                    + (f"<span class='dd-cite-meta'> · page {html.escape(str(page))}</span>" if page else ""),
+                    + f"<span class='dd-cite-src'>{inert_markdown(html.escape(str(source)))}</span>"
+                    + (f"<span class='dd-cite-meta'> · page {inert_markdown(html.escape(str(page)))}</span>"
+                       if page else ""),
                     unsafe_allow_html=True,
                 )
-                st.caption(f"{SEVERITY_ICON.get(severity, '⚪')} {escape_currency(desc)}")
+                # The description quotes the document text the pattern matched.
+                st.caption(f"{SEVERITY_ICON.get(severity, '⚪')} {inert_markdown(escape_currency(desc))}")

@@ -8,6 +8,7 @@ import streamlit as st
 import requests
 
 from app.components.verification import passage_location, signal_labels
+from app.markdown_safety import inert_markdown
 from src.utils.admin_client import admin_headers
 
 
@@ -139,7 +140,7 @@ def render_document_uploader(api_url: str, deal_id: str) -> None:
         results = []
 
         for i, file in enumerate(uploaded_files):
-            with st.spinner(f"Ingesting {file.name}..."):
+            with st.spinner(f"Ingesting {inert_markdown(file.name)}..."):
                 try:
                     data = {"deal_id": deal_id, "is_current_version": str(is_current)}
                     if category != "auto-detect":
@@ -165,7 +166,20 @@ def render_document_uploader(api_url: str, deal_id: str) -> None:
 
             progress.progress((i + 1) / len(uploaded_files))
 
-        # Show results
-        st.markdown("### Upload Results")
-        for r in results:
-            st.markdown(r)
+        render_upload_results(results)
+
+
+def render_upload_results(lines: list[str]) -> None:
+    """
+    Shows the upload report, one markdown line per item.
+
+    A line carries the file name, the server's notices (a sheet name is the
+    workbook's own words) and candidate file names, so each is made inert:
+    no image from them can load (Decision 96).
+
+    Args:
+        lines: _describe_ingest's lines and the error lines, in order.
+    """
+    st.markdown("### Upload Results")
+    for line in lines:
+        st.markdown(inert_markdown(line))

@@ -7,6 +7,7 @@ import re
 
 import streamlit as st
 
+from app.markdown_safety import inert_markdown
 from app.styles import pill
 
 # A chunk's `section_heading` is whatever line the structural chunker judged to
@@ -170,10 +171,12 @@ def render_citations(citations: list[dict]) -> None:
         # File names and section headings come from the documents — counterparty
         # text — and this markup is rendered with unsafe_allow_html, so both are
         # escaped. A heading such as `<img src=x onerror=...>` was live HTML here.
+        # And made inert: a blank line in a heading ends the HTML block, and
+        # markdown after it — an image — would render.
         st.markdown(
             f"<div class='{css_class}'>"
-            f"<div class='dd-cite-src'>{i}. {html.escape(str(source))}</div>"
-            f"<div class='dd-cite-meta'>{html.escape(meta)}</div>"
+            f"<div class='dd-cite-src'>{i}. {inert_markdown(html.escape(str(source)))}</div>"
+            f"<div class='dd-cite-meta'>{inert_markdown(html.escape(meta))}</div>"
             f"<div style='margin-top:0.35rem'>{flags}</div>"
             f"</div>",
             unsafe_allow_html=True,
@@ -182,5 +185,5 @@ def render_citations(citations: list[dict]) -> None:
         if not is_current:
             superseded_by = cite.get("superseded_by") or "a newer version"
             st.caption(
-                f"↳ Superseded by {superseded_by}. This information may be outdated."
+                f"↳ Superseded by {inert_markdown(superseded_by)}. This information may be outdated."
             )
