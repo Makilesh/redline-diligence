@@ -9,6 +9,8 @@ the converter's markdown grid, row-by-row and narrative representations, each
 under the statement's title and the converter's unit note. No model is loaded.
 """
 
+import pytest
+
 from src.verification.claim_checker import _FigureView
 from src.verification.numeric_grounding import (
     SCALE_HINT_RE,
@@ -450,6 +452,32 @@ class TestSign:
 
     def test_a_written_minus_names_the_other_side(self):
         assert _filed(GM_ROWS, "In fiscal 2018, net earnings was -$2,131.0.")[0].is_confirmed
+
+    def test_a_pair_printed_negative_side_first_after_a_word(self):
+        # General Mills' "Net actuarial (loss) income": the word before "(loss)" is no side.
+        rows = GM_ROWS + ("Net actuarial (loss) income: Fiscal Year 2019=(253.4) Fiscal Year 2018=140.1 "
+                          "Fiscal Year 2017=197.9\n")
+        assert _filed(rows, "In fiscal 2019, net actuarial loss was $253.4.")[0].is_confirmed
+        assert _filed(rows, "In fiscal 2018, net actuarial income was $140.1.")[0].is_confirmed
+        [check] = _filed(rows, "In fiscal 2019, net actuarial income was $253.4.")
+        assert check.binding == "conflict" and "loss side" in check.binding_note
+        assert _filed(rows, "In fiscal 2017, net actuarial loss was $197.9.")[0].binding == "conflict"
+
+    @pytest.mark.parametrize("label, pair", [
+        ("Net income (loss)", ("income", "loss")),
+        ("(Increase) decrease in receivables", ("decrease", "increase")),
+        ("Net actuarial (loss) income", ("income", "loss")),
+        ("Net (loss) gain on mark-to-market valuation of commodity positions", ("gain", "loss")),
+        ("Net (decrease) increase in cash, cash equivalents and restricted funds", ("increase", "decrease")),
+        ("Other (income) expense, net", ("expense", "income")),
+        ("Provision for (benefit from) income taxes", None),
+        ("Operating Income (EBIT)", None),
+        ("(Gain) or loss on sale of businesses", None),
+    ])
+    def test_the_sign_pair_of_a_label(self, label, pair):
+        from src.verification.numeric_grounding import _sign_pair
+
+        assert _sign_pair(label) == pair
 
 
 class TestCompany:
