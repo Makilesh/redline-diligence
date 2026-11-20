@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import bisect
 import re
+from collections import Counter
 from dataclasses import dataclass, asdict, field
 from typing import Callable, Iterable
 
@@ -366,6 +367,24 @@ SCALE_HINT_WORDS = {
     "millions": 1e6, "mm": 1e6, "m": 1e6,
     "billions": 1e9,
 }
+# The unit note the table converter writes on every representation of a table
+# (financial_table_converter._unit_note): "Values are as stated in the source,
+# in millions." — "in USD millions" when it knows the currency, which
+# SCALE_HINT_RE reads already. Without the currency the note matched none of
+# SCALE_HINT_RE's forms: 631 of the 696 row-by-row chunks of FinanceBench's dev
+# filings whose table states a scale carried a unit grounding could not read,
+# so "$1,488.4 million" was "not found" against "1,488.4" (Decision 90). Kept
+# out of SCALE_HINT_RE, which the financial verifier's registry shares and which
+# reads a converted table's scale from its payload instead.
+UNIT_NOTE_RE = re.compile(
+    r"\bvalues are as stated in the source, in (?:[a-z]{3}\s+)?(thousands|millions|billions)\b",
+    re.IGNORECASE,
+)
+
+
+def states_scale(line: str) -> bool:
+    """True for a line stating a unit or scale: a unit header, or the converter's unit note."""
+    return bool(SCALE_HINT_RE.search(line) or UNIT_NOTE_RE.search(line))
 
 # A fiscal period or a calendar year: FY2023, FY'23, Q3 FY2023, fiscal 2023,
 # "December 31, 2023". Docket-style numbers ("2023-CV-04821") are not periods.
@@ -399,8 +418,28 @@ _COMPARISON_TRAIL_RE = re.compile(
 _RULE_CHARS = frozenset("=-_*~|: \t")
 _PARENTHETICAL_RE = re.compile(r"\(([^()\n]*)\)")
 _COLUMN_GAP_RE = re.compile(r"\S(?:\s{2,}|\t|\s*\|\s*)\S")
+# A dot leader, the gap a PDF sets between a row label and its figures:
+# "Revenue ........ $ 4,795,511", ". . . . . 2,622,091". Four dots or more, so
+# an ellipsis is not one.
+_LEADER_RE = re.compile(r"\.(?:[ \t]?\.){3}")
 # Applied to a left-stripped line (see _is_listed).
 _LABEL_COLON_RE = re.compile(r"[^:\n]{2,60}:\s")
+# The longest column name _is_row_by_row reads after a label ("For the Years
+# Ended December 31, 2018" is 37 characters).
+_MAX_COLUMN_NAME = 80
+# Figure kinds that are alike in a table row: a statement prints "$" on a row's
+# first figure only ("Revenue  $452.8  387.1"), and a bare "111" stands beside a
+# separated "2,522". Any of them may take a column header's periods.
+_ALIKE = {"count": "currency", "plain": "currency"}
+# A column shorter than a fiscal year: its year is not a fiscal year's.
+_SUB_ANNUAL_RE = re.compile(
+    r"\b(?:q[1-4]|[1-4]q|h[12]|quarters?|quarterly|half|ytd|qtd|mtd|ltm|ttm)\b"
+    r"|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|[1-9]|1[01])\s+months?\b"
+    r"|\b(?:[1-9]|[1-4]\d|5[01])\s+weeks?\b",
+    re.IGNORECASE,
+)
+# A footnote marker beside a column title: "2019 (1)", "2018 (a)".
+_FOOTNOTE_MARK_RE = re.compile(r"\(\s*(?:\d{1,2}|[a-z])\s*\)", re.IGNORECASE)
 # A sentence ends before a capital, a figure or a list bullet: without the
 # bullet, "…$10 million per fiscal year;\n  - Dispose of assets … $20 million"
 # is one sentence, and every figure in a bulleted list shares one anchor.
@@ -451,6 +490,72 @@ def binding_tokens(text: str) -> set[str]:
     return out
 
 
+# A parenthetical that names the other side of a signed line ("Net income
+# (loss)", "Net (income) loss attributable to noncontrolling interests",
+# "Provision for (benefit from) income taxes") says which sign is which; it is
+# not another name for the line the way "Operating Income (EBIT)" is.
+_SIGN_WORDS = frozenset(binding_tokens(
+    "income loss losses gain gains expense expenses benefit benefits increase increases "
+    "decrease decreases provision charge charges credit credits deficit surplus"
+))
+
+
+def _is_sign_marker(parenthetical: str) -> bool:
+    """True for a parenthetical made only of words that name a sign: "(income)", "(benefit from)"."""
+    words = binding_tokens(parenthetical)
+    return bool(words) and words <= _SIGN_WORDS
+
+
+# The two sides of a signed line: "Net income (loss)" is income when printed
+# positive and a loss when printed negative; in "(Increase) decrease" the word
+# in parentheses is again the negative side.
+_SIGN_PAIRS = frozenset(frozenset(pair) for pair in (
+    ("income", "loss"), ("gain", "loss"), ("income", "expense"), ("profit", "loss"),
+    ("earnings", "loss"), ("increase", "decrease"), ("benefit", "provision"),
+    ("benefit", "expense"), ("inflow", "outflow"), ("surplus", "deficit"),
+))
+_SIGN_PLURALS = {
+    "losses": "loss", "gains": "gain", "expenses": "expense", "profits": "profit", "increases": "increase",
+    "decreases": "decrease", "benefits": "benefit", "provisions": "provision", "inflows": "inflow",
+    "outflows": "outflow", "surpluses": "surplus", "deficits": "deficit",
+}
+_SIGNED_LABEL_RE = re.compile(r"\b([A-Za-z]+)\s*\(\s*([A-Za-z]+)\s*\)|\(\s*([A-Za-z]+)\s*\)\s*([A-Za-z]+)\b")
+_WORD_RE = re.compile(r"[a-z]+")
+
+
+def _sign_word(word: str) -> str:
+    word = ascii_lower(word)
+    return _SIGN_PLURALS.get(word, word)
+
+
+def _sign_pair(label: str) -> tuple[str, str] | None:
+    """(positive side, negative side) of a row label such as "Net income (loss)", else None."""
+    for m in _SIGNED_LABEL_RE.finditer(label):
+        if m.group(1):
+            positive, negative = _sign_word(m.group(1)), _sign_word(m.group(2))
+        else:
+            negative, positive = _sign_word(m.group(3)), _sign_word(m.group(4))
+        if frozenset((positive, negative)) in _SIGN_PAIRS:
+            return positive, negative
+    return None
+
+
+def _printed_negative(body: str, mention: NumericMention) -> bool:
+    """True when the document prints a figure negative: "(1,570)", "$ (596)", "-$5.0", "−5.0"."""
+    j = mention.start
+    while j > 0 and body[j - 1] in " \t$€£":
+        j -= 1
+    before = body[j - 1] if j > 0 else ""
+    if before == "(":
+        k = mention.end
+        while k < len(body) and body[k] in " \t%":
+            k += 1
+        return k < len(body) and body[k] == ")"
+    # A minus sign, not a hyphen joining two figures ("5-10"). ("" is in every
+    # string: a figure that opens the text has no sign before it.)
+    return before != "" and before in "-−–" and (j < 2 or not body[j - 2].isalnum())
+
+
 def _periods_in(text: str) -> list[tuple[int, int, str]]:
     """(start, end, four-digit year) of every period stated in text."""
     out = []
@@ -460,14 +565,45 @@ def _periods_in(text: str) -> list[tuple[int, int, str]]:
     return out
 
 
+# What keeps a text's one year from dating its undated figures: a span shorter
+# than a year ("Q3 2023", "six months ended June 30, 2023" — _periods_in reads
+# both as 2023) or a plan rather than a result.
+_NOT_A_YEAR_RE = re.compile(
+    _SUB_ANNUAL_RE.pattern
+    + r"|\b(?:budget(?:ed|s)?|forecast(?:ed|s)?|projected|projections?|outlook|guidance)\b",
+    re.IGNORECASE,
+)
+
+
+def _chunk_period(body: str, source: str) -> str:
+    """
+    The year a chunk is about, for the figures in it nothing else dates: the
+    one year its text states; when its text states none, the one year its
+    document's name states ("quality_of_earnings_report_fy2023.txt" — the
+    revenue-quality section of a QoE report names no year of its own). ""
+    when the text (or the name) states several years, a span shorter than a
+    year, or a budget or forecast.
+    """
+    text = body
+    years = {year for _, _, year in _periods_in(body)}
+    if not years:
+        name = re.split(r"[\\/]", source or "")[-1]
+        text = re.sub(r"[_.\-]+", " ", re.sub(r"\.[A-Za-z0-9]{1,5}$", "", name))
+        years = {year for _, _, year in _periods_in(text)}
+    if len(years) != 1 or _NOT_A_YEAR_RE.search(text):
+        return ""
+    return next(iter(years))
+
+
 def figure_periods(text: str, spans: list[tuple[int, int]]) -> list[str]:
     """
     The period each figure in a piece of text is stated for.
 
-    For every figure, in order: a period right next to it with no other figure
-    in between ("$452.8 million in FY2023", "FY2022 $387.1M"); "*" when the
-    wording points at a comparison period without naming it ("up from
-    $387.1M", "against $72.1M a year earlier"); the only period the text
+    For every figure, in order: the period that labels it ("2019=7,207",
+    "FY2022: 387.1" — see _labelling_periods); a period right next to it with
+    no other figure in between ("$452.8 million in FY2023", "FY2022 $387.1M");
+    "*" when the wording points at a comparison period without naming it ("up
+    from $387.1M", "against $72.1M a year earlier"); the only period the text
     mentions, unless that period belongs to such a comparison ("284 (up from
     231 in FY2022)" says nothing about when 284 was); otherwise "".
 
@@ -479,11 +615,90 @@ def figure_periods(text: str, spans: list[tuple[int, int]]) -> list[str]:
         One of a four-digit year, "*" (another, unnamed period) or "" (not
         stated) per span.
     """
+    return _figure_periods(text, spans)[0]
+
+
+# Between a period and the figure it labels: "2019=7,207", "FY2022: 387.1",
+# "Fiscal Years 2014=$ 4,147,065", "2016=(1,570)" — the table converter's
+# row-by-row and narrative cells, and "period: value" lists generally.
+_LABEL_GAP_RE = re.compile(r"\s*[=:]\s*(?:[$€£(\-−–]\s*){0,3}")
+# A period that names a cell, whatever the cell holds: "2021=—" in a row-by-row
+# line, "2021: —;" in a narrative one.
+_EQUALS_AFTER_RE = re.compile(r"[ \t]*(?:=|:[ \t]*[—–-][ \t]*(?:;|$))")
+
+
+def _paren_depths(text: str, positions: list[int]) -> list[int]:
+    """How many parentheses are open at each of `positions` (ascending), never below zero."""
+    out, depth, at = [], 0, 0
+    for pos in positions:
+        for ch in text[at:pos]:
+            if ch == "(":
+                depth += 1
+            elif ch == ")" and depth:
+                depth -= 1
+        at = max(at, pos)
+        out.append(depth)
+    return out
+
+
+def _labelling_periods(
+    text: str, periods: list[tuple[int, int, str]], spans: list[tuple[int, int]]
+) -> list[int]:
+    """
+    Per figure, the index of the period that labels it, or -1.
+
+    A period followed by "=" or ":" and then, with only a sign or a currency
+    between, a figure, names that figure's column: "Operating income:
+    2019=7,207 2018=7,820". Without this, 7,207 sat as close to the " 2018"
+    after it as to the "2019=" before it, the tie went to the period after,
+    and every figure of such a line took its last column's year (Decision 90:
+    "Operating income was $7,207 in fiscal 2018" came back bound).
+    """
+    starts = [p[0] for p in periods]
+    out = []
+    for start, _end in spans:
+        j = bisect.bisect_right(starts, start) - 1
+        labelled = (
+            j >= 0
+            and periods[j][1] <= start
+            and _LABEL_GAP_RE.fullmatch(text, periods[j][1], start) is not None
+        )
+        out.append(j if labelled else -1)
+    return out
+
+
+def _figure_periods(
+    text: str, spans: list[tuple[int, int]]
+) -> tuple[list[str], list[bool], bool]:
+    """
+    figure_periods; per figure, whether a period labels it (_labelling_periods);
+    and whether the text labels any cell with a period ("2021=—" included).
+    """
     periods = _periods_in(text)
     if not periods:
-        return [
-            "*" if _is_comparison(text, start, end) else "" for start, end in spans
-        ]
+        return (
+            ["*" if _is_comparison(text, start, end) else "" for start, end in spans],
+            [False] * len(spans),
+            False,
+        )
+
+    labels = _labelling_periods(text, periods, spans)
+    # A period that labels a figure is that figure's alone: never the one
+    # after the figure before it ("$ 4,795,511: Fiscal Years 2014=$ 4,147,065"
+    # does not date the 4,795,511), and never the text's "only" period for a
+    # figure ahead of it. So is a period that labels an empty cell
+    # ("Notional value settled (2): 2021=— 2020=1,600": not the footnote's).
+    is_label = {j for j in labels if j >= 0} | {
+        idx for idx, (_, p_end, _) in enumerate(periods) if _EQUALS_AFTER_RE.match(text, p_end)
+    }
+    # A label inside a parenthetical labels inside it only: in "SaaS ARR
+    # Growth: 27.9% YoY (SaaS ARR as of Dec 31, 2023: $210.5M)" the 2023 dates
+    # the $210.5M, and still dates the 27.9% ahead of it as the line's only
+    # period (Decision 94's revision; the first form left the 27.9% undated).
+    depths = _paren_depths(text, [p[0] for p in periods])
+    top_labels = {j for j in is_label if depths[j] == 0}
+    first_label = min((periods[j][0] for j in top_labels), default=len(text))
+    free_years = {year for idx, (_, _, year) in enumerate(periods) if idx not in top_labels}
 
     # Only the nearest period on each side can be adjacent, and only the
     # neighbouring figure can sit in between — so this is a bisect per figure,
@@ -492,9 +707,12 @@ def figure_periods(text: str, spans: list[tuple[int, int]]) -> list[str]:
     comparison = [_is_comparison(text, start, end) for start, end in spans]
     adjacent: list[str] = []
     for i, (start, end) in enumerate(spans):
+        if labels[i] >= 0:
+            adjacent.append(periods[labels[i]][2])
+            continue
         best: tuple[int, int, str] | None = None
         k = bisect.bisect_left(period_starts, end)
-        if k < len(periods):
+        if k < len(periods) and k not in is_label:
             p_start, _, year = periods[k]
             next_figure = spans[i + 1][0] if i + 1 < len(spans) else p_start
             if p_start - end <= _PERIOD_ADJACENCY and next_figure >= p_start:
@@ -514,15 +732,21 @@ def figure_periods(text: str, spans: list[tuple[int, int]]) -> list[str]:
                 best = (gap, 1, year)
         adjacent.append(best[2] if best else "")
 
-    years = {year for _, _, year in periods}
-    only = next(iter(years)) if len(years) == 1 else ""
-    # The single period is "taken" when it sits next to a comparison figure.
-    if only and any(a == only and c for a, c in zip(adjacent, comparison)):
-        only = ""
+    def untaken(years: set[str]) -> str:
+        """The single period, unless it sits next to a comparison figure."""
+        only = next(iter(years)) if len(years) == 1 else ""
+        if only and any(a == only and c for a, c in zip(adjacent, comparison)):
+            return ""
+        return only
+
+    # Ahead of the first label only the periods that label nothing count; a
+    # label scopes forward ("Revenue FY2023: $452.8M (+17.0%)" dates the 17.0%).
+    only = untaken({year for _, _, year in periods})
+    only_ahead = untaken(free_years)
     out = []
-    for a, c in zip(adjacent, comparison):
-        out.append(a or ("*" if c else only))
-    return out
+    for (start, _end), a, c in zip(spans, adjacent, comparison):
+        out.append(a or ("*" if c else (only if start > first_label else only_ahead)))
+    return out, [j >= 0 for j in labels], bool(is_label)
 
 
 def _is_comparison(text: str, start: int, end: int) -> bool:
@@ -611,6 +835,10 @@ class ContextFigure:
         header_line: The column-header line `period` was read from, as the
             document prints it — from this chunk, or the one borrowed from
             another chunk of the same file; "" when no header named it.
+        chunk_period: For a figure whose period nothing else states, the one
+            period its chunk states, "" when it states none or several.
+        negative: True when the document prints the figure negative: in
+            parentheses, "(1,570)", or after a minus sign.
     """
 
     mention: NumericMention
@@ -625,6 +853,8 @@ class ContextFigure:
     column_unknown: bool = False
     row_span: tuple[int, int] = (-1, -1)
     header_line: str = ""
+    chunk_period: str = ""
+    negative: bool = False
 
     def named_by(self, claim_tokens: set[str]) -> bool:
         """
@@ -656,12 +886,17 @@ class ContextFigure:
 
 @dataclass
 class _Unit:
-    """A table row or a sentence that holds figures: its words and its figures."""
+    """
+    A table row or a sentence that holds figures: its words and its figures,
+    and for a row labelled with a signed pair ("Net income (loss)"), the word
+    a positive figure is and the word a negative one is.
+    """
 
     tokens: frozenset
     figures: list[int]
     tabular: bool
     kinds: frozenset = frozenset()
+    sign_pair: tuple[str, str] | None = None
 
 
 @dataclass
@@ -710,6 +945,10 @@ class ContextIndex:
         self.figures: list[ContextFigure] = []
         self.units: list[_Unit] = []
         self._units_by_token: dict[str, list[int]] = {}
+        # Per chunk index: the filing's registrant ("" when the payload names
+        # none) and the file name with the evidence text.
+        self.chunk_filers: dict[int, str] = {}
+        self.chunk_evidence: dict[int, str] = {}
         # (value at one magnitude, figure id, True when that magnitude is assumed)
         keyed: list[tuple[float, int, bool]] = []
 
@@ -736,29 +975,44 @@ class ContextIndex:
             # ascii_lower: "(ın mıllıons)" — "IN MILLIONS" lower-cased under
             # Turkish rules — matches the case-insensitive hint, and .lower()
             # alone is no key of SCALE_HINT_WORDS (Decision 88).
-            hints = [
-                (m.start(), SCALE_HINT_WORDS[ascii_lower(next(g for g in m.groups() if g))])
-                for m in SCALE_HINT_RE.finditer(body)
-            ]
+            hints = sorted(
+                [
+                    (m.start(), SCALE_HINT_WORDS[ascii_lower(next(g for g in m.groups() if g))])
+                    for m in SCALE_HINT_RE.finditer(body)
+                ]
+                + [
+                    (m.start(), SCALE_HINT_WORDS[ascii_lower(m.group(1))])
+                    for m in UNIT_NOTE_RE.finditer(body)
+                ]
+            )
             units = _body_units(body)
             file_scales.setdefault(source, set()).update(s for _, s in hints)
             file_headers.setdefault(source, set()).update(u[3] for u in units if u[3])
             for start, end, _tabular, unit_header in units:
                 if unit_header:
                     header_lines.setdefault(source, {}).setdefault(unit_header, body[start:end])
-            parsed.append((ci, source, body, hints, units))
+            # Who the chunk's document is (a filing's registrant, from its
+            # metadata), and what it says: the company check of ground_texts.
+            self.chunk_filers[ci] = str(chunk.get("filing_company") or "")
+            self.chunk_evidence[ci] = f"{source}\n{body}"
+            parsed.append((ci, source, body, hints, units, _chunk_period(body, source)))
 
-        for ci, source, body, hints, units in parsed:
+        for ci, source, body, hints, units, chunk_only in parsed:
             mentions = extract_numbers(body, claims_only=False)
             declared = sorted(file_scales.get(source, ()))
             hint_positions = [pos for pos, _ in hints]
             header: tuple[str, ...] = ()
             header_text = ""
+            header_cells = 0
             cursor = 0
             for start, end, tabular, unit_header in units:
                 if unit_header:
                     header = unit_header
                     header_text = body[start:end]
+                    # A pipe header whose every column cell is a period: a row
+                    # with as many cells is read cell by cell (_cell_periods).
+                    width = len(_pipe_cells(header_text))
+                    header_cells = width if width == len(header) + 1 else 0
                     continue
                 while cursor < len(mentions) and mentions[cursor].start < start:
                     cursor += 1
@@ -771,14 +1025,15 @@ class ContextIndex:
 
                 text = body[start:end]
                 tokens = frozenset(binding_tokens(text))
-                stated = figure_periods(text, [(m.start - start, m.end - start) for m in in_unit])
+                spans = [(m.start - start, m.end - start) for m in in_unit]
+                stated, labelled, labels_cells = _figure_periods(text, spans)
                 per_unit = bool(_PER_UNIT_RE.search(text))
                 at = bisect.bisect_right(hint_positions, start) - 1
                 nearest = hints[at][1] if at >= 0 else None
 
-                alias = frozenset(
-                    binding_tokens(" ".join(_PARENTHETICAL_RE.findall(text)))
-                ) if tabular else frozenset()
+                alias = frozenset(binding_tokens(" ".join(
+                    p for p in _PARENTHETICAL_RE.findall(text) if not _is_sign_marker(p)
+                ))) if tabular else frozenset()
 
                 unit_id = len(self.units)
                 self.units.append(_Unit(
@@ -786,17 +1041,38 @@ class ContextIndex:
                     figures=[],
                     tabular=tabular,
                     kinds=frozenset(m.kind for m in in_unit),
+                    # The row's label is what stands before its first figure.
+                    sign_pair=_sign_pair(text[: spans[0][0]]) if tabular else None,
                 ))
                 for token in tokens:
                     self._units_by_token.setdefault(token, []).append(unit_id)
 
-                # A column header applies to a row of like figures of the same
-                # count: "Revenue  $452.8  $387.1" under "FY2023  FY2022", not
-                # "$189.6  41.9%".
-                columns: tuple[str, ...] = ()
+                # A pipe row under a pipe header of as many cells takes its
+                # periods cell by cell: an empty "—" cell or a footnote in the
+                # label cell no longer shifts every figure after it.
+                cells: list[str] | None = None
                 column_line = ""
-                alike = tabular and len(in_unit) > 1 and len({m.kind for m in in_unit}) == 1
-                if alike:
+                if tabular and header_cells:
+                    row_cells = _pipe_cells(text)
+                    if len(row_cells) == header_cells:
+                        cells = _cell_periods(row_cells, header, spans)
+                        column_line = header_text
+                # Otherwise a column header applies to a row of like figures
+                # of the same count: "Revenue  $452.8  387.1" under "FY2023
+                # FY2022", not "$189.6  41.9%".
+                columns: tuple[str, ...] = ()
+                alike = (
+                    cells is None
+                    and tabular
+                    and len(in_unit) > 1
+                    and len({_ALIKE.get(m.kind, m.kind) for m in in_unit}) == 1
+                )
+                # Not to a row that labels its own cells ("2019=7,207",
+                # "2021=—"): its labels say which figure is whose, and a header
+                # of the same width would also date a footnote marker or a
+                # value the PDF left in the row label ("Notional value settled
+                # (2): 2021=— 2020=1,600" under "2021 | 2020").
+                if alike and not labels_cells:
                     options = [header] if header else sorted(
                         h for h in file_headers.get(source, ()) if len(h) == len(in_unit)
                     )
@@ -820,8 +1096,18 @@ class ContextIndex:
                 row_span = (row_start, len(body) if row_end < 0 else row_end)
 
                 for k, mention in enumerate(in_unit):
-                    period = columns[k] if columns else stated[k]
+                    # A period the row labels its figure with ("2019=7,207")
+                    # first; then the cell's column; then the header's column
+                    # for a row of like figures; then the period next to it.
+                    if labelled[k]:
+                        period = stated[k]
+                    elif cells is not None:
+                        period = cells[k]
+                    else:
+                        period = columns[k] if columns else stated[k]
                     period = "" if period == "*" else period
+                    # The header line is recorded where it named the period.
+                    header_line = column_line if period and (columns or cells is not None) else ""
                     lo = max(0, mention.start - 60)
                     idx = len(self.figures)
                     self.figures.append(ContextFigure(
@@ -836,7 +1122,9 @@ class ContextIndex:
                         period=period,
                         column_unknown=alike and not period,
                         row_span=row_span,
-                        header_line=column_line,
+                        header_line=header_line,
+                        chunk_period="" if period or alike else chunk_only,
+                        negative=_printed_negative(body, mention),
                     ))
                     self.units[unit_id].figures.append(idx)
                     keyed.append((mention.value, idx, False))
@@ -959,10 +1247,15 @@ class ContextIndex:
           its own figures match.
 
         A tied match that fails one of those is a "conflict": evidence the
-        figure belongs elsewhere. A conflict outranks a tied match whose period
-        simply is not stated — "Total Revenue $452.8" in an undated table must
-        not vouch for "FY2022 revenue was $452.8 million" when the income
-        statement puts $452.8 under FY2023.
+        figure belongs elsewhere. A tied match whose period the documents do
+        not state is not confirmation of the period a claim names: "Total
+        Revenue $452.8" in an undated table cannot vouch for "FY2022 revenue
+        was $452.8 million", whether or not the income statement that puts
+        $452.8 under FY2023 was retrieved too. It comes back "unbound", for the
+        judge, unless its chunk states that period and no other (Decision 94;
+        before, it was bound to any year when nothing contradicted it, and a
+        statement grid whose "For the Years Ended December 31, 2018" header
+        went unread confirmed whatever year a claim named).
 
         The test is lexical and deliberately one-sided: a paraphrase sharing no
         words with its row comes back "unbound" and is left to the entailment
@@ -984,13 +1277,14 @@ class ContextIndex:
         year = claim_period if claim_period not in ("", "*") else ""
         conflict: Binding | None = None
         undated: ContextFigure | None = None
+        chunk_dated: ContextFigure | None = None
         ambiguous: ContextFigure | None = None
         # The claim's strongest rival is the same for every candidate, so it is
         # found once, and only if a candidate gets that far. Looking for it per
         # candidate made binding candidates x units: 4.2 s for a 40-claim answer
         # against a 1,000-row schedule that repeats one figure, fourfold per
         # doubling — on a document a counterparty supplies.
-        rival: tuple[int, str] | None = None
+        rival: tuple[int, str, bool] | None = None
 
         for fig in candidates:
             if not fig.named_by(claim_tokens):
@@ -1011,7 +1305,16 @@ class ContextIndex:
                     claim_kind,
                     explained_units | {f.unit for f in candidates},
                 )
-            if rival[0] > shared:
+            # A rival also wins a tie on shared words when the claim names all
+            # of its label and only part of the candidate's: "Other assets was
+            # $7,445.1" sits in "Other intangible assets", and the "Other
+            # assets" row is named whole (Decision 94). A label's parenthetical
+            # need not be named: "total debt" names "Total Debt (Current +
+            # Non-Current)" whole.
+            if rival[0] > shared or (
+                rival[0] == shared and rival[2] and fig.cell
+                and not (fig.anchor_tokens - fig.alias_tokens or fig.anchor_tokens) <= claim_tokens
+            ):
                 conflict = conflict or Binding(
                     "conflict",
                     note=f"the statement names another item ({rival[1]}) whose figure is different",
@@ -1021,6 +1324,8 @@ class ContextIndex:
             if year and not fig.period:
                 if fig.column_unknown:
                     ambiguous = ambiguous or fig
+                elif fig.chunk_period == year:
+                    chunk_dated = chunk_dated or fig
                 else:
                     undated = undated or fig
                 continue
@@ -1028,8 +1333,17 @@ class ContextIndex:
 
         if conflict:
             return conflict
+        # A single figure whose own text states no period takes its chunk's
+        # only period, below a conflict and above nothing: a QoE table with no
+        # column header in a chunk about FY2023 (Decision 94's revision).
+        if chunk_dated:
+            return Binding("bound", figure=chunk_dated)
         if undated:
-            return Binding("bound", figure=undated)
+            return Binding(
+                "unbound",
+                note=f"the documents do not say which period this figure is for, so not that it is {year}",
+                figure=undated,
+            )
         if ambiguous:
             return Binding(
                 "unbound",
@@ -1085,24 +1399,29 @@ class ContextIndex:
             excluded_units: Units matched by a figure of the claim.
 
         Returns:
-            (shared word count, the shared words) of the strongest rival, or
-            (0, "") when there is none.
+            (shared word count, the shared words, True for a table row whose
+            every label word the claim uses) of the strongest rival — at equal
+            counts, a row named whole first — or (0, "", False) when there is
+            none.
         """
-        best_overlap, best_unit = 0, -1
+        best_overlap, best_unit, best_whole = 0, -1, False
         for ui, overlap in overlaps.items():
-            if overlap <= best_overlap or ui in excluded_units:
+            if overlap < best_overlap or ui in excluded_units:
                 continue
             unit = self.units[ui]
+            whole = unit.tabular and overlap == len(unit.tokens)
+            if overlap == best_overlap and (best_whole or not whole):
+                continue
             if unit.tabular:
                 if overlap / len(unit.tokens) < LABEL_COVERAGE:
                     continue
             elif overlap / len(claim_tokens) < SENTENCE_COVERAGE:
                 continue
             if any(_kinds_compatible(claim_kind, kind, True) for kind in unit.kinds):
-                best_overlap, best_unit = overlap, ui
+                best_overlap, best_unit, best_whole = overlap, ui, whole
         if best_unit < 0:
-            return 0, ""
-        return best_overlap, " ".join(sorted(self.units[best_unit].tokens & claim_tokens))
+            return 0, "", False
+        return best_overlap, " ".join(sorted(self.units[best_unit].tokens & claim_tokens)), best_whole
 
 
 def _assumed_scales(
@@ -1149,10 +1468,54 @@ def _is_rule_line(line: str) -> bool:
     return len(stripped) >= 4 and _RULE_CHARS.issuperset(stripped)
 
 
+def _is_columned(line: str) -> bool:
+    """True for a line set in columns: a gap of 2+ spaces, a tab, a pipe or a dot leader."""
+    stripped = line.strip()
+    return bool(_COLUMN_GAP_RE.search(stripped) or _LEADER_RE.search(stripped))
+
+
+def _is_row_by_row(line: str) -> bool:
+    """
+    True for the table converter's row-by-row line, "Label: column=value
+    column=value", whatever the label's length.
+
+    The converter writes the PDF's row label as printed, and a statement row's
+    label can run past _LABEL_COLON_RE's 60 characters ("Earnings before income
+    taxes and after-tax earnings from joint ventures: Fiscal Year 2022=3,209.6
+    …"). A string search, not a regex: this runs over counterparty text.
+    """
+    cut = line.find(": ")
+    if cut < 2:
+        return False
+    eq = line.find("=", cut + 2, cut + 2 + _MAX_COLUMN_NAME)
+    return eq > cut + 2 and ":" not in line[cut + 2: eq]
+
+
+def _is_labelled(line: str) -> bool:
+    """True for a "Label: value" line (see _is_row_by_row for long labels)."""
+    stripped = line.lstrip()
+    return bool(_LABEL_COLON_RE.match(stripped)) or _is_row_by_row(stripped)
+
+
+def _is_converter_row(line: str) -> bool:
+    """
+    True for one of the table converter's rows: row-by-row ("Label:
+    column=value …") or narrative ("Label: 2019: 32,136; 2018: …", a column
+    that names a period before its colon).
+    """
+    stripped = line.lstrip()
+    if _is_row_by_row(stripped):
+        return True
+    cut = stripped.find(": ")
+    if cut < 2:
+        return False
+    column = stripped.find(": ", cut + 2, cut + 2 + _MAX_COLUMN_NAME)
+    return column > cut + 2 and PERIOD_RE.search(stripped, cut + 2, column) is not None
+
+
 def _is_listed(line: str) -> bool:
     """True for a line that is a table row or a "Label: value" entry."""
-    stripped = line.strip()
-    return bool(_COLUMN_GAP_RE.search(stripped) or _LABEL_COLON_RE.match(line.lstrip()))
+    return _is_columned(line) or _is_labelled(line)
 
 
 def _body_units(body: str) -> list[tuple[int, int, bool, tuple[str, ...]]]:
@@ -1161,10 +1524,19 @@ def _body_units(body: str) -> list[tuple[int, int, bool, tuple[str, ...]]]:
 
     Data-room text is hard-wrapped prose interleaved with fixed-width tables
     and "Label: value" lists. A paragraph whose lines mostly look tabular (a
-    column gap, a pipe, or a leading "Label:") yields one unit per line; other
-    paragraphs yield one unit per sentence, across line breaks. A line that
-    only names columns ("FY2023   FY2022", "ASSETS   FY2023   FY2022") is
+    column gap, a pipe, a dot leader, or a leading "Label:") yields one unit
+    per line; other paragraphs yield one unit per sentence, across line
+    breaks. A line that only names columns ("FY2023   FY2022", "ASSETS
+    FY2023   FY2022", "| Line Item | Year Ended December 31, 2019 | …") is
     returned as a column header.
+
+    A statement's row labels keep the PDF's dot leaders ("Short-term
+    investments ........: 2015=3,111,524 2014=2,622,091"), past the 60
+    characters a "Label:" may have. Read as prose, a whole balance sheet was
+    one paragraph, cut into "sentences" at the leaders, and each one held one
+    row's figures and the next row's label: grounding confirmed 14 wrong
+    neighbour and period claims that way on Decision 90's FinanceBench set.
+    A leadered line is now a row, and so is the converter's row-by-row line.
 
     Lines are walked with plain string operations: this runs over
     counterparty-supplied text, and a paragraph regex with nested quantifiers
@@ -1184,14 +1556,20 @@ def _body_units(body: str) -> list[tuple[int, int, bool, tuple[str, ...]]]:
         if not paragraph:
             return
         listed = sum(1 for _, _, raw in paragraph if _is_listed(raw))
-        if listed >= max(1, len(paragraph) // 2):
+        # A paragraph holding one of the converter's rows is a table whatever
+        # its other lines: a short table's title, unit caption and unit note
+        # outnumber its rows, and read as prose one "sentence" spanned rows
+        # ("Employment taxes: 2021=1,225 …\nProperty and other taxes: 2021=
+        # 1,756 …" confirmed "employment taxes was $1,756 in 2021"; Decision
+        # 94's second look).
+        if listed >= max(1, len(paragraph) // 2) or any(_is_converter_row(raw) for _, _, raw in paragraph):
             for start, end, raw in paragraph:
-                if _COLUMN_GAP_RE.search(raw.strip()):
+                if _is_columned(raw):
                     units.append((start, end, True, _column_header(raw)))
                     continue
                 # "Revenue Growth: 17.0% YoY. The Company was in compliance…":
                 # the label owns its own sentence, not the rest of the line.
-                labelled = bool(_LABEL_COLON_RE.match(raw.lstrip()))
+                labelled = _is_labelled(raw)
                 cut = 0
                 for m in _SENTENCE_END_RE.finditer(body[start:end]):
                     units.append((start + cut, start + m.start(), labelled and cut == 0, ()))
@@ -1225,11 +1603,15 @@ def _column_header(line: str) -> tuple[str, ...]:
     A header holds two or more periods, each set off by a column gap, and no
     figure: "FY2023   FY2022", optionally after a table title ("ASSETS").
     "Period Under Review: FY2022 - FY2023" is a sentence about periods, not a
-    header.
+    header. A pipe-delimited header may also say more around each period, one
+    period per cell (_cell_header).
     """
     periods = list(PERIOD_RE.finditer(line))
     if len(periods) < 2:
         return ()
+    cells = _cell_header(line)
+    if cells:
+        return cells
     if extract_numbers(PERIOD_RE.sub(" ", line), claims_only=False):
         return ()
     for m in periods:
@@ -1237,6 +1619,80 @@ def _column_header(line: str) -> tuple[str, ...]:
         if before.strip() and not before.endswith(("  ", "\t")) and not before.rstrip(" ").endswith("|"):
             return ()
     return tuple(year for _, _, year in _periods_in(line))
+
+
+def _pipe_cells(line: str) -> list[tuple[int, int]]:
+    """
+    (start, end) of each cell of a pipe-delimited line, [] for any other line.
+
+    A leading or a trailing pipe opens or closes the row; an escaped pipe
+    ("\\|", as the converter writes one inside a cell) is cell text.
+    """
+    seps = [i for i, ch in enumerate(line) if ch == "|" and (i == 0 or line[i - 1] != "\\")]
+    if not seps:
+        return []
+    bounds = [-1, *seps, len(line)]
+    cells = [(a + 1, b) for a, b in zip(bounds, bounds[1:])]
+    if not line[: seps[0]].strip():
+        cells = cells[1:]
+    if not line[seps[-1] + 1:].strip():
+        cells = cells[:-1]
+    return cells
+
+
+def _cell_header(line: str) -> tuple[str, ...]:
+    """
+    Years of a pipe-delimited header whose every column cell names one year.
+
+    The table converter writes a statement's own column titles: "| Line Item |
+    For the Years Ended December 31, 2018 | For the Years Ended December 31,
+    2017 |", "| Line Item | At December 31, 2018 | … |", "| Line Item | 2019
+    (1) | 2018 (1) |". A gap-delimited header cannot say more than its periods
+    (the words would be read as a row label), but a cell can. Each column cell
+    must name exactly one year, distinct from the others', and nothing else
+    that is a figure but a month's day or a footnote marker; and not a span
+    shorter than a year ("Three months ended June 30, 2019"), which a fiscal
+    year's claim must not take. The first cell names the rows and holds no
+    period.
+    """
+    cells = _pipe_cells(line)
+    if len(cells) < 3:
+        return ()
+    label = line[cells[0][0]: cells[0][1]]
+    if PERIOD_RE.search(label) or extract_numbers(label, claims_only=False):
+        return ()
+    years: list[str] = []
+    for a, b in cells[1:]:
+        cell = line[a:b]
+        found = {year for _, _, year in _periods_in(cell)}
+        if len(found) != 1 or _SUB_ANNUAL_RE.search(cell):
+            return ()
+        rest = _FOOTNOTE_MARK_RE.sub(" ", PERIOD_RE.sub(" ", cell))
+        if any(
+            not (m.kind == "quantity" and m.unit in ("week", "month"))
+            for m in extract_numbers(rest, claims_only=False)
+        ):
+            return ()
+        years.append(found.pop())
+    return tuple(years) if len(set(years)) == len(years) else ()
+
+
+def _cell_periods(cells: list[tuple[int, int]], header: tuple[str, ...], spans: list[tuple[int, int]]) -> list[str]:
+    """
+    Per figure of a pipe row, the year of the column its cell sits in.
+
+    "" for a figure in the label cell ("Hedge derivatives (2)") or sharing its
+    cell with another figure ("$ 4,059 $ 1,696" printed in one cell).
+
+    Args:
+        cells: _pipe_cells of the row, as many as the header's.
+        header: The header's years, one per column cell.
+        spans: (start, end) of each figure, relative to the row.
+    """
+    starts = [a for a, _ in cells]
+    index = [bisect.bisect_right(starts, start) - 1 for start, _ in spans]
+    per_cell = Counter(index)
+    return [header[c - 1] if c >= 1 and per_cell[c] == 1 else "" for c in index]
 
 
 # ─── Grounding ────────────────────────────────────────────────────────────────
@@ -2193,6 +2649,237 @@ def _check_written_arithmetic(segments: list[tuple], readings: list[list[_Readin
             break
 
 
+# ─── What a figure's row says about the rest of the claim ─────────────────────
+#
+# Reading a table right confirms the figure a claim states; it says nothing of
+# the company the claim names or the direction it gives. On Decision 90's
+# FinanceBench claims, with the rows read right, such claims — the right
+# figure, the wrong company or "rose" for "fell" — passed more often than when
+# misread rows had sent them to the judge by accident (Decision 94). Three
+# checks use what the row now tells: the period before, the printed sign, and
+# whose filing it is. Each can only withhold a confirmation.
+
+# A claim that a figure is the level something rose or fell to: "rose to
+# $6,149", "increased 17.0% from $387.1 million in FY2022 to $452.8 million".
+_DIRECTION_VERB_RE = re.compile(
+    r"\b(?:(?P<up>rose|risen|rises|rising|increas(?:ed|es|ing)|grew|grow(?:n|s|ing)|climb(?:ed|s|ing)"
+    r"|jump(?:ed|s)|surg(?:ed|es))"
+    r"|(?P<down>fell|fallen|falls|falling|declin(?:ed|es|ing)|decreas(?:ed|es|ing)|dropp(?:ed|ing)|drops"
+    r"|dipped|shrank|shrunk|slipped|slid))\b",
+    re.IGNORECASE,
+)
+# Between the verb and the level: a change, a time, but no sentence end; then "to".
+_TO_LEVEL_RE = re.compile(r"(?:[^.;\n]|\.(?=\d)){0,60}?\bto\s*(?:US\$|\$|€|£)?\s*\(?\s*", re.IGNORECASE)
+_DIRECTION_LEAD = 100
+
+# Words of a company's name that do not tell one company from another.
+_CORPORATE_WORDS = frozenset({
+    "the", "inc", "incorporated", "corporation", "corp", "company", "co", "companies", "llc", "ltd", "limited",
+    "plc", "holdings", "holding", "group", "sa", "ag", "nv", "lp", "llp", "and", "of",
+})
+# Words a claim may write with a capital that name no company: connectives and
+# sentence openers, periods and months, finance's own abbreviations, and the
+# parts of a filing a claim cites.
+_NOT_A_NAME = frozenset({
+    # connectives, openers
+    "in", "the", "for", "during", "at", "as", "on", "of", "by", "to", "a", "an", "and", "or", "its", "it", "this",
+    "that", "these", "those", "from", "with", "per", "after", "before", "over", "under", "between", "while", "when",
+    "since", "through", "both", "each", "all", "our", "their", "we", "they", "there", "here", "also", "however",
+    "overall", "then", "thus", "so", "but", "if", "about", "approximately", "around", "roughly", "nearly",
+    "according", "based", "compared", "including", "excluding", "within",
+    # periods
+    "fiscal", "fy", "cy", "year", "years", "quarter", "quarters", "month", "months", "annual", "quarterly",
+    "first", "second", "third", "fourth", "full", "ltm", "ttm", "ytd", "ntm", "yoy", "qoq", "mom", "cagr",
+    "january", "february", "march", "april", "june", "july", "august", "september", "october", "november",
+    "december", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+    # measures
+    "total", "net", "gaap", "non-gaap", "ebitda", "ebitdar", "ebit", "eps", "roe", "roa", "roic", "roi", "cogs",
+    "capex", "opex", "fcf", "arr", "mrr", "nrr", "grr", "ltv", "cac", "aum", "nim", "nii", "bps", "sg&a", "r&d",
+    "pp&e", "md&a", "d&a", "m&a", "saas", "kpi", "kpis", "dso", "dpo", "dio", "nol", "irr", "moic", "ev",
+    "usd", "eur", "gbp", "jpy", "cad", "aud", "chf", "cny", "inr",
+    # bodies and filings
+    "us", "usa", "uk", "eu", "sec", "irs", "fasb", "iasb", "ifrs", "ceo", "cfo", "coo", "cto",
+    "note", "notes", "item", "items", "part", "exhibit", "schedule", "table", "page", "section", "statement",
+    "statements", "consolidated", "report", "form", "source", "sources", "appendix", "balance", "sheet", "income",
+    "cash", "flow", "flows", "operations",
+})
+# A word with a capital anywhere: "PepsiCo", "AMD", "eBay", "Coca-Cola", "AT&T".
+_NAME_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9&'’-])[A-Za-z][A-Za-z0-9&'’-]*")
+_POSSESSIVE_RE = re.compile(r"['’]s?$")
+# What a company is the subject of: "Block reported …", "Nike posted …".
+_REPORTING_VERBS = frozenset({
+    "reported", "reports", "posted", "posts", "recorded", "records", "recognized", "recognised", "generated",
+    "generates", "disclosed", "discloses", "earned", "earns", "booked", "delivered", "delivers", "achieved",
+    "said", "says", "announced", "announces",
+})
+# Where a sentence (or a parenthesis, a list item) starts: its first word is
+# written with a capital whatever it is.
+_OPENS_SENTENCE = ".!?:;([{\"“‘•*-–—"
+
+
+def _level_direction(text: str, mention: NumericMention) -> int:
+    """+1 or -1 when the claim says the figure is the level something rose or fell to, else 0."""
+    last = None
+    for m in _DIRECTION_VERB_RE.finditer(text, max(0, mention.start - _DIRECTION_LEAD), mention.start):
+        last = m
+    if last is None or not _TO_LEVEL_RE.fullmatch(text, last.end(), mention.start):
+        return 0
+    return 1 if last.group("up") else -1
+
+
+def _moved_against(index: "ContextIndex", group: list[ContextFigure], claim_tokens: set[str],
+                   year: str, direction: int) -> str:
+    """
+    The row's own movement when it contradicts the direction a claim gives a
+    figure: the note of a conflict, or "" when it agrees or cannot say.
+
+    The row is any candidate the claim names, for the claim's year, whose row
+    also holds the prior year's figure; both must be printed positive (a
+    shrinking loss "falls" whichever way its sign is read).
+    """
+    if not (year.isdigit() and direction):
+        return ""
+    prior_year = str(int(year) - 1)
+    for fig in group:
+        if fig.period != year or fig.unit < 0 or not fig.named_by(claim_tokens):
+            continue
+        kind = _ALIKE.get(fig.mention.kind, fig.mention.kind)
+        for k in index.units[fig.unit].figures:
+            prior = index.figures[k]
+            if prior.period != prior_year or _ALIKE.get(prior.mention.kind, prior.mention.kind) != kind:
+                continue
+            if fig.negative or prior.negative:
+                return ""
+            change = fig.mention.value - prior.mention.value
+            moved = (change > 0) - (change < 0)
+            if moved == direction:
+                return ""
+            how = {1: "a rise", -1: "a fall", 0: "no change"}[moved]
+            return f"the documents give {prior.mention.raw} for {prior_year} and {fig.mention.raw} for {year}: {how}"
+    return ""
+
+
+def _sign_against(index: "ContextIndex", fig: ContextFigure, text: str, mention: NumericMention) -> str:
+    """
+    The note of a conflict when a claim names the side of a signed row ("net
+    income" of "Net income (loss)") that the printed sign does not select,
+    else "".
+    """
+    pair = index.units[fig.unit].sign_pair if fig.unit >= 0 else None
+    if pair is None or not fig.mention.value:
+        return ""
+    positive, negative = pair
+    words = {_sign_word(w) for w in _WORD_RE.findall(ascii_lower(text))}
+    if (positive in words) == (negative in words):
+        return ""
+    claimed_negative = (negative in words) != ((_written_sign(text, mention.start) or 0) < 0)
+    if claimed_negative == fig.negative:
+        return ""
+    printed = negative if fig.negative else positive
+    return f"the documents print {fig.mention.raw} on the {printed} side of {positive} ({negative})"
+
+
+def _name_words(text: str) -> list[str]:
+    """
+    The words a claim writes that may name a company: "PepsiCo", "Kraft",
+    "Heinz", "AMD".
+
+    A word with a capital, less those in _NOT_A_NAME, those with a digit
+    ("FY2023", "10-K") and single letters. A sentence's first word counts only
+    when its capitals go past its first letter ("PepsiCo", "AMD"), or it is
+    followed by a possessive, another capitalised word ("Best Buy") or a verb
+    of reporting ("Block reported"): "Revenue rose to …" names nobody.
+    """
+    tokens = list(_NAME_TOKEN_RE.finditer(text))
+    out = []
+    for i, m in enumerate(tokens):
+        raw = m.group(0)
+        word = _POSSESSIVE_RE.sub("", raw).strip("'’-&")
+        if (
+            sum(c.isalpha() for c in word) < 2
+            or not any(c.isupper() for c in word)
+            or any(c.isdigit() for c in word)
+            or ascii_lower(word) in _NOT_A_NAME
+        ):
+            continue
+        before = text[: m.start()].rstrip()
+        if not before or before[-1] in _OPENS_SENTENCE:
+            nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+            between = text[m.end(): nxt.start()] if nxt else ""
+            follower = nxt.group(0) if nxt and between.strip() in ("", "&") else ""
+            if not (
+                any(c.isupper() for c in word[1:])
+                or _POSSESSIVE_RE.search(raw)
+                or (follower and follower[0].isupper() and ascii_lower(follower) not in _NOT_A_NAME)
+                or ascii_lower(follower) in _REPORTING_VERBS
+            ):
+                continue
+        out.append(word)
+    return out
+
+
+def _names_filer(text: str, filer: str) -> bool:
+    """
+    True when a claim names a filing's registrant: all the distinctive words of
+    its name ("Kraft Heinz"), the name run together ("CocaCola"), or its first
+    word not followed by another name ("Adobe reported" for ADOBE SYSTEMS
+    INCORPORATED, but not "General Motors" for GENERAL MILLS, INC.).
+    """
+    own = [w for w in _WORD_RE.findall(ascii_lower(filer)) if w not in _CORPORATE_WORDS and len(w) > 1]
+    if not own:
+        return False
+    words = set(_WORD_RE.findall(ascii_lower(text)))
+    if all(w in words for w in own) or "".join(own) in _squash(text):
+        return True
+    for m in re.finditer(rf"(?<![A-Za-z]){re.escape(own[0])}(?![A-Za-z])", text, re.IGNORECASE):
+        after = re.match(r"[\s&-]*([A-Za-z]+)", text[m.end():])
+        if after is None or not after.group(1)[0].isupper() or ascii_lower(after.group(1)) in _NOT_A_NAME:
+            return True
+    return False
+
+
+def _squash(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", ascii_lower(text))
+
+
+def _company_withheld(index: "ContextIndex", text: str, chunk_ids: list[int]) -> str:
+    """
+    Whether a claim's figure-only confirmation is withheld because the filing
+    the figures come from is another company's: the note, or "".
+
+    Withheld when the chunks holding the figures belong to a filing whose
+    registrant the payload names (`filing_company`), the claim names that
+    registrant nowhere — by a word of its name or the filing's file name
+    ("COCACOLA_2017_10K.pdf" for "Coca-Cola") — and the claim writes a name
+    those chunks never hold ("PepsiCo reported goodwill of $5,821.1 …" over
+    General Mills' balance sheet). Documents with no registrant are never
+    withheld on this ground.
+
+    Args:
+        index: The context.
+        text: The claim.
+        chunk_ids: The chunks its confirmed figures were found in.
+    """
+    filers = sorted({index.chunk_filers.get(ci, "") for ci in chunk_ids} - {""})
+    if not filers or any(_names_filer(text, filer) for filer in filers):
+        return ""
+    names = _name_words(text)
+    if not names:
+        return ""
+    squashed = _squash(text)
+    for ci in chunk_ids:
+        source = re.split(r"[\\/]", index.chunk_evidence.get(ci, "").split("\n", 1)[0])[-1]
+        stem = _squash(re.split(r"[_\W\d]", source + "_")[0])
+        if len(stem) > 2 and stem in squashed:
+            return ""
+    evidence = "\n".join(index.chunk_evidence.get(ci, "") for ci in chunk_ids)
+    held, held_squashed = set(_WORD_RE.findall(ascii_lower(evidence))), _squash(evidence)
+    absent = [w for w in names if ascii_lower(w) not in held and _squash(w) not in held_squashed]
+    if not absent:
+        return ""
+    return f"the documents holding this figure are {filers[0]}'s, and the statement names {absent[0]}"
+
+
 def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericCheck]]:
     """
     Grounds every figure in a list of answer segments (claims or sentences).
@@ -2252,6 +2939,17 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
                     explained,
                     overlaps,
                 )
+                # The row's other figures and its printed sign can contradict
+                # what the claim says of the figure: "rose to" a level below
+                # the prior year's, "net income" printed as a loss.
+                if binding.status == "bound" and binding.figure is not None:
+                    claimed = stated.get((mention.start, mention.end), "")
+                    year = claimed if claimed not in ("", "*") else binding.figure.period
+                    note = _moved_against(
+                        index, group, claim_tokens, year, _level_direction(text, mention)
+                    ) or _sign_against(index, binding.figure, text, mention)
+                    if note:
+                        binding = Binding("conflict", note=note, figure=binding.figure)
                 fig = binding.figure or group[0]
                 # Operand value in the context's normalisation, so a claim
                 # printed as "$452.8" (unscaled) still computes in dollars when
@@ -2421,7 +3119,7 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
     # result computed in one claim can be an input of the next.
     _check_written_arithmetic(segments, readings)
 
-    for _text, mentions, checks, _pending, _operands in segments:
+    for seg_text, mentions, checks, _pending, _operands in segments:
         # A figure restating the one just before it in other units —
         # "$0.02 million ($20,000)", "$97.3M ($97,300,000)" — is the same claim
         # twice, so it shares that figure's verdict instead of being judged on
@@ -2446,6 +3144,17 @@ def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericChec
                 cur.evidence_cell = prev.evidence_cell
                 cur.evidence_row = prev.evidence_row
                 cur.evidence_header = prev.evidence_header
+
+        # A claim confirmed by its figures alone, from another company's
+        # filing than the one it names, is left to the veto and the judge.
+        figures = [c for c in checks if c.kind != "quantity"]
+        found_in = sorted({c.evidence_chunk for c in figures if c.evidence_chunk >= 0})
+        if figures and found_in and all(c.is_confirmed for c in figures):
+            note = _company_withheld(index, seg_text, found_in)
+            if note:
+                for c in figures:
+                    if c.status in ("grounded", "derived"):
+                        c.binding, c.binding_note = "unbound", note
 
         results.append(checks)
 
@@ -2526,6 +3235,8 @@ __all__ = [
     "Binding",
     "SCALE_HINT_RE",
     "SCALE_HINT_WORDS",
+    "UNIT_NOTE_RE",
+    "states_scale",
     "PERIOD_RE",
     "binding_tokens",
     "figure_periods",

@@ -269,9 +269,12 @@ class TestV2FiguresAreBound:
         assert _binding("Aurora's FY2022 revenue was $452.8 million.", chunks) == [
             ("$452.8 million", "conflict")
         ]
-        # Alone, the undated table is all there is to go on.
+        # Alone, the undated table does not say FY2022 either: it neither
+        # confirms nor contradicts the period, so the judge decides (Decision
+        # 94; it used to be bound, and the claim is wrong — $452.8 million is
+        # FY2023's revenue).
         assert _binding("Aurora's FY2022 revenue was $452.8 million.", [undated]) == [
-            ("$452.8 million", "bound")
+            ("$452.8 million", "unbound")
         ]
 
     def test_columns_no_retrieved_header_names_are_not_guessed(self):
@@ -437,8 +440,8 @@ class TestPathologicalLinesAreLinear:
         Binding looked for a rival row once per candidate figure, so a schedule
         that repeats a figure on every row cost candidates x rows: 4.2 s for a
         40-claim answer against 1,000 rows, fourfold per doubling (about a
-        minute at these 4,000). The rows carry a row number, so their columns
-        are not "alike" and every candidate reaches the rival check.
+        minute at these 4,000). The rows carry a row number, so no column
+        header names their periods and every candidate reaches the rival check.
         """
         rows = "\n".join(
             f"Revenue line {k} gross profit        $452.8      $271.7" for k in range(4_000)
