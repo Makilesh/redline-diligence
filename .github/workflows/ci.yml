@@ -68,10 +68,10 @@ jobs:
       # CPU torch first, from the CPU index, so sentence-transformers sees the
       # requirement satisfied and does not pull ~2.5GB of CUDA wheels.
       - name: Install CPU torch
-        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+        run: pip install torch==2.11.0 --index-url https://download.pytorch.org/whl/cpu  # = Dockerfile.hf TORCH_VERSION
 
       - name: Install dependencies
-        run: pip install -r requirements-dev.txt
+        run: pip install -c constraints.txt -r requirements-dev.txt  # the tested versions (scripts/update_constraints.py)
 
       - name: Ruff
         run: ruff check . --output-format=github
@@ -174,10 +174,10 @@ jobs:
           key: hf-eval-${{ runner.os }}-bge-m3-bge-reranker-v2-m3-v1
 
       - name: Install CPU torch
-        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+        run: pip install torch==2.11.0 --index-url https://download.pytorch.org/whl/cpu  # = Dockerfile.hf TORCH_VERSION
 
       - name: Install dependencies
-        run: pip install -r requirements-dev.txt
+        run: pip install -c constraints.txt -r requirements-dev.txt  # the tested versions (scripts/update_constraints.py)
 
       - name: Run retrieval eval against the baseline
         run: python -m eval.run_retrieval_eval --baseline eval/baseline.json --tolerance 0.03
