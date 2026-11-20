@@ -213,7 +213,11 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f api cadd
 The first build downloads CPU PyTorch and bakes the embedding, reranker and NLI
 weights into the image — 20–30 minutes on 2 ARM cores. Every Python
 dependency installs from a prebuilt wheel on both architectures (the install
-runs with `--only-binary :all:`), so nothing is compiled. A build that stops
+runs with `--only-binary :all:`), so nothing is compiled, and `constraints.txt` pins
+every package to the version the project was tested with (without it, a build on
+2026-11-20 would have installed a different version of 81 of the 162 packages,
+PyMuPDF and qdrant-client among them; `scripts/update_constraints.py` regenerates
+it after a deliberate upgrade). A build that stops
 making progress for more than a few minutes is a fault, not patience — the
 network fetches in the Dockerfile are all bounded. The model
 layers come before the code, so a later `git pull && up -d --build` that only

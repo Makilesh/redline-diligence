@@ -48,8 +48,11 @@ ARG TORCH_VERSION=2.11.0
 RUN pip install --retries 5 "torch==${TORCH_VERSION}" \
         --index-url https://download.pytorch.org/whl/cpu
 
-COPY requirements.txt .
-RUN timeout 1800 pip install --retries 5 --only-binary :all: -r requirements.txt
+# constraints.txt pins every package to the version the project was measured with;
+# without it each build took whatever the index served that day (on 2026-11-20, 81 of
+# the 162 packages differed from the tested set, PyMuPDF and qdrant-client among them).
+COPY requirements.txt constraints.txt ./
+RUN timeout 1800 pip install --retries 5 --only-binary :all: -c constraints.txt -r requirements.txt
 
 # Fails the build, not the first query, if the stack cannot import on this
 # architecture.
