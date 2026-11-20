@@ -28,6 +28,7 @@ from hypothesis import strategies as st
 
 import api.security as security
 from api.security import public_stage, public_trace
+from app.markdown_safety import inert_markdown
 from eval.question_forms import question_form
 from src.data_processing import document_identity as di
 from src.data_processing.ingest_pipeline import UnsupportedFileTypeError, sanitize_filename
@@ -489,6 +490,52 @@ class TestPublicTrace:
         for public in (public_trace([entry]), public_stage(stage)):
             assert "zq7-unclassified" not in json.dumps(public, ensure_ascii=False)
             assert key not in set(_all_keys(public))
+
+
+# Every form of markdown image, the pieces they are made of, and the tags HTML
+# loads an image from — mixed into domain text by the strategy below.
+_IMAGE_PIECES = (
+    "![alt](https://c.example/x.png)", '![](//c.example/x "t")', "![a ![b](u) c](v)", "![a][r]",
+    "![a][]", "![r]", "[r]: https://c.example/y", "<img src=x>", "<IMG SRC=x>", "<image href=x>",
+    "<imgx>", "&lt;img", "![", "](", "[", "]", "(", ")", "!", "<", "\\", "\\\\", "`", "\n\n", " ",
+)
+# What markdown would still make an image of: "!" before "[", or "<" before
+# img or image, behind an even number of backslashes (none included).
+_LIVE_IMAGE = re.compile(r"(?<!\\)(?:\\\\)*(?:!\[|<(?:img|image)\b)", re.IGNORECASE)
+
+
+@st.composite
+def _console_text(draw):
+    return "".join(draw(st.lists(st.one_of(st.sampled_from(_IMAGE_PIECES), domain_text(4)), max_size=30)))
+
+
+class TestConsoleMarkdown:
+    """Text the Streamlit console renders from the API shows no image (Decision 96)."""
+
+    @given(_console_text())
+    def test_no_image_survives_and_a_second_pass_changes_nothing(self, text):
+        shown = inert_markdown(text)
+        assert not _LIVE_IMAGE.search(shown)
+        assert inert_markdown(shown) == shown
+
+    @given(domain_text())
+    def test_text_with_no_bang_and_no_angle_bracket_is_left_alone(self, text):
+        text = text.replace("!", "").replace("<", "")
+        assert inert_markdown(text) == text
+
+    @given(st.from_regex(r"[A-Za-z0-9 ]{0,12}", fullmatch=True), domain_text(6), domain_text(6))
+    def test_an_inline_image_shows_its_alt_text_and_drops_the_address(self, alt, before, after):
+        before, after = (re.sub(r"[\\!\[\]()<`]", "", s) for s in (before, after))
+        shown = inert_markdown(f"{before}![{alt}](https://c.example/x.png){after}")
+        assert shown == f"{before}{alt}{after}"
+
+    @given(_console_text())
+    def test_the_console_helpers_never_pass_an_image_on(self, text):
+        from app.components import checklist, tie_out
+        from app.styles import pill, stat_row
+
+        for shown in (checklist._plain(text), tie_out._plain(text), pill(text), stat_row([(text, text)])):
+            assert not _LIVE_IMAGE.search(shown)
 
 
 class TestSanitizeFilename:
