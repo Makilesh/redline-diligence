@@ -5,6 +5,7 @@ Version browser component — document version history viewer.
 import streamlit as st
 
 from app.components.verification import signal_labels
+from app.markdown_safety import inert_markdown
 from app.styles import pill
 
 
@@ -57,7 +58,9 @@ def render_version_browser(version_chain: list[dict]) -> None:
 
         badge = "🟢 CURRENT" if is_current else "🔴 SUPERSEDED"
 
-        with st.expander(f"{badge}  |  {filename}  ({label})", expanded=is_current):
+        # An expander label renders markdown images; the file name is the uploader's.
+        with st.expander(f"{badge}  |  {inert_markdown(filename)}  ({inert_markdown(label)})",
+                         expanded=is_current):
             flags = pill(badge, "ok" if is_current else "bad")
             if category:
                 flags += pill(category.upper(), "muted")

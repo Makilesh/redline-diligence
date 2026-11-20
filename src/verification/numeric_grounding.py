@@ -962,6 +962,9 @@ class ContextIndex:
         # none) and the file name with the evidence text.
         self.chunk_filers: dict[int, str] = {}
         self.chunk_evidence: dict[int, str] = {}
+        # The identities of the chunk's registrant (filing_entity_keys): two
+        # filings that share one are one registrant, renamed or not.
+        self.chunk_keys: dict[int, frozenset[str]] = {}
         # (value at one magnitude, figure id, True when that magnitude is assumed)
         keyed: list[tuple[float, int, bool]] = []
 
@@ -1007,6 +1010,8 @@ class ContextIndex:
             # Who the chunk's document is (a filing's registrant, from its
             # metadata), and what it says: the company check of ground_texts.
             self.chunk_filers[ci] = str(chunk.get("filing_company") or "")
+            keys = chunk.get("filing_entity_keys")
+            self.chunk_keys[ci] = frozenset(str(k) for k in keys) if isinstance(keys, (list, tuple, set)) else frozenset()
             self.chunk_evidence[ci] = f"{source}\n{body}"
             parsed.append((ci, source, body, hints, units, _chunk_period(body, source)))
 
@@ -2835,8 +2840,9 @@ def _names_filer(text: str, filer: str) -> bool:
     """
     True when a claim names a filing's registrant: all the distinctive words of
     its name ("Kraft Heinz"), the name run together ("CocaCola"), or its first
-    word not followed by another name ("Adobe reported" for ADOBE SYSTEMS
-    INCORPORATED, but not "General Motors" for GENERAL MILLS, INC.).
+    word, written with a capital as a name is, not followed by another name
+    ("Adobe reported" for ADOBE SYSTEMS INCORPORATED, but not "General Motors"
+    nor "selling, general, and administrative" for GENERAL MILLS, INC.).
     """
     own = [w for w in _WORD_RE.findall(ascii_lower(filer)) if w not in _CORPORATE_WORDS and len(w) > 1]
     if not own:
@@ -2845,6 +2851,8 @@ def _names_filer(text: str, filer: str) -> bool:
     if all(w in words for w in own) or "".join(own) in _squash(text):
         return True
     for m in re.finditer(rf"(?<![A-Za-z]){re.escape(own[0])}(?![A-Za-z])", text, re.IGNORECASE):
+        if not any(c.isupper() for c in m.group(0)):
+            continue
         after = re.match(r"[\s&-]*([A-Za-z]+)", text[m.end():])
         if after is None or not after.group(1)[0].isupper() or ascii_lower(after.group(1)) in _NOT_A_NAME:
             return True
@@ -2866,31 +2874,78 @@ def _company_withheld(index: "ContextIndex", text: str, chunk_ids: list[int]) ->
     ("COCACOLA_2017_10K.pdf" for "Coca-Cola") — and the claim writes a name
     those chunks never hold ("PepsiCo reported goodwill of $5,821.1 …" over
     General Mills' balance sheet). Documents with no registrant are never
-    withheld on this ground.
+    withheld on this ground. When the figures come from several registrants'
+    filings, each is checked on its own: naming one does not vouch for
+    another's figures.
 
     Args:
         index: The context.
         text: The claim.
         chunk_ids: The chunks its confirmed figures were found in.
     """
-    filers = sorted({index.chunk_filers.get(ci, "") for ci in chunk_ids} - {""})
-    if not filers or any(_names_filer(text, filer) for filer in filers):
-        return ""
     names = _name_words(text)
     if not names:
         return ""
     squashed = _squash(text)
+    # Each registrant on its own (Decision 98's review): a claim that names one
+    # filing's registrant does not vouch for figures it confirms from another's
+    # ("Coca-Cola reported net revenue of $63,525", PepsiCo's figure). Filers
+    # whose chunks share an identity key are one registrant ("SQUARE, INC" and
+    # "BLOCK, INC" share their file number).
+    groups: list[tuple[set[str], list[int], set[str]]] = []      # (filers, chunks, keys)
     for ci in chunk_ids:
-        source = re.split(r"[\\/]", index.chunk_evidence.get(ci, "").split("\n", 1)[0])[-1]
-        stem = _squash(re.split(r"[_\W\d]", source + "_")[0])
-        if len(stem) > 2 and stem in squashed:
-            return ""
-    evidence = "\n".join(index.chunk_evidence.get(ci, "") for ci in chunk_ids)
-    held, held_squashed = set(_WORD_RE.findall(ascii_lower(evidence))), _squash(evidence)
-    absent = [w for w in names if ascii_lower(w) not in held and _squash(w) not in held_squashed]
-    if not absent:
-        return ""
-    return f"the documents holding this figure are {filers[0]}'s, and the statement names {absent[0]}"
+        filer = index.chunk_filers.get(ci, "")
+        if not filer:
+            continue
+        keys = index.chunk_keys.get(ci, frozenset())
+        merged: tuple[set[str], list[int], set[str]] = ({filer}, [ci], set(keys))
+        for group in [g for g in groups if filer in g[0] or keys & g[2]]:
+            merged[0].update(group[0])
+            merged[1].extend(group[1])
+            merged[2].update(group[2])
+            groups.remove(group)
+        groups.append(merged)
+    unnamed = [ci for ci in chunk_ids if not index.chunk_filers.get(ci, "")]
+    for filers, own, keys in sorted(groups, key=lambda g: sorted(g[0])):
+        if any(_names_filer(text, filer) for filer in filers):
+            continue
+        texts, stems = list(own), [_file_stem(index, ci) for ci in own]
+        # A chunk whose document records no registrant (an earnings release, a
+        # CIM) speaks for this one only when it is this registrant's filing
+        # (a shared key), or, keyless, when its text or its file name holds a
+        # word of the registrant's name ("Disney's segment operating income",
+        # "DISNEY_Q4_release.pdf" for WALT DISNEY CO) -- and then only its text
+        # or only its file name, whichever holds the word, so another company's
+        # file name ("COCACOLA_2017_10K.pdf") never speaks for PepsiCo.
+        words = {w for filer in filers for w in _WORD_RE.findall(ascii_lower(filer))
+                 if w not in _CORPORATE_WORDS and len(w) > 2}
+        for ci in unnamed:
+            chunk_keys = index.chunk_keys.get(ci, frozenset())
+            if chunk_keys:
+                if chunk_keys & keys:
+                    texts.append(ci)
+                    stems.append(_file_stem(index, ci))
+                continue
+            body = index.chunk_evidence.get(ci, "").split("\n", 1)[-1]
+            if words & set(_WORD_RE.findall(ascii_lower(body))):
+                texts.append(ci)
+            stem = _file_stem(index, ci)
+            if any(word in stem for word in words):
+                stems.append(stem)
+        if any(len(stem) > 2 and stem in squashed for stem in stems):
+            continue
+        evidence = "\n".join(index.chunk_evidence.get(ci, "") for ci in texts)
+        held, held_squashed = set(_WORD_RE.findall(ascii_lower(evidence))), _squash(evidence)
+        absent = [w for w in names if ascii_lower(w) not in held and _squash(w) not in held_squashed]
+        if absent:
+            return f"the documents holding this figure are {sorted(filers)[0]}'s, and the statement names {absent[0]}"
+    return ""
+
+
+def _file_stem(index: "ContextIndex", ci: int) -> str:
+    """The first word of a chunk's file name, run together ("COCACOLA_2017_10K.pdf" -> "cocacola")."""
+    source = re.split(r"[\\/]", index.chunk_evidence.get(ci, "").split("\n", 1)[0])[-1]
+    return _squash(re.split(r"[_\W\d]", source + "_")[0])
 
 
 def ground_texts(texts: list[str], index: ContextIndex) -> list[list[NumericCheck]]:

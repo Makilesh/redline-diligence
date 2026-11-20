@@ -138,9 +138,11 @@ function StageDetail({ stage }: { stage: PipelineStage }) {
             Documents reached
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {sources.map((s) => (
+            {/* Two sources can read the same: a public caller gets every
+                withheld file name as one placeholder (Decision 96). */}
+            {sources.map((s, i) => (
               <span
-                key={s}
+                key={`${i}-${s}`}
                 className="rounded border border-line bg-ink-800 px-2 py-0.5 font-mono text-[0.68rem] text-ash-300"
               >
                 {s}

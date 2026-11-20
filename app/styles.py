@@ -18,6 +18,8 @@ import html
 
 import streamlit as st
 
+from app.markdown_safety import inert_markdown
+
 # ---------------------------------------------------------------------------
 # Palette
 # ---------------------------------------------------------------------------
@@ -506,9 +508,12 @@ def pill(text: str, variant: str = "muted") -> str:
 
     Returns:
         HTML string for use inside st.markdown(..., unsafe_allow_html=True).
-        The text is escaped: callers pass labels, never markup.
+        The text is escaped: callers pass labels, never markup. It is made
+        inert too, since some labels come from the API (a document category is
+        whatever the uploader sent) and markdown still renders inside the span.
     """
-    return f'<span class="dd-pill dd-pill-{html.escape(variant)}">{html.escape(str(text))}</span>'
+    label = inert_markdown(html.escape(str(text)))
+    return f'<span class="dd-pill dd-pill-{html.escape(variant)}">{label}</span>'
 
 
 def stat_row(items: list[tuple[str, str]]) -> str:
@@ -525,11 +530,13 @@ def stat_row(items: list[tuple[str, str]]) -> str:
         HTML string for st.markdown(..., unsafe_allow_html=True). Labels and
         values are escaped: one caller passes the deal id straight from the
         `?deal_id=` query parameter, so an unescaped value was a reflected XSS
-        reachable with a crafted link.
+        reachable with a crafted link. They are made inert as well: a blank
+        line in the value ends the HTML block, and markdown after it renders —
+        an image in a crafted link would load on opening it.
     """
     cells = "".join(
-        f'<div class="dd-stat"><div class="dd-stat-l">{html.escape(str(label))}</div>'
-        f'<div class="dd-stat-v">{html.escape(str(value))}</div></div>'
+        f'<div class="dd-stat"><div class="dd-stat-l">{inert_markdown(html.escape(str(label)))}</div>'
+        f'<div class="dd-stat-v">{inert_markdown(html.escape(str(value)))}</div></div>'
         for label, value in items
     )
     return f'<div class="dd-stats">{cells}</div>'

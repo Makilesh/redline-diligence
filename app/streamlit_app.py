@@ -9,6 +9,7 @@ This module is a pure HTTP client. It holds no pipeline logic — every decision
 (refusal, validation status, confidence) is made server-side and rendered here.
 """
 
+import html
 import os
 import sys
 import time
@@ -24,6 +25,7 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from app.markdown_safety import inert_markdown
 from app.styles import inject_styles, pill, stat_row
 from src.utils.admin_client import admin_headers
 from app.components.deal_manager import render_deal_manager
@@ -161,9 +163,10 @@ def render_budget_panel() -> None:
         # Budget exhaustion silently degrades synthesis to the local model,
         # so surfacing the pressure early is worth the sidebar real estate.
         variant = "ok" if pct < 0.7 else ("warn" if pct < 0.95 else "bad")
+        # The key is the API's: escaped and made inert like any text it sends.
+        label = inert_markdown(html.escape(model_key.replace("_", " ").title()))
         st.markdown(
-            f"<span class='dd-cite-meta'>{model_key.replace('_', ' ').title()}</span> "
-            + pill(f"{remaining}/{limit} left", variant),
+            f"<span class='dd-cite-meta'>{label}</span> " + pill(f"{remaining}/{limit} left", variant),
             unsafe_allow_html=True,
         )
         st.progress(min(pct, 1.0))

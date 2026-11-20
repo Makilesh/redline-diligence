@@ -52,6 +52,50 @@ def _canonical(identity: dict) -> str:
     return json.dumps(identity, sort_keys=True, ensure_ascii=False)
 
 
+class IdentityPlan:
+    """
+    What the backfill would write, gathered over a scroll of child payloads.
+
+    For each (deal_id, doc_id): the point ids, the opening (the payloads with
+    the lowest chunk_index, at most _OPENING_CHUNKS of them, as ingestion reads
+    it) and the identities the points carry now. The backfill writes from it,
+    and the re-ingestion report (reingest_report.py) reads it without writing,
+    so both name the same documents.
+    """
+
+    # The payload fields add() reads.
+    FIELDS = _READ_FIELDS
+
+    def __init__(self) -> None:
+        self.point_ids: dict[tuple, list] = defaultdict(list)
+        self._opening: dict[tuple, list[dict]] = defaultdict(list)
+        # The identities the document's points carry now (one, when consistent).
+        self.current: dict[tuple, set[str]] = defaultdict(set)
+
+    def add(self, point_id, payload: dict) -> None:
+        key = (payload.get("deal_id"), payload.get("doc_id"))
+        if not key[1]:
+            return
+        self.point_ids[key].append(point_id)
+        self._opening[key].append(payload)
+        # Keep the opening only; the rest of a long document is not read.
+        if len(self._opening[key]) > 2 * _OPENING_CHUNKS:
+            self._opening[key] = sorted(self._opening[key], key=lambda p: p.get("chunk_index") or 0)[:_OPENING_CHUNKS]
+        self.current[key].add(_canonical({f: payload.get(f) for f in IDENTITY_FIELDS if payload.get(f)}))
+
+    def identity(self, key: tuple) -> dict | None:
+        """The identity ingestion would write, or None when the extractor raised."""
+        payloads = sorted(self._opening[key], key=lambda p: p.get("chunk_index") or 0)[:_OPENING_CHUNKS]
+        # A document whose identity cannot be read is left exactly as it is —
+        # not given {}, which would delete fields it may already carry — and
+        # the run goes on to the next (src/utils/fail_open.py).
+        return fail_open("document_identity", extract_document_identity, payloads, default=None)
+
+    def unchanged(self, key: tuple, identity: dict) -> bool:
+        """Whether every point of the document already carries `identity`, and nothing else."""
+        return self.current[key] == {_canonical(identity)}
+
+
 async def backfill_document_identity(
     client: AsyncQdrantClient,
     *,
@@ -74,10 +118,7 @@ async def backfill_document_identity(
     """
     scroll_filter = (Filter(must=[FieldCondition(key="deal_id", match=MatchValue(value=deal_id))])
                      if deal_id else None)
-    point_ids: dict[tuple, list] = defaultdict(list)
-    opening: dict[tuple, list[dict]] = defaultdict(list)
-    # The identities the document's points carry now (one, when consistent).
-    current: dict[tuple, set[str]] = defaultdict(set)
+    plan = IdentityPlan()
     offset = None
     while True:
         records, offset = await client.scroll(
@@ -85,33 +126,20 @@ async def backfill_document_identity(
             with_payload=_READ_FIELDS, with_vectors=False,
         )
         for record in records:
-            payload = record.payload or {}
-            key = (payload.get("deal_id"), payload.get("doc_id"))
-            if not key[1]:
-                continue
-            point_ids[key].append(record.id)
-            opening[key].append(payload)
-            # Keep the opening only; the rest of a long document is not read.
-            if len(opening[key]) > 2 * _OPENING_CHUNKS:
-                opening[key] = sorted(opening[key], key=lambda p: p.get("chunk_index") or 0)[:_OPENING_CHUNKS]
-            current[key].add(_canonical({f: payload.get(f) for f in IDENTITY_FIELDS if payload.get(f)}))
+            plan.add(record.id, record.payload or {})
         if offset is None:
             break
 
-    stats = {"documents": len(point_ids), "updated": 0, "unchanged": 0, "with_title": 0, "with_parties": 0,
-             "failed": 0}
-    for key, ids in point_ids.items():
-        payloads = sorted(opening[key], key=lambda p: p.get("chunk_index") or 0)[:_OPENING_CHUNKS]
-        # A document whose identity cannot be read is left exactly as it is —
-        # not given {}, which would delete fields it may already carry — and
-        # the run goes on to the next (src/utils/fail_open.py).
-        identity = fail_open("document_identity", extract_document_identity, payloads, default=None)
+    stats = {"documents": len(plan.point_ids), "updated": 0, "unchanged": 0, "with_title": 0,
+             "with_parties": 0, "failed": 0}
+    for key, ids in plan.point_ids.items():
+        identity = plan.identity(key)
         if identity is None:
             stats["failed"] += 1
             continue
         stats["with_title"] += "doc_title" in identity
         stats["with_parties"] += "doc_parties" in identity
-        if current[key] == {_canonical(identity)}:
+        if plan.unchanged(key, identity):
             stats["unchanged"] += 1
             continue
         stats["updated"] += 1

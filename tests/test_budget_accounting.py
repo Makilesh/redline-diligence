@@ -263,6 +263,27 @@ class TestTokensPerMinute:
             t.reserve_input_tokens(0, TOP, 1)
         assert 0 < full.value.retry_after <= 60
 
+    # Monotonic clock readings (seconds since boot) in the minute below 2**16,
+    # 2**17 and 2**18 seconds, where a stamp plus 60 crosses a power of two.
+    @pytest.mark.parametrize("clock", [65508.146, 131025.45, 262121.621])
+    def test_the_wait_never_exceeds_the_window_whatever_the_clock_reads(self, clock, monkeypatch):
+        # Windows' monotonic clock ticks every ~16 ms, so a refused request often
+        # reads the same instant as the booking it waits for, and the wait is the
+        # whole minute. Computed as stamp + 60 - now, it came out an ulp over 60 s
+        # whenever the stamp lay in the minute below a power of two: at ~36.4 h of
+        # uptime the test above failed with 60.00000000001455.
+        import src.llm.budget_tracker as budget_tracker
+        from src.llm.failures import TokenWindowFull
+        from src.llm.model_registry import usable_tpm
+
+        monkeypatch.setattr(budget_tracker.time, "monotonic", lambda: clock)
+        t = _tracker()
+        limit = usable_tpm(TOP)
+        t.reserve_input_tokens(0, TOP, limit)
+        with pytest.raises(TokenWindowFull) as full:
+            t.reserve_input_tokens(0, TOP, 1)
+        assert full.value.retry_after == 60.0
+
     def test_each_slot_has_its_own_window(self):
         from src.llm.model_registry import usable_tpm
 

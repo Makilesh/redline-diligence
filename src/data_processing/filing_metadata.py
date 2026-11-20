@@ -42,7 +42,9 @@ Output, written onto every child payload of the document when present:
     filing_entity_keys    identities of the registrant ("sec:1-3285",
                           "name:3m", "ticker:pep"); two filings are the same
                           company when they share any key
-    filing_company        the registrant's name as printed (display only)
+    filing_company        the registrant's name as printed: the cover's or,
+                          when the cover prints none, the signature page's
+                          (display, and the verifier's company check)
 
 Naming a fiscal year (Decision 70). A registrant names its fiscal year itself
 (dei:DocumentFiscalYearFocus is that label), and for most year ends every
@@ -70,6 +72,7 @@ import re
 from datetime import date, timedelta
 
 from src.utils.casefold import ascii_lower
+from src.utils.fail_open import fail_open
 
 # Only the opening pages are read: the cover of an SEC form is page 1, and an
 # earnings release states its subject in its first lines. Reading further would
@@ -145,6 +148,63 @@ _REGISTRANT_MARKER = re.compile(r"\(\s*Exact\s+name\s+of\s+(?:the\s+)?registrant
 # A foreign private issuer prints its name in its own language and then in
 # English: "SONY GROUP CORPORATION (Translation of Registrant's name into English)".
 _TRANSLATION_MARKER = re.compile(r"\(\s*Translation\s+of\s+(?:the\s+)?registrant", re.IGNORECASE)
+# The signature page names the registrant too, in the fixed language of every
+# 10-K, 10-Q and 8-K, with a label under the name:
+#
+#     Pursuant to the requirements of Section 13 or 15(d) of the Securities
+#     Exchange Act of 1934, the Registrant has duly caused this report to be
+#     signed on its behalf by the undersigned, thereunto duly authorized.
+#     THE COCA-COLA COMPANY
+#     (Registrant)
+#
+# It is read only when the cover yields no name: Coca-Cola's 2017 10-K prints
+# its name on the cover as an image. The sentence's subject varies ("the
+# registrant", "PepsiCo"), as do "this report" / "this Annual Report on Form
+# 10-K", "by" / "of the undersigned", "thereunto" / "hereunto" and a date or a
+# place before its full stop. Most signature pages print no "(Registrant)"
+# label (31 of the 42 SEC forms among FinanceBench's dev filings: "NIKE, INC.
+# By: /s/ ...", "Date: ... SQUARE, INC."); without it nothing marks where the
+# name ends, so they give none.
+#
+# The sentence ends at "authorized." or after a clause that opens with a comma
+# (", on February 9, 2023.", ", in the City of St. Paul, State of
+# Minnesota."). Inside the clause a period after a single letter ("D.C.",
+# "U.S.") or "St." / "Mt." / "Ft." is an abbreviation, never the full stop,
+# and the clause cannot run into a parenthesis: so "in Washington, D.C. FANNIE
+# MAE (Registrant)" and a sentence with no full stop ("…authorized AMAZON.COM,
+# INC. (Registrant)") give nothing rather than "C. FANNIE MAE" or "COM, INC"
+# (Decision 98's review).
+_SIGNED = re.compile(
+    r"\bhas\s+duly\s+caused\s+this\s+(?:\S+\s+){0,6}?to\s+be\s+signed\s+on\s+(?:its\s+)?behalf\s+(?:by|of)\s+"
+    r"the\s+undersigned,?\s+(?:there|here)unto\s+duly\s+authori[sz]ed"
+    r"(?:[,;](?:[^.(]|\.(?=\S)|(?<=\b[A-Za-z])\.|(?<=\bSt)\.|(?<=\bMt)\.|(?<=\bFt)\.){0,120}?)?"
+    r"(?<!\b[A-Za-z])(?<!\bSt)(?<!\bMt)(?<!\bFt)\.(?=\s|$)",
+    re.IGNORECASE)
+# What may not sit in a name alone: a running header or heading carried over a
+# page break ("Table of Contents", "SIGNATURES", "Index", "Page").
+# Nor a 10-K's part header ("PART IV"), the report's or a schedule's title, or
+# the words of the block itself ("Chief Executive Officer", "On Behalf Of",
+# "the Undersigned"), which Title Case lets through the case rule below.
+_SIGNED_NOT_NAME = re.compile(
+    r"\b(?:table\s+of\s+contents|contents|index|signatures?|page|part\s+[ivx]+|annual\s+report|exhibits?|schedules?"
+    r"|officers?|directors?|behalf|signed|undersigned)\b",
+    re.IGNORECASE)
+# A full stop inside a name follows an initial or a dotted abbreviation ("J. C.
+# PENNEY", "S.A.B. DE C.V.") or a corporate one ("Co.", "Inc."); after any
+# other word it ends a sentence ("Paul, State of Minnesota. 3M COMPANY").
+_NAME_ABBREVIATION = re.compile(r"[A-Za-z](?:\.[A-Za-z])*|co|cos|inc|corp|ltd|bros|mfg|intl|st|mt|ft|no",
+                                re.IGNORECASE)
+# Words of a name printed in lower case: connectives, particles, a possessive,
+# and the legal forms and ".com" registrants print so ("Medtronic plc",
+# "Amazon.com, Inc."). A dotted acronym ("e.l.f. Beauty") is read apart.
+_NAME_LOWER_WORDS = frozenset({
+    "and", "of", "the", "de", "del", "della", "des", "du", "la", "le", "y", "und", "van", "von", "der", "for", "s",
+    "com",
+})
+_DOTTED_ACRONYM = re.compile(r"(?<![^\W\d_])(?:[^\W\d_]\.){2,}")
+_SIGNED_LABEL = re.compile(r"\(\s*Registrant\s*\)", re.IGNORECASE)
+# The label follows the name; it must start this close to the sentence's end.
+_SIGNED_NAME_CHARS = 100
 
 # Earnings release: "Ulta Beauty, Inc. (NASDAQ: ULTA) today announced ..."
 _EXCHANGE_TICKER = re.compile(r"\(\s*(?:NYSE|NASDAQ|Nasdaq|NYSE American)\s*:\s*([A-Z][A-Z.]{0,5})\b")
@@ -350,6 +410,47 @@ def _name_before(cover: str, marker_re: re.Pattern, after_label: bool = False) -
     return name if re.search(r"[A-Za-z]{2}", name) else ""
 
 
+def _signature_name(sections: list[dict]) -> str:
+    """
+    The registrant's name as its signature page prints it, or "".
+
+    The name is what lies between the sentence a signature block opens with
+    and the "(Registrant)" label under the name (_SIGNED), and only when that
+    is a name alone: no number (a date, a page), no field ("Date:", "By:"), no
+    "/s/" signature. A document whose blocks name different registrants gives
+    none. Tables are skipped: the sentence is prose, and a block the
+    processor read as a grid has no reading order to trust.
+    """
+    text = _WHITESPACE.sub(" ", " ".join(str(s.get("text") or "") for s in sections if not s.get("is_table")))
+    names: dict[str, str] = {}
+    for m in _SIGNED.finditer(text):
+        label = _SIGNED_LABEL.search(text, m.end(), m.end() + _SIGNED_NAME_CHARS)
+        if not label:
+            continue
+        name = text[m.end(): label.start()].strip(" _.,:;()|-–—")
+        if _is_name_alone(name):
+            names.setdefault(normalize_company_name(name), name)
+    return next(iter(names.values())) if len(names) == 1 else ""
+
+
+def _is_name_alone(name: str) -> bool:
+    """
+    Whether text read between a signature block's sentence and its label is a
+    registrant's name and nothing else: letters; no number, field, "/s/" or
+    bracket (_NAME_SPLIT); no running header; no sentence break; every word
+    written as a name is ("Best Buy Co., Inc", "eBay Inc", "3M COMPANY"), but
+    for connectives ("of", "and", "de").
+    """
+    if not normalize_company_name(name) or not re.search(r"[^\W\d_]{2}", name):
+        return False
+    if _NAME_SPLIT.search(name) or "/" in name or _SIGNED_NOT_NAME.search(name):
+        return False
+    if any(not _NAME_ABBREVIATION.fullmatch(m.group(1)) for m in re.finditer(r"([^\s.]+(?:\.[^\s.]+)*)\.\s", name)):
+        return False
+    return all(any(c.isupper() for c in word) or word.lower() in _NAME_LOWER_WORDS or word.lower() in _NAME_STOPWORDS
+               for word in re.findall(r"[^\W\d_]+", _DOTTED_ACRONYM.sub(" ", name)))
+
+
 def _quarter_of_10q(text: str, end: date) -> int | None:
     """Fiscal quarter of a 10-Q from its year-to-date statements, or None."""
     found = set()
@@ -368,7 +469,7 @@ def _quarter_of_10q(text: str, end: date) -> int | None:
     return 1 if found else None
 
 
-def _sec_filing(cover: str, with_tables: str, form: str) -> dict:
+def _sec_filing(cover: str, with_tables: str, form: str, sections: list[dict]) -> dict:
     out: dict = {"filing_form": form}
     base = form.removesuffix("/A")
     label, gap = _PERIOD_LABELS["annual" if base in _ANNUAL_FORMS else base]
@@ -405,6 +506,18 @@ def _sec_filing(cover: str, with_tables: str, form: str) -> dict:
     if english and normalize_company_name(english) and f"name:{normalize_company_name(english)}" not in keys:
         keys.append(f"name:{normalize_company_name(english)}")
         out.setdefault("filing_company", english)
+    if "filing_company" not in out:
+        # Optional (Decision 88): if the signature page cannot be read, the
+        # filing keeps what its cover gave.
+        signed = fail_open("filing_signature_name", _signature_name, sections, default="")
+        if signed:
+            # Named, but not keyed. Two filings are one registrant when they
+            # share any key, and that is what lets the period preference set
+            # one filing aside for another's (src/vector_db/filing_period.py).
+            # The file number already links a registrant's SEC filings; a
+            # name key would add only its releases, and a misread name would
+            # join another company's filings (Decision 98).
+            out["filing_company"] = signed
     if keys:
         out["filing_entity_keys"] = keys
     return out
@@ -503,7 +616,8 @@ def _earnings_release(head: str) -> dict:
 
 def extract_filing_metadata(sections: list[dict]) -> dict:
     """
-    Company and period of a public filing, from its opening pages.
+    Company and period of a public filing, from its opening pages (and the
+    registrant's name from its signature page when the cover prints none).
 
     Args:
         sections: The document's sections in order, as extract_sections
@@ -531,5 +645,6 @@ def extract_filing_metadata(sections: list[dict]) -> dict:
             # statement) or whose form name is unreadable: nothing, rather than
             # a release read off a registration statement.
             return {}
-        return _sec_filing(cover, _cover_text(sections, tables=True), name + ("/A" if form.group(2) else ""))
+        return _sec_filing(cover, _cover_text(sections, tables=True), name + ("/A" if form.group(2) else ""),
+                           sections)
     return _earnings_release(cover[:_RELEASE_HEAD_CHARS])

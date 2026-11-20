@@ -29,7 +29,8 @@ Payload fields written per child chunk (see _child_payload):
     (document_identity.py; the same on every child of a document), plus, only
     on a chunk whose text reads like instructions to a model,
     suspected_injection=1 and injection_signals (injection_screen.py; parents
-    are screened too).
+    are screened too). index_document adds sparse_encoding (default BM25 only)
+    and ingest_version (children and parents) to what it stores.
 
 `text` is always the exact source text. `context_header` ("Document: ... /
 Section: ...", see chunk_context.py; written only when CHUNK_CONTEXT_HEADERS
@@ -116,6 +117,22 @@ _RATIO_CHECK_MIN_BYTES = 10 * 1024 * 1024
 # Fixed namespace for every ingestion id. Changing it changes every doc_id and
 # point id, i.e. forces a full re-index.
 INGEST_NAMESPACE = uuid.UUID("6f1c2a52-5d0e-4f8e-9a57-3c0b8e2d9a11")
+
+# Which extraction and chunking code wrote a point, stamped on every child and
+# parent as `ingest_version` (Decision 97). Point ids come from positions, not
+# content, so nothing else tells a live index's documents written before an
+# extraction change from those written after it. Bump it with any change that
+# alters the chunks or payloads some file type produces, and set that type's
+# entry in CURRENT_SINCE to the new value.
+INGEST_VERSION = 1
+
+# file type -> the lowest ingest_version whose chunks for that type are what
+# the current code writes. A document of a listed type stamped below it, or not
+# stamped at all (indexed before Decision 97; counted as 0), needs re-ingesting
+# from its file; a type not listed has not changed since before the stamp.
+# PDF: a box around text is not a table (Decision 89), and statements keep
+# their period headers, titles and pages (Decision 93).
+CURRENT_SINCE = {"pdf": 1}
 
 _CONTENT_SAMPLE_CHARS = 2000
 
@@ -1187,7 +1204,11 @@ async def index_document(
     If an upsert fails on a first-time ingest, every point for this
     (deal_id, doc_id) is deleted from both collections before the error
     propagates, so a new document is either fully indexed or absent. On a
-    re-index nothing is deleted: the copy that was already serving stays.
+    re-index nothing is deleted: when the chunking is unchanged the copy that
+    was serving stays as it was; after an extraction or chunking change the
+    document holds old and new chunks until it is indexed again (its points
+    then carry two ingest_version stamps, which reingest_report flags), and
+    indexing the same file again completes it.
 
     A document that a newer version has superseded stays superseded when it is
     re-indexed (is_current_version=0, superseded_by kept, and a warning).
@@ -1260,6 +1281,14 @@ async def index_document(
         count_filter=_doc_filter(deal_id, doc.doc_id),
         exact=True,
     )
+    # Parents with no child left (a rollback whose parent delete failed) are
+    # this document's too. They decide nothing below but the stale delete,
+    # which removes those the new chunking does not overwrite.
+    leftover_parents = 0 if existing.count else (await client.count(
+        collection_name=parent_collection_name,
+        count_filter=_doc_filter(deal_id, doc.doc_id),
+        exact=True,
+    )).count
     retired_by = await _retired_by(client, collection_name, deal_id, doc.doc_id) \
         if existing.count else ""
     if retired_by:
@@ -1281,14 +1310,17 @@ async def index_document(
     dense = np.asarray(await embed_fn(texts), dtype=np.float32)
     sparse = await asyncio.to_thread(sparse_fn, texts)
 
+    # Every stored point says which extraction and chunking code wrote it
+    # (INGEST_VERSION), so a re-index cut short, or a document indexed before an
+    # extraction change, can be told apart (src/vector_db/reingest_report.py).
+    stamp = {"ingest_version": INGEST_VERSION}
+    if sparse_encoding is not None:
+        stamp["sparse_encoding"] = sparse_encoding
     child_points = [
         PointStruct(
             id=point_id_for(payload["chunk_id"]),
             vector={"dense": dense[i].tolist(), "sparse": sparse[i]},
-            payload=(
-                payload if sparse_encoding is None
-                else {**payload, "sparse_encoding": sparse_encoding}
-            ),
+            payload={**payload, **stamp},
         )
         for i, payload in enumerate(doc.chunks)
     ]
@@ -1305,7 +1337,7 @@ async def index_document(
         parent_points.append(PointStruct(
             id=point_id_for(parent["chunk_id"]),
             vector={"dense": (vector / norm).tolist()},
-            payload=parent,
+            payload={**parent, "ingest_version": INGEST_VERSION},
         ))
 
     try:
@@ -1315,12 +1347,17 @@ async def index_document(
         if existing.count:
             # A re-index of a document that was already serving. Deleting every
             # point of the doc_id here removed the good copy along with the
-            # failed attempt (audit I9). The points are keyed by chunk id, so
-            # what is there now is the old copy with some chunks rewritten to
-            # the same content — a valid state; the caller sees the error and
-            # can retry.
+            # failed attempt (audit I9), so nothing is deleted. Point ids come
+            # from positions, not content: with the chunking unchanged, what is
+            # there now is the old copy with some chunks rewritten to the same
+            # content. After an extraction or chunking change it is old chunks
+            # and new ones, with parents that may not hold their children, until
+            # the same file is indexed again (that run upserts every new point
+            # and deletes the rest). The two ingest_version stamps the document
+            # now carries are what reingest_report flags (Decision 97).
             logger.error(
-                "Re-index upsert failed; the previously indexed copy is kept",
+                "Re-index upsert failed; the document holds the chunks of both runs until it is "
+                "indexed again",
                 extra={"doc_id": doc.doc_id, "deal_id": deal_id},
                 exc_info=True,
             )
@@ -1345,8 +1382,7 @@ async def index_document(
                 )
         raise
 
-    # Remove points this document no longer produces (only relevant on re-index).
-    if existing.count:
+    async def delete_stale() -> None:
         for name, points in (
             (collection_name, child_points),
             (parent_collection_name, parent_points),
@@ -1356,6 +1392,17 @@ async def index_document(
                 points_selector=_doc_filter(deal_id, doc.doc_id, [p.id for p in points]),
                 wait=True,
             )
+
+    # Remove points this document no longer produces (only relevant on re-index).
+    if existing.count:
+        await delete_stale()
+    elif leftover_parents:
+        # A first ingest that finds parents an earlier failed rollback left
+        # behind. The document is already whole and searchable, so failing to
+        # remove them must not turn the upload into an error with no registry
+        # or audit entry: optional (Decision 88), and a parent no child names
+        # is reported as orphan_parent by reingest_report.
+        await fail_open_async("leftover_parent_delete", delete_stale, default=None)
 
     result = {
         "doc_id": doc.doc_id,

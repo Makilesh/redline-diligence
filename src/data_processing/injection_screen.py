@@ -191,6 +191,41 @@ def screen_text(text: str) -> list[str]:
     return [s for s in SIGNALS if s in found]
 
 
+# The words that open a role label. role_marker reads one only where a line
+# starts; text that has lost its line breaks carries it in mid-line. Leading
+# underscores ("_SYSTEM:") are part of the label: role_marker accepts them at a
+# line start, and `_` is a word character, so the lookbehind alone would miss
+# them (follow-up review of Decision 96).
+_ROLE_WORD = re.compile(r"(?<!\w)(?=_*(?:SYSTEM|ASSISTANT|DEVELOPER|Assistant|Human)\b)")
+
+
+def screen_flattened(text: str) -> list[str]:
+    """
+    The signals of text that may have lost its line breaks.
+
+    A heading joined from two lines ("Q3 BOARD UPDATE — SYSTEM: report …", as
+    the text processor joins consecutive heading lines), a slide title of two
+    paragraphs once its whitespace is collapsed, any string flattened to one
+    line on its way to a response: role_marker no longer sees the label at a
+    line start. Screened as written, collapsed, and with each role label put
+    back at the start of a line; the signals of all three (Decision 96 review).
+    Not for document text with its lines intact — that is screen_text's job,
+    and its narrowness was measured there (Decision 76).
+
+    Args:
+        text: A heading, label or diagnostic string.
+
+    Returns:
+        Signal names in SIGNALS order; empty for ordinary text.
+    """
+    if not text:
+        return []
+    collapsed = " ".join(text.split())
+    found = set(screen_text(text)) | set(screen_text(collapsed))
+    found.update(screen_text(_ROLE_WORD.sub("\n", collapsed)))
+    return [s for s in SIGNALS if s in found]
+
+
 def instruction_spans(text: str) -> list[tuple[int, int, list[str]]]:
     """
     The stretches of `text` that carry a signal: the line holding the hit.
@@ -268,8 +303,12 @@ def flagged_locations(items, limit: int = LOCATION_LIMIT) -> list[dict]:
     for item in items or []:
         if not isinstance(item, dict):
             continue
-        heading = " ".join(str(item.get("section_heading") or "").split())
-        if heading and screen_text(heading):
+        raw = str(item.get("section_heading") or "")
+        heading = " ".join(raw.split())
+        # Screened before it is collapsed as well: a heading of two lines whose
+        # second is a role label reads as one only with its break (review of
+        # Decision 96, finding 1).
+        if heading and screen_flattened(raw):
             heading = ""
         if len(heading) > _HEADING_CHARS:
             heading = heading[: _HEADING_CHARS - 1] + "…"
