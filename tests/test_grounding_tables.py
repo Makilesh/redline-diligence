@@ -504,3 +504,22 @@ class TestCompany:
         chunk = {"text": GM_ROWS, "source_file": "financials.txt", "is_table": 1}
         [[check]] = ground_texts(["PepsiCo reported net sales of $16,865.2 in fiscal 2019."], ContextIndex([chunk]))
         assert check.is_confirmed
+
+    def test_a_first_word_names_the_filer_only_written_as_a_name(self):
+        # Decision 98: "general" in "selling, general, and administrative" named
+        # GENERAL MILLS, INC. by its first word, read without case.
+        rows = GM_ROWS + ("Selling, general, and administrative expenses: Fiscal Year 2019=2,935.8 "
+                          "Fiscal Year 2018=2,752.6\n")
+        [check] = _filed(rows, "PepsiCo reported selling, general, and administrative expenses of $2,935.8 in "
+                               "fiscal 2019.")
+        assert check.binding == "unbound" and "GENERAL MILLS" in check.binding_note
+        assert _filed(rows, "General Mills reported selling, general, and administrative expenses of $2,935.8 in "
+                            "fiscal 2019.")[0].is_confirmed
+        # Written as a name, the first word still names its registrant.
+        text = GM_ROWS.replace("GENERAL MILLS", "ADOBE SYSTEMS")
+        for claim in ("Adobe reported net sales of $16,865.2 in fiscal 2019, ahead of Photoshop's plan.",
+                      "ADOBE reported net sales of $16,865.2 in fiscal 2019, ahead of Photoshop's plan."):
+            assert _filed(text, claim, filer="ADOBE SYSTEMS INCORPORATED", source="filing.pdf")[0].is_confirmed
+        [check] = _filed(text, "adobe reported net sales of $16,865.2 in fiscal 2019, ahead of Photoshop's plan.",
+                         filer="ADOBE SYSTEMS INCORPORATED", source="filing.pdf")
+        assert check.binding == "unbound" and "ADOBE SYSTEMS" in check.binding_note
