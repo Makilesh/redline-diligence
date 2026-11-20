@@ -13,7 +13,8 @@ console shows from the API — claims, evidence quotes, the validator's notes,
 file names, section headings, risk samples, ingest notices, the trace — so the
 same policy applies to all of it here.
 
-Three passes, the last two a guarantee that does not depend on the first:
+Three passes, the second a guarantee for markdown that does not depend on
+the first:
 
 1. Every inline (`![alt](url)`) and full or collapsed reference
    (`![alt][ref]`, `![alt][]`) image is replaced by its alt text, the
@@ -23,10 +24,18 @@ Three passes, the last two a guarantee that does not depend on the first:
    pass 1's replacements put next to each other — is backslash-escaped, so it
    prints and no image can start there.
 3. Any unescaped `<img` or `<image` (HTML parses `<image>` as `<img>`) gets a
-   backslash before the `<`: markdown shows it as text, and with
-   unsafe_allow_html it cannot open a tag. Calls that allow HTML escape their
-   untrusted text with html.escape as well (every call site is listed in the
-   report of Decision 96's console follow-up).
+   backslash before the `<`, so markdown shows it as text.
+
+This is not an HTML sanitizer. Inside an HTML block (from a line that opens
+with `<div>` or the like to the next blank line) backslash escapes do not
+apply: with unsafe_allow_html, `\\<img src=...>` there reaches the browser as a
+tag, and other tags (video, svg, input, object) load addresses too. So a call
+that allows HTML must html.escape its untrusted text first, as every one does
+(each is listed in Decision 96's console follow-up); this function then
+handles the markdown that still renders between the tags. Rendered with
+micromark, the parser under Streamlit's markdown, 100,037 strings built from
+these characters showed no image either way; inert_markdown alone under
+unsafe_allow_html showed one for 118 of them, all inside an HTML block.
 
 Everything else — emphasis, lists, tables, links (a click away, as in the web
 console), the `\\$` of escape_currency — is left exactly as it was. Apply it as
