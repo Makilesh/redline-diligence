@@ -268,6 +268,21 @@ class TestGrid:
         scoped = checklist._passage_filter(DEMO_DEAL, ["doc-a"])
         assert scoped.must[: len(deal_read_filter(DEMO_DEAL).must)] == deal_read_filter(DEMO_DEAL).must
 
+    def test_the_read_filter_holds_only_conditions_its_readers_copy(self):
+        """
+        The grid (_passage_filter, deal_documents) and the tie-out
+        (tie_out._deal_filter) extend the deal's read filter by copying its
+        `must` conditions. A `must_not` or `should` added to
+        hybrid_search.deal_read_filter would be dropped there without a
+        sound, and a report could show a superseded or PII-flagged passage.
+        If this fails, carry the new clause into those readers first.
+        """
+        from src.vector_db.hybrid_search import deal_read_filter
+
+        read = deal_read_filter(DEMO_DEAL)
+        assert read.must
+        assert not read.must_not and not read.should and not read.min_should
+
     def test_items_are_a_subset_in_checklist_order_and_unknown_ones_are_refused(self, models):
         assert [i.id for i in checklist.resolve_items(["governing_law", "anti_assignment"])] == [
             "anti_assignment", "governing_law"]
