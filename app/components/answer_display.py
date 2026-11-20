@@ -7,6 +7,7 @@ import html
 import streamlit as st
 
 from app.components.verification import answer_verdict, injection_note, render_claim_checks
+from app.markdown_safety import inert_markdown
 from app.styles import escape_currency, pill, stat_row
 
 _VERDICT_PILL = {
@@ -81,8 +82,11 @@ def render_answer(
         }
     )
     icon, variant = _VERDICT_PILL[key]
+    # html.escape keeps the API's text from opening a tag; inert_markdown keeps
+    # it from showing an image, which markdown still renders inside the span.
     st.markdown(
-        pill(f"{icon} {label}", variant) + f"<span class='dd-cite-meta'>{html.escape(detail)}</span>",
+        pill(f"{icon} {label}", variant)
+        + f"<span class='dd-cite-meta'>{inert_markdown(html.escape(detail))}</span>",
         unsafe_allow_html=True,
     )
     # Where instruction-like text sits behind this answer. Its flags fold away
@@ -92,7 +96,7 @@ def render_answer(
         text, note_variant = note
         st.markdown(
             pill("INSTRUCTION-LIKE TEXT", note_variant)
-            + f"<span class='dd-cite-meta'>{escape_currency(html.escape(text))}</span>",
+            + f"<span class='dd-cite-meta'>{inert_markdown(escape_currency(html.escape(text)))}</span>",
             unsafe_allow_html=True,
         )
 
@@ -107,7 +111,9 @@ def render_answer(
     st.write("")
     with st.container(border=True):
         st.markdown("<span class='dd-answer-marker'></span>", unsafe_allow_html=True)
-        st.markdown(escape_currency(answer))
+        # An image in the answer would load as soon as it is shown: the alt
+        # text instead, as in the web console (Decision 76; app/markdown_safety.py).
+        st.markdown(inert_markdown(escape_currency(answer)))
         if answer_truncated:
             st.caption("✂ Cut off here: the model reached its output limit, so the answer is incomplete.")
 
@@ -121,7 +127,7 @@ def render_answer(
         # With per-claim checks above, the notes mostly repeat them.
         with st.expander(f"Validator notes ({len(hallucination_flags)})", expanded=not claim_checks):
             for flag in hallucination_flags:
-                st.markdown(f"- {escape_currency(html.escape(flag))}")
+                st.markdown(f"- {inert_markdown(escape_currency(html.escape(flag)))}")
 
 
 def render_unavailable(request_id: str = "") -> None:
