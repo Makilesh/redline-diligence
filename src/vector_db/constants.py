@@ -48,3 +48,10 @@ QDRANT_MAX_DELAY_S: float = 8.0
 
 # Batch upsert configuration
 QDRANT_BATCH_SIZE: int = 100  # vectors per upsert call
+
+# A first-time ingest writes its points with this field in place of deal_id,
+# and moves the value to deal_id only once every point is written
+# (ingest_pipeline.index_document). Every reader filters on deal_id, so an
+# upload cut short by a crash or a cancelled request is never searched,
+# listed or counted; deal purges and the sandbox sweeper match this field too.
+STAGED_DEAL_FIELD: str = "staged_deal_id"

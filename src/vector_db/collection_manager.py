@@ -37,6 +37,7 @@ from src.vector_db.constants import (
     QDRANT_MAX_RETRIES,
     QDRANT_BASE_DELAY_S,
     QDRANT_MAX_DELAY_S,
+    STAGED_DEAL_FIELD,
 )
 from src.vector_db.qdrant_client import get_qdrant_client
 from src.utils.logger import setup_logger
@@ -338,6 +339,10 @@ async def create_payload_indexes(
         ("filing_entity_keys",  PayloadSchemaType.KEYWORD),
         ("filing_fiscal_years", PayloadSchemaType.INTEGER),
         ("filing_fiscal_quarter", PayloadSchemaType.INTEGER),
+        # A first-time ingest's points before their commit (constants.
+        # STAGED_DEAL_FIELD): the sandbox sweeper facets it, and Qdrant refuses
+        # to facet an unindexed field.
+        (STAGED_DEAL_FIELD,     PayloadSchemaType.KEYWORD),
     ]
 
     for field_name, field_type in indexes:
@@ -364,6 +369,7 @@ async def create_payload_indexes(
         ("doc_id",              PayloadSchemaType.KEYWORD),
         ("is_current_version",  PayloadSchemaType.INTEGER),
         ("contains_pii",        PayloadSchemaType.INTEGER),
+        (STAGED_DEAL_FIELD,     PayloadSchemaType.KEYWORD),
     ]
 
     for field_name, field_type in parent_indexes:

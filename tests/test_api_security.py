@@ -25,7 +25,7 @@ import api.routes.deals as deals
 import api.routes.query as query_routes
 import api.security as security
 import src.vector_db.qdrant_client as qdrant_module
-from src.vector_db.constants import COLLECTION_NAME
+from src.vector_db.constants import COLLECTION_NAME, PARENT_COLLECTION_NAME
 
 DEMO_DEAL = "aurora_vertex_2024"
 ADMIN_KEY = "test-admin-key"
@@ -42,6 +42,7 @@ class FakeQdrant:
     def __init__(self, deals_to_files: dict[str, list[str]]):
         self.deals = {k: list(v) for k, v in deals_to_files.items()}
         self.deleted: list[str] = []
+        self.staged_deleted: list[tuple[str, str]] = []
         self.reachable = True
         self.fail_delete = False
 
@@ -56,7 +57,12 @@ class FakeQdrant:
     async def delete(self, collection_name, points_selector):
         if self.fail_delete:
             raise RuntimeError("delete failed at http://internal-qdrant:6333 token=abc")
-        deal_id = points_selector.filter.must[0].match.value
+        condition = points_selector.filter.must[0]
+        if condition.key != "deal_id":
+            # The purge's delete of never-committed staged points (none here).
+            self.staged_deleted.append((collection_name, condition.match.value))
+            return
+        deal_id = condition.match.value
         if collection_name == COLLECTION_NAME:
             self.deleted.append(deal_id)
             self.deals.pop(deal_id, None)
@@ -261,6 +267,9 @@ def test_purge_of_non_sandbox_deal_requires_admin(client, fake_qdrant, monkeypat
     ok = client.delete(f"/api/v1/deals/{DEMO_DEAL}", headers={security.ADMIN_HEADER: ADMIN_KEY})
     assert ok.status_code == 200
     assert fake_qdrant.deleted == [DEMO_DEAL]
+    # and what a cut-short first upload staged for it, in both collections
+    assert sorted(fake_qdrant.staged_deleted) == sorted(
+        [(COLLECTION_NAME, DEMO_DEAL), (PARENT_COLLECTION_NAME, DEMO_DEAL)])
 
 
 def test_development_mode_without_key_is_admin(client, fake_qdrant, monkeypatch):

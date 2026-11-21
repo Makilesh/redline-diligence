@@ -74,7 +74,9 @@ class IdentityPlan:
 
     def add(self, point_id, payload: dict) -> None:
         key = (payload.get("deal_id"), payload.get("doc_id"))
-        if not key[1]:
+        # No deal_id: a first-time upload staged it and never committed it
+        # (ingest_pipeline.index_document). No reader sees it; neither does this.
+        if not key[0] or not key[1]:
             return
         self.point_ids[key].append(point_id)
         self._opening[key].append(payload)
