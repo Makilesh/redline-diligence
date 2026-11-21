@@ -3,6 +3,7 @@ Deal management routes.
 """
 
 import asyncio
+import contextlib
 import os
 import re
 import secrets
@@ -576,11 +577,32 @@ async def _reconstruct_documents(deal_id: str) -> list[dict]:
 
 
 async def _deal_documents(deal_id: str) -> list[dict]:
-    """Returns in-memory records when present, else rebuilds them from Qdrant."""
-    records = _documents.get(deal_id)
-    if records:
-        return records
-    return await _reconstruct_documents(deal_id)
+    """
+    The deal's documents: every one the vector store holds, with this process's
+    record in place of the rebuilt one wherever it has one.
+
+    The registry only knows the uploads this process made. Returning it alone
+    whenever it was non-empty meant that after a restart the first upload to a
+    deal hid every document indexed before it from the version browser and the
+    risk dashboard, though retrieval still used them. Its own records win: they
+    carry the upload date and the extractor's full risk signals, which a rebuild
+    cannot recover. A rebuilt document that a registered upload supersedes is
+    shown as superseded, as the store says once the ingest has stamped it. When
+    the store cannot be read, the rebuild is empty and the registry is returned,
+    as before.
+    """
+    rebuilt = await _reconstruct_documents(deal_id)
+    records = _documents.get(deal_id) or []
+    if not records:
+        return rebuilt
+    known = {r["doc_id"] for r in records}
+    added = {r["doc_id"]: r for r in rebuilt if r["doc_id"] not in known}
+    for record in records:
+        prior = added.get(record.get("supersedes_doc_id") or "")
+        if prior is not None:
+            prior["is_current_version"] = False
+            prior["superseded_by"] = record["doc_id"]
+    return [*added.values(), *records]
 
 
 @router.get("/deals/{deal_id}/documents", response_model=list[DocumentRecord])
@@ -939,6 +961,40 @@ def _is_missing_collection(error: Exception) -> bool:
     return "not found" in text or "doesn't exist" in text or "does not exist" in text
 
 
+class IngestTicket:
+    """One ingest in flight for a deal; `purged` is set when the deal is purged under it."""
+
+    __slots__ = ("purged",)
+
+    def __init__(self) -> None:
+        self.purged = False
+
+
+# Ingests in flight, per deal. A purge (the tab-close beacon, an admin DELETE,
+# the sandbox sweeper) that ran while a file was still being indexed deleted
+# the vectors written so far and forgot the deal, and then the ingest wrote the
+# rest, committed, and registered the document again: the purge was undone, and
+# the upload stayed readable until a sweep (never, for a permanent deal). Only
+# open ingests hold a ticket, so this stays as small as the number of uploads
+# in flight.
+_open_ingests: dict[str, set[IngestTicket]] = {}
+
+
+@contextlib.contextmanager
+def watch_for_purge(deal_id: str):
+    """Yields a ticket whose `purged` flag a purge of `deal_id` sets while it is open."""
+    ticket = IngestTicket()
+    _open_ingests.setdefault(deal_id, set()).add(ticket)
+    try:
+        yield ticket
+    finally:
+        open_now = _open_ingests.get(deal_id)
+        if open_now is not None:
+            open_now.discard(ticket)
+            if not open_now:
+                _open_ingests.pop(deal_id, None)
+
+
 async def purge_deal(deal_id: str) -> dict:
     """
     Deletes a deal's vectors and forgets its in-memory records.
@@ -949,6 +1005,10 @@ async def purge_deal(deal_id: str) -> dict:
     Returns:
         Summary dict with the deal_id and how many document records were dropped.
     """
+    # First, so an ingest that finishes while the vectors are being deleted
+    # discards its document instead of registering it.
+    for ticket in _open_ingests.get(deal_id, ()):
+        ticket.purged = True
     await _delete_deal_vectors(deal_id)
 
     # Checkpoints hold the retrieved chunk text of every interrupted run on

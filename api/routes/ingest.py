@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 
 from api.models.request_models import DEAL_ID_PATTERN
 from api.models.response_models import IngestResponse, InjectionScreen, PassageLocation
-from api.routes.deals import register_document
+from api.routes.deals import register_document, watch_for_purge
 from api.security import (
     ClientContext,
     acquire_pipeline_slot,
@@ -29,6 +29,7 @@ from api.security import (
 from src.data_processing.ingest_pipeline import (
     SUPPORTED_EXTENSIONS,
     IngestionError,
+    delete_document,
     index_document,
     mark_superseded,
     sanitize_filename,
@@ -172,6 +173,32 @@ async def _save_upload(file: UploadFile, dest_path: str, max_bytes: int) -> int:
     return written
 
 
+async def _discard_purged_upload(deal_id: str, doc_id: str, filename: str, request_id: str) -> None:
+    """
+    Deletes an upload whose deal was purged while it was being indexed, and
+    refuses it (409). Registering it would undo the purge: the points written
+    after the purge's delete, and the commit, would leave it readable.
+    """
+    metrics.INGESTS.inc(outcome="rejected")
+    logger.warning(
+        "Upload discarded: its deal was purged while it was being indexed",
+        extra={"deal_id": deal_id, "doc_id": doc_id, "request_id": request_id},
+    )
+    await delete_document(deal_id, doc_id)
+    audit_log.record(
+        "document_discarded",
+        request_id=request_id,
+        doc_id=doc_id,
+        deal_id=deal_id,
+        file_name=filename,
+        reason="deal_purged_during_ingest",
+    )
+    raise HTTPException(
+        status_code=409,
+        detail="This deal was deleted while the file was being indexed, so the upload was discarded.",
+    )
+
+
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest_document(
     http_request: Request,
@@ -235,141 +262,149 @@ async def ingest_document(
     temp_dir = tempfile.mkdtemp(prefix="manda_ingest_")
     temp_path = os.path.join(temp_dir, f"upload{extension}")
 
-    # Ingestion spends CPU, not Gemini quota: it holds a slot but does not
-    # count toward the daily query cap.
-    slot = acquire_pipeline_slot(client, count_toward_daily_cap=False)
-    try:
-        await _save_upload(file, temp_path, _max_upload_bytes())
-        _reject_archive_bomb(temp_path, extension)
-        result = await index_document(
-            temp_path,
-            filename,
-            deal_id,
-            document_category,
-            is_current_version=is_current_version,
-            supersedes_doc_id=supersedes_doc_id,
-        )
-    except HTTPException:
-        metrics.INGESTS.inc(outcome="rejected")
-        raise
-    except IngestionError as e:
-        metrics.INGESTS.inc(outcome="rejected")
-        logger.warning(
-            "Document rejected",
-            extra={"deal_id": deal_id, "file_name": filename, "reason": str(e)},
-        )
-        raise HTTPException(status_code=e.status_code, detail=str(e)) from None
-    except Exception as e:
-        metrics.INGESTS.inc(outcome="error")
-        # Internal detail (paths, Qdrant errors) stays in the log.
-        logger.error(
-            "Document ingestion failed",
-            extra={
-                "deal_id": deal_id,
-                "file_name": filename,
-                "error": str(e),
-                "request_id": client.request_id,
-            },
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=public_error_detail("Ingestion", client.request_id),
-        ) from e
-    finally:
-        slot.release()
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-    doc_id = result["doc_id"]
-    # The pipeline's warnings are what make an upload "partial" (failed or
-    # hidden sheets, pages without a text layer, tables not extracted, a
-    # superseded re-upload). They are written for the uploader and name only
-    # parts of the uploaded file, so they are shown as the reason; without
-    # them the consoles could only say "Partly indexed".
-    notices: list[str] = list(
-        dict.fromkeys(w for w in result.get("warnings") or [] if isinstance(w, str) and w)
-    )
-
-    # Retire the superseded document's chunks so retrieval's is_current_version=1
-    # filter stops returning them, and any citation that does surface them
-    # carries the pointer forward.
-    retired = True
-    if supersedes_doc_id:
-        retirement = await mark_superseded(
-            deal_id=deal_id,
-            superseded_doc_id=supersedes_doc_id,
-            superseded_by=doc_id,
-        )
-        # The pipeline reports {"ok", "chunks_retired", "error"}. A bare None is
-        # the older best-effort contract, which reported nothing either way.
-        retired = retirement is None or bool(retirement.get("ok"))
-        if not retired:
-            reason = retirement.get("error") or "the version store could not be updated"
-            notices.append(
-                f"The new document is indexed, but {supersedes_doc_id} is still marked as "
-                f"the current version: {reason}."
+    # Open until the document is registered: a purge of the deal meanwhile
+    # marks the ticket, and the upload is then discarded, not registered.
+    with watch_for_purge(deal_id) as ticket:
+        # Ingestion spends CPU, not Gemini quota: it holds a slot but does not
+        # count toward the daily query cap.
+        slot = acquire_pipeline_slot(client, count_toward_daily_cap=False)
+        try:
+            await _save_upload(file, temp_path, _max_upload_bytes())
+            _reject_archive_bomb(temp_path, extension)
+            result = await index_document(
+                temp_path,
+                filename,
+                deal_id,
+                document_category,
+                is_current_version=is_current_version,
+                supersedes_doc_id=supersedes_doc_id,
             )
+        except HTTPException:
+            metrics.INGESTS.inc(outcome="rejected")
+            raise
+        except IngestionError as e:
+            metrics.INGESTS.inc(outcome="rejected")
             logger.warning(
-                "Supersession not applied",
+                "Document rejected",
+                extra={"deal_id": deal_id, "file_name": filename, "reason": str(e)},
+            )
+            raise HTTPException(status_code=e.status_code, detail=str(e)) from None
+        except Exception as e:
+            metrics.INGESTS.inc(outcome="error")
+            # Internal detail (paths, Qdrant errors) stays in the log.
+            logger.error(
+                "Document ingestion failed",
                 extra={
                     "deal_id": deal_id,
-                    "doc_id": doc_id,
-                    "supersedes_doc_id": supersedes_doc_id,
-                    "reason": reason,
+                    "file_name": filename,
+                    "error": str(e),
+                    "request_id": client.request_id,
                 },
+                exc_info=True,
             )
+            raise HTTPException(
+                status_code=500,
+                detail=public_error_detail("Ingestion", client.request_id),
+            ) from e
+        finally:
+            slot.release()
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
-    # A label, not a failure: it never makes the upload "partial".
-    screen = _injection_screen(result)
+        doc_id = result["doc_id"]
+        # The pipeline's warnings are what make an upload "partial" (failed or
+        # hidden sheets, pages without a text layer, tables not extracted, a
+        # superseded re-upload). They are written for the uploader and name only
+        # parts of the uploaded file, so they are shown as the reason; without
+        # them the consoles could only say "Partly indexed".
+        notices: list[str] = list(
+            dict.fromkeys(w for w in result.get("warnings") or [] if isinstance(w, str) and w)
+        )
 
-    # The registry records a supersession only when the index applied it.
-    # Recording one that did not happen would make the version browser show the
-    # older document as retired while retrieval still serves it as current.
-    register_document(
-        deal_id=deal_id,
-        doc_id=doc_id,
-        filename=filename,
-        document_category=result["document_category"],
-        chunks_created=result["chunks_created"],
-        is_current_version=is_current_version,
-        supersedes_doc_id=supersedes_doc_id if retired else None,
-        risk_signals=result["risk_signals"],
-        injection_screen={"flagged_passages": screen.flagged_passages, "signals": screen.signals},
-    )
+        # Retire the superseded document's chunks so retrieval's is_current_version=1
+        # filter stops returning them, and any citation that does surface them
+        # carries the pointer forward.
+        retired = True
+        if supersedes_doc_id:
+            retirement = await mark_superseded(
+                deal_id=deal_id,
+                superseded_doc_id=supersedes_doc_id,
+                superseded_by=doc_id,
+            )
+            # The pipeline reports {"ok", "chunks_retired", "error"}. A bare None is
+            # the older best-effort contract, which reported nothing either way.
+            retired = retirement is None or bool(retirement.get("ok"))
+            if not retired:
+                reason = retirement.get("error") or "the version store could not be updated"
+                notices.append(
+                    f"The new document is indexed, but {supersedes_doc_id} is still marked as "
+                    f"the current version: {reason}."
+                )
+                logger.warning(
+                    "Supersession not applied",
+                    extra={
+                        "deal_id": deal_id,
+                        "doc_id": doc_id,
+                        "supersedes_doc_id": supersedes_doc_id,
+                        "reason": reason,
+                    },
+                )
 
-    partial = bool(result["warnings"]) or not retired
-    metrics.INGESTS.inc(outcome="partial" if partial else "indexed")
+        # A label, not a failure: it never makes the upload "partial".
+        screen = _injection_screen(result)
 
-    audit_log.record(
-        "document_ingested",
-        **{
-            "request_id": client.request_id,
-            "doc_id": doc_id,
-            "deal_id": deal_id,
-            "file_name": filename,
-            "category": result["document_category"],
-            "chunks_created": result["chunks_created"],
-            "parent_chunks_created": result["parent_chunks_created"],
-            "previously_indexed": result["previously_indexed"],
-            "warnings": result["warnings"],
-            "risk_signal_types": [s["signal_type"] for s in result["risk_signals"]],
-            "suspected_injection_passages": screen.flagged_passages,
-            "injection_signals": screen.signals,
-            "supersedes_doc_id": supersedes_doc_id or "",
-            "supersession_applied": retired if supersedes_doc_id else None,
-        },
-    )
+        # No await between this check and register_document, so a purge cannot
+        # slip in after it.
+        if ticket.purged:
+            await _discard_purged_upload(deal_id, doc_id, filename, client.request_id)
 
-    return IngestResponse(
-        doc_id=doc_id,
-        deal_id=deal_id,
-        document_category=result["document_category"],
-        chunks_created=result["chunks_created"],
-        # Some sheets failed, or the older version could not be retired — say
-        # so rather than "success".
-        status="partial" if partial else "success",
-        notices=notices,
-        # Passed through, never acted on: superseding stays an explicit choice.
-        version_candidates=result.get("version_candidates") or [],
-        injection_screen=screen,
-    )
+        # The registry records a supersession only when the index applied it.
+        # Recording one that did not happen would make the version browser show the
+        # older document as retired while retrieval still serves it as current.
+        register_document(
+            deal_id=deal_id,
+            doc_id=doc_id,
+            filename=filename,
+            document_category=result["document_category"],
+            chunks_created=result["chunks_created"],
+            is_current_version=is_current_version,
+            supersedes_doc_id=supersedes_doc_id if retired else None,
+            risk_signals=result["risk_signals"],
+            injection_screen={"flagged_passages": screen.flagged_passages, "signals": screen.signals},
+        )
+
+        partial = bool(result["warnings"]) or not retired
+        metrics.INGESTS.inc(outcome="partial" if partial else "indexed")
+
+        audit_log.record(
+            "document_ingested",
+            **{
+                "request_id": client.request_id,
+                "doc_id": doc_id,
+                "deal_id": deal_id,
+                "file_name": filename,
+                "category": result["document_category"],
+                "chunks_created": result["chunks_created"],
+                "parent_chunks_created": result["parent_chunks_created"],
+                "previously_indexed": result["previously_indexed"],
+                "warnings": result["warnings"],
+                "risk_signal_types": [s["signal_type"] for s in result["risk_signals"]],
+                "suspected_injection_passages": screen.flagged_passages,
+                "injection_signals": screen.signals,
+                "supersedes_doc_id": supersedes_doc_id or "",
+                "supersession_applied": retired if supersedes_doc_id else None,
+            },
+        )
+
+        return IngestResponse(
+            doc_id=doc_id,
+            deal_id=deal_id,
+            document_category=result["document_category"],
+            chunks_created=result["chunks_created"],
+            # Some sheets failed, or the older version could not be retired — say
+            # so rather than "success".
+            status="partial" if partial else "success",
+            notices=notices,
+            # Passed through, never acted on: superseding stays an explicit choice.
+            version_candidates=result.get("version_candidates") or [],
+            injection_screen=screen,
+        )

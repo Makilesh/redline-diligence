@@ -280,8 +280,16 @@ class _SlidingWindowLimiter:
         if len(self._hits) > _MAX_TRACKED_KEYS:
             self._prune(now)
 
+        if not per_minute and not per_day:
+            return None
+
+        # Only as much history as the limits in force can count. A bucket with
+        # no daily cap (the read bucket's default) used to keep every hit for a
+        # day all the same: ~7,200 timestamps an hour per client, each scanned
+        # on every request by the per-minute count below.
+        horizon = _DAY if per_day else _MINUTE
         window = self._hits.setdefault(key, deque())
-        while window and now - window[0] >= _DAY:
+        while window and now - window[0] >= horizon:
             window.popleft()
 
         if per_day and len(window) >= per_day:
