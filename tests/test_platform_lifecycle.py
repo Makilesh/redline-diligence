@@ -475,6 +475,15 @@ def test_failed_synthesis_is_not_verified_and_is_reported_as_such(
     assert body["confidence_score"] == 0.0
     assert body["claim_checks"] == []
 
+    # Counted as the outage it is, not as a refusal (the label the API and the
+    # audit log already use); the stream endpoint labels it the same way.
+    client.post("/api/v1/query/stream", json=QUERY)
+    monkeypatch.setenv("ADMIN_API_KEY", ADMIN_KEY)
+    text = client.get("/metrics", headers={security.ADMIN_HEADER: ADMIN_KEY}).text
+    assert 'redline_queries_total{outcome="synthesis_failed",transport="blocking"} 1' in text
+    assert 'redline_queries_total{outcome="synthesis_failed",transport="stream"} 1' in text
+    assert 'outcome="refusal"' not in text
+
 
 @pytest.mark.parametrize(
     ("state", "expected"),

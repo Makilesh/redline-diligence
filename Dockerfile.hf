@@ -121,11 +121,29 @@ ARG NLI_REVISION=a150876415327c80daeff35ca6f68f5ed8cf5c24
 # hanging it.
 ENV HF_HUB_DOWNLOAD_TIMEOUT=60 \
     HF_HUB_ETAG_TIMEOUT=30
+# The embedder is fetched as its pinned snapshot and then loaded from that
+# directory with the Hub offline, which is how the app loads it
+# (load_cached_first). Loading it by id instead, as this step once did, makes
+# transformers look for a safetensors conversion of a .bin-only commit and
+# download one from the Hub's conversion branch (refs/pr/130 for bge-m3, not
+# pinned): 2.27 GB the app never reads. The ignored folders are other runtimes'
+# copies of the same weights (bge-m3's onnx/ is another 2.27 GB) and images.
 RUN timeout 3600 python -c "\
-from sentence_transformers import SentenceTransformer, CrossEncoder; \
+from huggingface_hub import snapshot_download; \
+snapshot_download('${EMBEDDING_MODEL}', revision='${EMBEDDING_REVISION}', \
+    ignore_patterns=['onnx/*', 'openvino/*', 'imgs/*', '*.onnx', '*.onnx_data', '*.jpg', '*.png', '*.webp', \
+                     'flax_model.msgpack', 'tf_model.h5', 'rust_model.ot']); \
+print('embedder snapshot cached')" && \
+    HF_HUB_OFFLINE=1 python -c "\
+from huggingface_hub import snapshot_download; \
+from sentence_transformers import SentenceTransformer; \
 from transformers import AutoTokenizer; \
-SentenceTransformer('${EMBEDDING_MODEL}', revision='${EMBEDDING_REVISION}'); \
-AutoTokenizer.from_pretrained('${EMBEDDING_MODEL}', revision='${EMBEDDING_REVISION}'); \
+local = snapshot_download('${EMBEDDING_MODEL}', revision='${EMBEDDING_REVISION}', local_files_only=True); \
+SentenceTransformer(local).encode(['build check']); \
+AutoTokenizer.from_pretrained(local); \
+print('embedder loads offline from', local)"
+RUN timeout 3600 python -c "\
+from sentence_transformers import CrossEncoder; \
 CrossEncoder('${RERANKER_MODEL}', revision='${RERANKER_REVISION}'); \
 CrossEncoder('${NLI_MODEL}', revision='${NLI_REVISION}'); \
 print('models cached')"
