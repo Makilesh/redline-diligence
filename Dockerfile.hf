@@ -129,6 +129,21 @@ AutoTokenizer.from_pretrained('${EMBEDDING_MODEL}', revision='${EMBEDDING_REVISI
 CrossEncoder('${RERANKER_MODEL}', revision='${RERANKER_REVISION}'); \
 CrossEncoder('${NLI_MODEL}', revision='${NLI_REVISION}'); \
 print('models cached')"
+# A download at a commit writes no refs/main, so a load that names no revision
+# (anything but the app's loaders: an operator's one-off script) would find
+# nothing offline and fetch upstream main online. Point each model's main at
+# its pin, as a download of main would have, so that load gets the pin too.
+RUN python -c "\
+import os; \
+from huggingface_hub.constants import HF_HUB_CACHE; \
+from huggingface_hub.file_download import repo_folder_name; \
+pins = (('${EMBEDDING_MODEL}', '${EMBEDDING_REVISION}'), ('${RERANKER_MODEL}', '${RERANKER_REVISION}'), ('${NLI_MODEL}', '${NLI_REVISION}')); \
+refs = [os.path.join(HF_HUB_CACHE, repo_folder_name(repo_id=r, repo_type='model'), 'refs') for r, _ in pins]; \
+[os.makedirs(d, exist_ok=True) for d in refs]; \
+[open(os.path.join(d, 'main'), 'w').write(v) for d, (_, v) in zip(refs, pins)]; \
+missing = [r for r, v in pins if not os.path.isdir(os.path.join(HF_HUB_CACHE, repo_folder_name(repo_id=r, repo_type='model'), 'snapshots', v))]; \
+assert not missing, missing; \
+print('refs/main at the pins')"
 
 # Laya's typed-decisions checkpoint (~1.7GB) for the decision layer in
 # src/decisions — same reasoning: fetched here once, not on the first request.

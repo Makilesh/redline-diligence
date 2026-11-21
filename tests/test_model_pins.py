@@ -58,6 +58,21 @@ def test_the_image_fetches_each_model_at_its_build_arg():
     assert not re.search(r"(?:SentenceTransformer|CrossEncoder)\('\$\{\w+\}'\)", text)
 
 
+def test_the_image_points_main_at_each_pin():
+    """A download at a commit writes no refs/main; the image writes it, so an
+    unpinned load by id in the image (found by the round-13 Docker check's
+    smoke, offline) resolves to the pin instead of failing or fetching main."""
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    step = text[text.index("refs/main at the pins") - 1200:text.index("refs/main at the pins")]
+    for model_arg, revision_arg in (
+        ("EMBEDDING_MODEL", "EMBEDDING_REVISION"),
+        ("RERANKER_MODEL", "RERANKER_REVISION"),
+        ("NLI_MODEL", "NLI_REVISION"),
+    ):
+        assert f"('${{{model_arg}}}', '${{{revision_arg}}}')" in step, model_arg
+    assert "'refs'" in step and "'main'" in step and "assert not missing" in step
+
+
 def test_an_override_or_a_local_directory_is_not_pinned(tmp_path):
     assert mc.pinned_revision("my-org/my-reranker") is None
     assert mc.pinned_revision(str(tmp_path)) is None
