@@ -21,7 +21,7 @@ import torch
 from sentence_transformers import SentenceTransformer, CrossEncoder
 
 from src.utils.logger import setup_logger
-from src.utils.model_cache import load_cached_first
+from src.utils.model_cache import load_cached_first, pinned_revision
 
 logger = setup_logger(__name__)
 
@@ -108,9 +108,11 @@ def _get_embedding_model() -> SentenceTransformer:
         # From the cache when present: loading by Hub id makes transformers
         # call the Hub for this tokenizer, and fail when it is unreachable
         # (src/utils/model_cache.py, Decision 84).
+        revision = pinned_revision(EMBEDDING_MODEL_NAME)
         _embedding_model = load_cached_first(
-            lambda source: SentenceTransformer(source, device=device),
+            lambda source: SentenceTransformer(source, device=device, revision=revision),
             EMBEDDING_MODEL_NAME,
+            revision,
         )
         logger.info(
             f"{EMBEDDING_MODEL_NAME} embedding model loaded successfully on {device.upper()}"
@@ -157,14 +159,17 @@ def _get_reranker_model() -> CrossEncoder:
         )
         # The calibration profile is looked up by RERANKER_MODEL_NAME below,
         # never by the path the weights came from.
+        revision = pinned_revision(RERANKER_MODEL_NAME)
         model = load_cached_first(
             lambda source: CrossEncoder(
                 source,
                 max_length=RERANKER_MAX_LENGTH,
                 device=device,
                 default_activation_function=torch.nn.Sigmoid(),  # ← MANDATORY for [0,1] scores
+                revision=revision,
             ),
             RERANKER_MODEL_NAME,
+            revision,
         )
         limit = _model_max_length(model)
         max_length = RERANKER_MAX_LENGTH if limit is None else min(RERANKER_MAX_LENGTH, limit)
