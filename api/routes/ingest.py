@@ -7,6 +7,7 @@ src/data_processing/ingest_pipeline.py so the evaluation harness indexes
 through exactly the same code.
 """
 
+import asyncio
 import os
 import shutil
 import tempfile
@@ -17,7 +18,13 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 
 from api.models.request_models import DEAL_ID_PATTERN
 from api.models.response_models import IngestResponse, InjectionScreen, PassageLocation
-from api.routes.deals import register_document, watch_for_purge
+from api.routes.deals import (
+    IngestTicket,
+    register_document,
+    uploaded_again_since_purge,
+    wait_for_purges,
+    watch_for_purge,
+)
 from api.security import (
     ClientContext,
     acquire_pipeline_slot,
@@ -29,6 +36,8 @@ from api.security import (
 from src.data_processing.ingest_pipeline import (
     SUPPORTED_EXTENSIONS,
     IngestionError,
+    compute_content_hash,
+    compute_doc_id,
     delete_document,
     index_document,
     mark_superseded,
@@ -173,29 +182,58 @@ async def _save_upload(file: UploadFile, dest_path: str, max_bytes: int) -> int:
     return written
 
 
-async def _discard_purged_upload(deal_id: str, doc_id: str, filename: str, request_id: str) -> None:
+async def _discard_purged_upload(
+    deal_id: str, doc_id: str, filename: str, request_id: str, ticket: IngestTicket
+) -> None:
     """
-    Deletes an upload whose deal was purged while it was being indexed, and
-    refuses it (409). Registering it would undo the purge: the points written
-    after the purge's delete, and the commit, would leave it readable.
+    Deletes an upload whose deal was purged (or asked to be) while it was being
+    indexed, and refuses it. Registering it would undo the purge: the points
+    written after the purge's delete, and the commit, would leave it readable.
+
+    The delete waits for the purge to finish, and is skipped when the same
+    bytes were uploaded to the deal again since: those points are that upload's
+    now (same ids). A delete that fails is reported as the failure it is (500,
+    with the request id): the points it could not delete are still readable.
     """
+    await wait_for_purges(deal_id)
+    try:
+        deleted = await delete_document(
+            deal_id, doc_id, unless=lambda: uploaded_again_since_purge(deal_id, doc_id, ticket)
+        )
+    except Exception as e:
+        metrics.INGESTS.inc(outcome="error")
+        logger.error(
+            "Upload of a purged deal could not be deleted",
+            extra={"deal_id": deal_id, "doc_id": doc_id, "request_id": request_id, "error": str(e)},
+            exc_info=True,
+        )
+        audit_log.record(
+            "document_discard_failed",
+            request_id=request_id, doc_id=doc_id, deal_id=deal_id, file_name=filename,
+            reason="deal_purged_during_ingest",
+        )
+        raise HTTPException(
+            status_code=500, detail=public_error_detail("Ingestion", request_id)
+        ) from e
     metrics.INGESTS.inc(outcome="rejected")
     logger.warning(
         "Upload discarded: its deal was purged while it was being indexed",
-        extra={"deal_id": deal_id, "doc_id": doc_id, "request_id": request_id},
+        extra={"deal_id": deal_id, "doc_id": doc_id, "request_id": request_id,
+               "points_deleted": deleted},
     )
-    await delete_document(deal_id, doc_id)
     audit_log.record(
         "document_discarded",
-        request_id=request_id,
-        doc_id=doc_id,
-        deal_id=deal_id,
-        file_name=filename,
+        request_id=request_id, doc_id=doc_id, deal_id=deal_id, file_name=filename,
         reason="deal_purged_during_ingest",
+        # False: the same file was uploaded again since, and its points are kept.
+        points_deleted=deleted,
     )
     raise HTTPException(
         status_code=409,
-        detail="This deal was deleted while the file was being indexed, so the upload was discarded.",
+        detail=(
+            "A delete of this deal was requested while the file was being indexed, "
+            "so the upload was discarded."
+        ),
     )
 
 
@@ -271,6 +309,12 @@ async def ingest_document(
         try:
             await _save_upload(file, temp_path, _max_upload_bytes())
             _reject_archive_bomb(temp_path, extension)
+            # The id index_document will derive (same bytes, same deal), on the
+            # ticket before indexing, so a discard of an earlier upload of these
+            # bytes can tell that this one is in flight.
+            ticket.doc_id = compute_doc_id(
+                deal_id, await asyncio.to_thread(compute_content_hash, temp_path)
+            )
             result = await index_document(
                 temp_path,
                 filename,
@@ -355,7 +399,7 @@ async def ingest_document(
         # No await between this check and register_document, so a purge cannot
         # slip in after it.
         if ticket.purged:
-            await _discard_purged_upload(deal_id, doc_id, filename, client.request_id)
+            await _discard_purged_upload(deal_id, doc_id, filename, client.request_id, ticket)
 
         # The registry records a supersession only when the index applied it.
         # Recording one that did not happen would make the version browser show the

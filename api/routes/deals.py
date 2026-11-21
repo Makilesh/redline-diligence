@@ -962,12 +962,16 @@ def _is_missing_collection(error: Exception) -> bool:
 
 
 class IngestTicket:
-    """One ingest in flight for a deal; `purged` is set when the deal is purged under it."""
+    """
+    One ingest in flight for a deal. `purged` is set when the deal is purged
+    under it; `doc_id` is the upload's document id, set once its bytes are saved.
+    """
 
-    __slots__ = ("purged",)
+    __slots__ = ("purged", "doc_id")
 
-    def __init__(self) -> None:
-        self.purged = False
+    def __init__(self, purged: bool = False) -> None:
+        self.purged = purged
+        self.doc_id = ""
 
 
 # Ingests in flight, per deal. A purge (the tab-close beacon, an admin DELETE,
@@ -979,11 +983,17 @@ class IngestTicket:
 # in flight.
 _open_ingests: dict[str, set[IngestTicket]] = {}
 
+# Purges running now, per deal, and an event set when the last one ends. An
+# ingest that opens its ticket while one runs is marked from the start, and a
+# discard waits for them to finish before it looks for a newer upload.
+_purges_running: dict[str, int] = {}
+_purges_idle: dict[str, asyncio.Event] = {}
+
 
 @contextlib.contextmanager
 def watch_for_purge(deal_id: str):
     """Yields a ticket whose `purged` flag a purge of `deal_id` sets while it is open."""
-    ticket = IngestTicket()
+    ticket = IngestTicket(purged=deal_id in _purges_running)
     _open_ingests.setdefault(deal_id, set()).add(ticket)
     try:
         yield ticket
@@ -993,6 +1003,29 @@ def watch_for_purge(deal_id: str):
             open_now.discard(ticket)
             if not open_now:
                 _open_ingests.pop(deal_id, None)
+
+
+async def wait_for_purges(deal_id: str) -> None:
+    """Returns once no purge of `deal_id` is running."""
+    idle = _purges_idle.get(deal_id)
+    if idle is not None:
+        await idle.wait()
+
+
+def uploaded_again_since_purge(deal_id: str, doc_id: str, ticket: IngestTicket) -> bool:
+    """
+    True when the same bytes were uploaded to the deal after its purge: an
+    upload registered since (the purge dropped every earlier record), or one in
+    flight whose ticket the purge did not mark. Deleting the discarded upload's
+    points would then delete that upload's too, as they share their ids. Called
+    with no purge of the deal running (wait_for_purges).
+    """
+    if any(r["doc_id"] == doc_id for r in _documents.get(deal_id, [])):
+        return True
+    return any(
+        other is not ticket and not other.purged and other.doc_id == doc_id
+        for other in _open_ingests.get(deal_id, ())
+    )
 
 
 async def purge_deal(deal_id: str) -> dict:
@@ -1005,8 +1038,23 @@ async def purge_deal(deal_id: str) -> dict:
     Returns:
         Summary dict with the deal_id and how many document records were dropped.
     """
+    _purges_running[deal_id] = _purges_running.get(deal_id, 0) + 1
+    _purges_idle.setdefault(deal_id, asyncio.Event()).clear()
+    try:
+        return await _purge_deal(deal_id)
+    finally:
+        left = _purges_running[deal_id] - 1
+        if left:
+            _purges_running[deal_id] = left
+        else:
+            del _purges_running[deal_id]
+            _purges_idle.pop(deal_id).set()
+
+
+async def _purge_deal(deal_id: str) -> dict:
     # First, so an ingest that finishes while the vectors are being deleted
-    # discards its document instead of registering it.
+    # discards its document instead of registering it (and one that starts
+    # meanwhile is marked by watch_for_purge).
     for ticket in _open_ingests.get(deal_id, ()):
         ticket.purged = True
     await _delete_deal_vectors(deal_id)
