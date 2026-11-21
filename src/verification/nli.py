@@ -49,7 +49,7 @@ import time
 from dataclasses import dataclass
 
 from src.utils.logger import setup_logger
-from src.utils.model_cache import load_cached_first
+from src.utils.model_cache import load_cached_first, pinned_revision
 
 logger = setup_logger(__name__)
 
@@ -228,8 +228,13 @@ def _load(name: str) -> None:
 
     from sentence_transformers import CrossEncoder
 
+    revision = pinned_revision(name)
     model = load_cached_first(
-        lambda source: CrossEncoder(source, max_length=MAX_SEQ_LENGTH, device=device), name
+        lambda source: CrossEncoder(
+            source, max_length=MAX_SEQ_LENGTH, device=device, revision=revision
+        ),
+        name,
+        revision,
     )
     id2label = getattr(model.config, "id2label", None) or {}
     labels = {str(v).lower(): int(k) for k, v in id2label.items()}
