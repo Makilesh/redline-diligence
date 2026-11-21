@@ -47,6 +47,18 @@ describe("normalizeQueryResponse", () => {
       );
     });
 
+    it("reads a refusal for want of an assessor as an outage, and only that one", () => {
+      expect(
+        legacy({
+          is_refusal: true,
+          agent_trace: [{ agent: "insufficient_context", force_refusal: true, reason: "assessor_unavailable" }],
+        }),
+      ).toBe("synthesis_failed");
+      expect(
+        legacy({ is_refusal: true, agent_trace: [{ agent: "insufficient_context", force_refusal: true }] }),
+      ).toBe("refused");
+    });
+
     it("reads a refusal and a failed verification", () => {
       expect(legacy({ is_refusal: true })).toBe("refused");
       expect(legacy({ validation_status: "failed" })).toBe("answered_unverified");

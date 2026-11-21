@@ -218,10 +218,49 @@ def node_timings(agent_trace: list[dict]) -> list[dict]:
     return rows
 
 
+# Why insufficient_context ran, when it was not for lack of context: the last
+# quality assessment reached no usable model, so the gate failed closed on
+# heuristic numbers it is built to distrust in that band. Nothing is then known
+# about the data room, and the run is reported as an outage, not a refusal.
+ASSESSOR_UNAVAILABLE = "assessor_unavailable"
+
+
+def assessor_unavailable_kind(state: dict) -> str | None:
+    """
+    The failure class of the run's last quality assessment, if it was degraded.
+
+    The assessor degrades only in the ambiguous band (best chunk 0.05-0.30),
+    where its numbers alone never admit context: the rewrite loop then ends in
+    insufficient_context whatever the documents hold. Only the last pass
+    counts: it is the one the router refused on.
+
+    Args:
+        state: Run state with agent_trace.
+
+    Returns:
+        The degraded pass's `error` (a FailureKind value such as "connection"),
+        "unknown" when it carries none, or None when the last assessment was
+        not degraded or there was none.
+    """
+    for entry in reversed(state.get("agent_trace") or []):
+        if isinstance(entry, dict) and entry.get("agent") == "quality_assessor":
+            if not entry.get("degraded"):
+                return None
+            error = entry.get("error")
+            return error if isinstance(error, str) and error else "unknown"
+    return None
+
+
 async def insufficient_context_node(state: AgentState) -> dict:
     """
     Terminal node for queries where context is insufficient after max rewrites.
     Sets force_refusal=True so the synthesizer generates a refusal.
+
+    When the last assessment reached no usable model, the refusal says so
+    instead of suggesting the documents are missing, and its trace entry
+    carries reason "assessor_unavailable": run_outcome then reports the run as
+    synthesis_failed (no model returned a usable answer), which both consoles
+    present as a service problem.
 
     Args:
         state: Current AgentState.
@@ -229,22 +268,38 @@ async def insufficient_context_node(state: AgentState) -> dict:
     Returns:
         State with force_refusal and generated refusal answer.
     """
-    logger.info("Insufficient context — generating refusal")
-    return {
-        "force_refusal": True,
-        "generated_answer": (
+    attempts = state.get("rewrite_iteration", 0) + 1
+    unavailable = assessor_unavailable_kind(state)
+    trace: dict = {"agent": "insufficient_context", "force_refusal": True}
+    if unavailable:
+        logger.warning(
+            "Insufficient context because the assessor reached no model — reporting an outage",
+            extra={"error": unavailable},
+        )
+        answer = (
+            "I couldn't answer this question because the language model service did "
+            "not return a usable response, so the passages retrieved from the data "
+            "room could not be assessed. This is a service problem, not a finding "
+            "about your question or the documents. Please try again shortly.\n\n"
+            f"Search attempts: {attempts}"
+        )
+        trace.update(reason=ASSESSOR_UNAVAILABLE, error=unavailable)
+    else:
+        logger.info("Insufficient context — generating refusal")
+        answer = (
             "I was unable to find sufficient relevant information in the data room "
             "to answer this question, even after refining the search. This may mean "
             "the relevant documents haven't been uploaded yet, or the question falls "
             "outside the scope of the available materials.\n\n"
-            f"Search attempts: {state.get('rewrite_iteration', 0) + 1}\n"
+            f"Search attempts: {attempts}\n"
             f"Best quality score achieved: {_as_score(state.get('context_quality_score')):.2f}"
-        ),
+        )
+    return {
+        "force_refusal": True,
+        "generated_answer": answer,
         "confidence_score": 0.0,
         "validation_status": "passed",  # No validation needed for refusal
-        "agent_trace": [
-            {"agent": "insufficient_context", "force_refusal": True}
-        ],
+        "agent_trace": [trace],
     }
 
 
@@ -282,7 +337,9 @@ async def synthesis_unavailable_node(state: AgentState) -> dict:
 OUTCOME_ANSWERED = "answered"
 OUTCOME_ANSWERED_UNVERIFIED = "answered_unverified"  # failed validation twice; shipped flagged
 OUTCOME_REFUSED = "refused"  # no usable context, or the assessor said so
-OUTCOME_SYNTHESIS_FAILED = "synthesis_failed"  # every model failed; apology returned
+# Every model failed, in synthesis or in the assessment that gates it (the gate
+# then fails closed with nothing known about the context); apology returned.
+OUTCOME_SYNTHESIS_FAILED = "synthesis_failed"
 
 
 def run_outcome(final_state: dict) -> str:
@@ -300,7 +357,12 @@ def run_outcome(final_state: dict) -> str:
         for entry in final_state.get("agent_trace") or []
         if isinstance(entry, dict)
     }
-    if "synthesis_unavailable" in agents:
+    if "synthesis_unavailable" in agents or any(
+        entry.get("agent") == "insufficient_context"
+        and entry.get("reason") == ASSESSOR_UNAVAILABLE
+        for entry in final_state.get("agent_trace") or []
+        if isinstance(entry, dict)
+    ):
         return OUTCOME_SYNTHESIS_FAILED
     if final_state.get("force_refusal") or not final_state.get("generated_answer"):
         return OUTCOME_REFUSED
@@ -1078,6 +1140,10 @@ def _summarize_stage(node: str, delta: dict) -> tuple[str, dict]:
         }
 
     if node == "insufficient_context":
+        if trace.get("reason") == ASSESSOR_UNAVAILABLE:
+            return "Declined - the language models could not assess the retrieved passages", {
+                "force_refusal": True,
+            }
         return "Refused - no passage in the data room supports an answer", {
             "force_refusal": True,
         }

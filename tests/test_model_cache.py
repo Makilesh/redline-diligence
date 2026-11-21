@@ -159,7 +159,9 @@ def test_the_reranker_loads_from_the_cache_and_keeps_its_profile(reranker_module
         mod._reranker_model = None
         mod._get_reranker_model()
 
-    assert ctor.call_args.args[0] == f"/cache/{minilm}@None"
+    pinned = mc.PINNED_REVISIONS[minilm]
+    assert ctor.call_args.args[0] == f"/cache/{minilm}@{pinned}"
+    assert ctor.call_args.kwargs["revision"] == pinned  # also when fetched by id
     # The calibration profile follows the configured name, not the load path.
     assert mod._reranker_profile is rc.MINILM_PROFILE
 
@@ -169,7 +171,9 @@ def test_the_embedder_loads_from_the_cache(reranker_module, snapshot_of):
     with patch.object(mod, "SentenceTransformer", return_value=MagicMock()) as ctor:
         mod._embedding_model = None
         mod._get_embedding_model()
-    assert ctor.call_args.args[0] == "/cache/BAAI/bge-m3@None"
+    pinned = mc.PINNED_REVISIONS["BAAI/bge-m3"]
+    assert ctor.call_args.args[0] == f"/cache/BAAI/bge-m3@{pinned}"
+    assert ctor.call_args.kwargs["revision"] == pinned
 
 
 def test_the_grounding_checker_loads_its_pinned_commit_from_the_cache(snapshot_of, monkeypatch):
@@ -215,17 +219,23 @@ def test_the_nli_fallback_loads_from_the_cache(snapshot_of, monkeypatch):
 
     nli._load(name)
 
-    assert ctor.call_args.args[0] == f"/cache/{name}@None"
+    pinned = mc.PINNED_REVISIONS[name]
+    assert ctor.call_args.args[0] == f"/cache/{name}@{pinned}"
+    assert ctor.call_args.kwargs["revision"] == pinned
 
 
 def test_the_token_counter_loads_from_the_cache(snapshot_of, monkeypatch):
     from src.utils import token_counter as tc
 
     seen = []
-    monkeypatch.setattr(tc, "AutoTokenizer", MagicMock(from_pretrained=lambda s: seen.append(s) or "tok"))
+    monkeypatch.setattr(
+        tc, "AutoTokenizer",
+        MagicMock(from_pretrained=lambda s, revision=None: seen.append((s, revision)) or "tok"),
+    )
     tc.get_tokenizer.cache_clear()
     try:
         assert tc.get_tokenizer() == "tok"
     finally:
         tc.get_tokenizer.cache_clear()
-    assert seen == ["/cache/BAAI/bge-m3@None"]
+    pinned = mc.PINNED_REVISIONS["BAAI/bge-m3"]
+    assert seen == [(f"/cache/BAAI/bge-m3@{pinned}", pinned)]

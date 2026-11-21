@@ -59,6 +59,15 @@ class TestRules:
         legacy = _result(agent_trace=[{"agent": "synthesis_unavailable"}], is_refusal=True)
         del legacy["outcome"]
         assert result_outcome(legacy) == "synthesis_failed"
+        legacy = _result(
+            agent_trace=[{"agent": "insufficient_context", "reason": "assessor_unavailable"}],
+            is_refusal=True,
+        )
+        del legacy["outcome"]
+        assert result_outcome(legacy) == "synthesis_failed"
+        legacy = _result(agent_trace=[{"agent": "insufficient_context"}], is_refusal=True)
+        del legacy["outcome"]
+        assert result_outcome(legacy) == "refused"
         legacy = _result(validation_status="failed")
         del legacy["outcome"]
         assert result_outcome(legacy) == "answered_unverified"

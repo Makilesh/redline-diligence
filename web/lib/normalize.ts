@@ -205,7 +205,9 @@ function deriveOutcome(raw: Bag, trace: Bag[]): Outcome {
   const synthesisFailed = trace.some(
     (t) =>
       t.agent === "synthesis_unavailable" ||
-      (t.agent === "answer_synthesizer" && t.synthesis_failed === true),
+      (t.agent === "answer_synthesizer" && t.synthesis_failed === true) ||
+      // Refused only because the assessor reached no model: an outage too.
+      (t.agent === "insufficient_context" && t.reason === "assessor_unavailable"),
   );
   if (synthesisFailed) return "synthesis_failed";
   if (raw.is_refusal === true || !str(raw.answer).trim()) return "refused";

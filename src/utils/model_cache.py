@@ -19,6 +19,12 @@ snapshot the same way (src/decisions/laya_client.py).
 A cached model is used as cached: an unpinned model is no longer silently
 updated when its Hub repository changes. To move to a new revision, pin it
 or clear that model from the cache.
+
+The default models are pinned (PINNED_REVISIONS): each is loaded at the Hub
+commit its thresholds, calibration profiles and benchmarks were measured on,
+from the cache when that commit is there and from the Hub at that commit when
+it is not. A new upload to one of these repositories used to reach a fresh
+image build, or a machine with an empty cache, unannounced (audit M5).
 """
 
 from __future__ import annotations
@@ -32,6 +38,37 @@ from src.utils.logger import setup_logger
 logger = setup_logger(__name__)
 
 T = TypeVar("T")
+
+# Hub commits of the default models, as measured. Each is the commit the
+# development cache's "main" pointed to when the round-12 gates and benchmarks
+# ran (every refs/main file predates them), and upstream "main" when it was
+# pinned (2026-11-21). Dockerfile.hf bakes the CPU image's three at the same commits
+# (its *_REVISION build args; tests/test_model_pins.py keeps the two equal).
+# ms-marco-MiniLM-L-6-v2 was renamed upstream to ms-marco-MiniLM-L6-v2 in
+# August 2026; the old id redirects, and that commit changed only the README
+# (the weights, config and tokenizer are byte-identical to the July commit).
+# To move a model: pin the new commit here and in Dockerfile.hf, then re-run
+# the benchmarks and the calibration that depend on it.
+PINNED_REVISIONS: dict[str, str] = {
+    "BAAI/bge-m3": "5617a9f61b028005a4858fdac845db406aefb181",
+    "cross-encoder/ms-marco-MiniLM-L-6-v2": "233902d25c440f23af6f7d6e94d2946bac0bee0a",
+    "cross-encoder/nli-deberta-v3-xsmall": "a150876415327c80daeff35ca6f68f5ed8cf5c24",
+    "BAAI/bge-reranker-v2-m3": "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e",
+    "cross-encoder/nli-deberta-v3-small": "fa2804872c3b4bd748f38c0185cc85775361e735",
+}
+
+
+def pinned_revision(repo_id: str) -> str | None:
+    """
+    The pinned Hub commit of a default model, or None for any other model.
+
+    Args:
+        repo_id: Hub id, or a local directory (never pinned).
+
+    Returns:
+        The commit, or None: an override or a local copy is loaded as given.
+    """
+    return PINNED_REVISIONS.get(repo_id)
 
 
 def cached_snapshot(repo_id: str, revision: str | None = None) -> str | None:

@@ -44,6 +44,8 @@ def result_outcome(result: dict) -> str:
     if any(
         t.get("agent") == "synthesis_unavailable"
         or (t.get("agent") == "answer_synthesizer" and t.get("synthesis_failed"))
+        # Refused only because the assessor reached no model: an outage too.
+        or (t.get("agent") == "insufficient_context" and t.get("reason") == "assessor_unavailable")
         for t in trace
     ):
         return "synthesis_failed"
