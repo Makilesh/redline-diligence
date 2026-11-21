@@ -964,14 +964,16 @@ def _is_missing_collection(error: Exception) -> bool:
 class IngestTicket:
     """
     One ingest in flight for a deal. `purged` is set when the deal is purged
-    under it; `doc_id` is the upload's document id, set once its bytes are saved.
+    under it; `doc_id` is the upload's document id, set once its bytes are
+    saved; `closed` is set when the ingest ends, however it ends.
     """
 
-    __slots__ = ("purged", "doc_id")
+    __slots__ = ("purged", "doc_id", "closed")
 
     def __init__(self, purged: bool = False) -> None:
         self.purged = purged
         self.doc_id = ""
+        self.closed = asyncio.Event()
 
 
 # Ingests in flight, per deal. A purge (the tab-close beacon, an admin DELETE,
@@ -1003,6 +1005,7 @@ def watch_for_purge(deal_id: str):
             open_now.discard(ticket)
             if not open_now:
                 _open_ingests.pop(deal_id, None)
+        ticket.closed.set()
 
 
 async def wait_for_purges(deal_id: str) -> None:
@@ -1012,19 +1015,35 @@ async def wait_for_purges(deal_id: str) -> None:
         await idle.wait()
 
 
+def registered_since_purge(deal_id: str, doc_id: str) -> bool:
+    """
+    True when the deal's registry holds `doc_id`. Called with no purge of the
+    deal running (wait_for_purges), when a record can only be one registered
+    after the purge, which drops every earlier one; unless the purge failed
+    before dropping them, and then the deal and that document were never
+    deleted.
+    """
+    return any(r["doc_id"] == doc_id for r in _documents.get(deal_id, []))
+
+
+def pending_uploads_of(deal_id: str, doc_id: str, ticket: IngestTicket) -> list[IngestTicket]:
+    """Other ingests in flight of the same bytes that no purge marked."""
+    return [
+        other
+        for other in _open_ingests.get(deal_id, ())
+        if other is not ticket and not other.purged and other.doc_id == doc_id
+    ]
+
+
 def uploaded_again_since_purge(deal_id: str, doc_id: str, ticket: IngestTicket) -> bool:
     """
     True when the same bytes were uploaded to the deal after its purge: an
-    upload registered since (the purge dropped every earlier record), or one in
-    flight whose ticket the purge did not mark. Deleting the discarded upload's
-    points would then delete that upload's too, as they share their ids. Called
-    with no purge of the deal running (wait_for_purges).
+    upload registered since, or one in flight that the purge did not mark.
+    Deleting the discarded upload's points would then delete that upload's
+    too, as they share their ids.
     """
-    if any(r["doc_id"] == doc_id for r in _documents.get(deal_id, [])):
-        return True
-    return any(
-        other is not ticket and not other.purged and other.doc_id == doc_id
-        for other in _open_ingests.get(deal_id, ())
+    return registered_since_purge(deal_id, doc_id) or bool(
+        pending_uploads_of(deal_id, doc_id, ticket)
     )
 
 

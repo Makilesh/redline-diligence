@@ -20,8 +20,9 @@ from api.models.request_models import DEAL_ID_PATTERN
 from api.models.response_models import IngestResponse, InjectionScreen, PassageLocation
 from api.routes.deals import (
     IngestTicket,
+    pending_uploads_of,
     register_document,
-    uploaded_again_since_purge,
+    registered_since_purge,
     wait_for_purges,
     watch_for_purge,
 )
@@ -190,16 +191,31 @@ async def _discard_purged_upload(
     indexed, and refuses it. Registering it would undo the purge: the points
     written after the purge's delete, and the commit, would leave it readable.
 
-    The delete waits for the purge to finish, and is skipped when the same
-    bytes were uploaded to the deal again since: those points are that upload's
-    now (same ids). A delete that fails is reported as the failure it is (500,
-    with the request id): the points it could not delete are still readable.
+    The delete waits for the purge to finish. When the same bytes were uploaded
+    to the deal again since, the points are that upload's now (same ids): if it
+    is registered they are kept; if it is still in flight, this waits for it to
+    end and decides again, so an upload that then fails, or is cancelled before
+    it writes, does not leave these points behind with no record. A delete
+    that fails is reported as the failure it is (500, with the request id): the
+    points it could not delete are still readable.
     """
-    await wait_for_purges(deal_id)
+    pending: list[IngestTicket] = []
+
+    def kept_by_another_upload() -> bool:
+        # Evaluated under the document lock by delete_document.
+        pending.clear()
+        if registered_since_purge(deal_id, doc_id):
+            return True
+        pending.extend(pending_uploads_of(deal_id, doc_id, ticket))
+        return bool(pending)
+
     try:
-        deleted = await delete_document(
-            deal_id, doc_id, unless=lambda: uploaded_again_since_purge(deal_id, doc_id, ticket)
-        )
+        while True:
+            await wait_for_purges(deal_id)
+            deleted = await delete_document(deal_id, doc_id, unless=kept_by_another_upload)
+            if deleted or not pending:
+                break
+            await asyncio.gather(*(other.closed.wait() for other in pending))
     except Exception as e:
         metrics.INGESTS.inc(outcome="error")
         logger.error(

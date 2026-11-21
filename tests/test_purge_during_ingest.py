@@ -193,6 +193,9 @@ def test_a_discard_whose_delete_fails_is_reported_as_a_failure(route):
     [audit_file] = route["audit"].iterdir()
     events = [json.loads(line) for line in audit_file.read_text().splitlines()]
     assert [e["event"] for e in events] == ["document_discard_failed"]
+    text = TestClient(api_main.app).get("/metrics", headers=ADMIN).text
+    assert 'redline_ingest_total{outcome="error"} 1' in text
+    assert 'outcome="rejected"' not in text
 
 
 # ==============================================================================
@@ -306,3 +309,155 @@ def test_a_discard_with_no_later_upload_deletes(tmp_path, monkeypatch):
         await client.close()
 
     asyncio.run(run())
+
+
+@pytest.mark.usefixtures("default_bm25_is_a_stub")
+@pytest.mark.parametrize("b_ends", ["fails_before_writing", "registers"])
+def test_a_discard_waits_for_an_in_flight_reupload_and_decides_again(tmp_path, monkeypatch, b_ends):
+    """A is marked by a purge; B, the same bytes started after it, is still in
+    flight when A discards. A must not decide from B's ticket alone: if B then
+    ends without registering (cancelled or failed before it writes), A's points
+    would be left with no record. A waits for B and decides again."""
+    import functools
+
+    from fastapi import HTTPException
+
+    import src.data_processing.ingest_pipeline as ip
+    import src.workflow.orchestrator as orchestrator
+
+    async def nothing(*a, **k):
+        return 0
+
+    monkeypatch.setattr(deals, "_delete_deal_vectors", nothing)
+    monkeypatch.setattr(orchestrator, "purge_deal_checkpoints", nothing)
+    monkeypatch.setattr(deals, "_documents", {})
+    monkeypatch.setenv("AUDIT_LOG_DIR", str(tmp_path / "audit"))
+
+    async def run():
+        client = await rd.new_client()
+        monkeypatch.setattr(ingest_routes, "delete_document",
+                            functools.partial(ip.delete_document, client=client))
+        path = rd.write_supply_agreement(tmp_path)
+        doc_id = ip.compute_doc_id(rd.DEAL, ip.compute_content_hash(str(path)))
+        with deals.watch_for_purge(rd.DEAL) as a:
+            a.doc_id = doc_id
+            result = await rd.index(client, path)
+            await deals.purge_deal(rd.DEAL)
+            b_scope = deals.watch_for_purge(rd.DEAL)
+            b = b_scope.__enter__()
+            b.doc_id = doc_id
+            discard = asyncio.create_task(
+                ingest_routes._discard_purged_upload(rd.DEAL, doc_id, "supply.txt", "req-a", a)
+            )
+            await asyncio.sleep(0.05)
+            assert not discard.done()  # waiting for B
+            assert len(await rd.points(client)) == result["chunks_created"]
+            if b_ends == "registers":
+                deals.register_document(
+                    deal_id=rd.DEAL, doc_id=doc_id, filename="supply.txt",
+                    document_category="legal", chunks_created=result["chunks_created"],
+                    is_current_version=True, supersedes_doc_id=None,
+                )
+            b_scope.__exit__(None, None, None)
+            with pytest.raises(HTTPException) as refused:
+                await asyncio.wait_for(discard, 10)
+            assert refused.value.status_code == 409
+        left = len(await rd.points(client)) + len(await rd.points(client, PARENT_COLLECTION_NAME))
+        await client.close()
+        return left, result
+
+    left, result = asyncio.run(run())
+    if b_ends == "registers":
+        assert left == result["chunks_created"] + result["parent_chunks_created"]
+    else:
+        assert left == 0
+    [audit_file] = (tmp_path / "audit").iterdir()
+    [event] = [json.loads(line) for line in audit_file.read_text().splitlines()]
+    assert event["event"] == "document_discarded"
+    assert event["points_deleted"] is (b_ends != "registers")
+
+
+def test_the_ticket_carries_the_doc_id_index_document_derives(monkeypatch, tmp_path):
+    """The route hashes the upload before indexing; the id must be the one the
+    pipeline derives, or a discard could not recognise a re-upload in flight."""
+    import src.data_processing.ingest_pipeline as ip
+
+    monkeypatch.setenv("ADMIN_API_KEY", ADMIN_KEY)
+    monkeypatch.setenv("AUDIT_LOG_DIR", str(tmp_path / "audit"))
+    monkeypatch.setattr(deals, "_documents", {})
+    seen = {}
+
+    async def fake_index_document(path, filename, deal_id, category, **kwargs):
+        [ticket] = deals._open_ingests[deal_id]
+        doc = ip.extract_and_chunk(path, filename, deal_id, category)
+        seen.update(ticket=ticket.doc_id, pipeline=doc.doc_id)
+        return {
+            "doc_id": doc.doc_id, "document_category": "legal", "chunks_created": 1,
+            "parent_chunks_created": 1, "previously_indexed": False, "warnings": [],
+            "risk_signals": [], "suspected_injection": [],
+        }
+
+    monkeypatch.setattr(ingest_routes, "index_document", fake_index_document)
+    assert _upload().status_code == 200
+    assert seen["ticket"] and seen["ticket"] == seen["pipeline"]
+
+
+@pytest.mark.usefixtures("default_bm25_is_a_stub")
+def test_a_discard_during_the_purge_waits_for_it_before_deciding(tmp_path, monkeypatch):
+    """A re-uploads a document registered before the purge. Its discard starts
+    while the purge is still running, before the purge drops the registry: the
+    old record must not be taken for an upload made since, or the delete is
+    skipped and the purge undone."""
+    import functools
+
+    from fastapi import HTTPException
+
+    import src.data_processing.ingest_pipeline as ip
+    import src.workflow.orchestrator as orchestrator
+
+    monkeypatch.setattr(deals, "_documents", {})
+    monkeypatch.setenv("AUDIT_LOG_DIR", str(tmp_path / "audit"))
+
+    async def run():
+        client = await rd.new_client()
+        monkeypatch.setattr(ingest_routes, "delete_document",
+                            functools.partial(ip.delete_document, client=client))
+        release = asyncio.Event()
+
+        async def slow_vector_delete(deal_id):
+            await release.wait()
+
+        async def nothing(*a, **k):
+            return 0
+
+        monkeypatch.setattr(deals, "_delete_deal_vectors", slow_vector_delete)
+        monkeypatch.setattr(orchestrator, "purge_deal_checkpoints", nothing)
+
+        path = rd.write_supply_agreement(tmp_path)
+        doc_id = ip.compute_doc_id(rd.DEAL, ip.compute_content_hash(str(path)))
+        first = await rd.index(client, path)
+        deals.register_document(
+            deal_id=rd.DEAL, doc_id=doc_id, filename="supply.txt", document_category="legal",
+            chunks_created=first["chunks_created"], is_current_version=True, supersedes_doc_id=None,
+        )
+        with deals.watch_for_purge(rd.DEAL) as a:
+            a.doc_id = doc_id
+            await rd.index(client, path)  # A: the same file again
+            purge = asyncio.create_task(deals.purge_deal(rd.DEAL))
+            await asyncio.sleep(0)
+            assert a.purged and rd.DEAL in deals._documents  # purge running, registry not yet dropped
+            discard = asyncio.create_task(
+                ingest_routes._discard_purged_upload(rd.DEAL, doc_id, "supply.txt", "req-a", a)
+            )
+            await asyncio.sleep(0.05)
+            assert not discard.done()
+            release.set()
+            await purge
+            with pytest.raises(HTTPException) as refused:
+                await asyncio.wait_for(discard, 10)
+            assert refused.value.status_code == 409
+        left = len(await rd.points(client)) + len(await rd.points(client, PARENT_COLLECTION_NAME))
+        await client.close()
+        return left
+
+    assert asyncio.run(run()) == 0
