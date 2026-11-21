@@ -165,7 +165,9 @@ async def _facet_deal_ids(include_parents: bool = False) -> list[str]:
         Deal ids. Empty on any failure of the main collection.
     """
     from src.vector_db.qdrant_client import get_qdrant_client
-    from src.vector_db.constants import COLLECTION_NAME, PARENT_COLLECTION_NAME
+    from src.vector_db.constants import (
+        COLLECTION_NAME, PARENT_COLLECTION_NAME, STAGED_DEAL_FIELD,
+    )
 
     client = get_qdrant_client()
     try:
@@ -178,20 +180,27 @@ async def _facet_deal_ids(include_parents: bool = False) -> list[str]:
     deal_ids = [str(hit.value) for hit in deal_facet.hits]
 
     if include_parents:
-        try:
-            parent_facet = await client.facet(
-                collection_name=PARENT_COLLECTION_NAME, key="deal_id", limit=1000
-            )
-            known = set(deal_ids)
-            deal_ids.extend(
-                str(hit.value) for hit in parent_facet.hits if str(hit.value) not in known
-            )
-        except Exception as e:
-            # The parent collection may not exist, or may not index deal_id.
-            logger.debug(
-                "Could not enumerate deals from the parent collection",
-                extra={"error_type": type(e).__name__},
-            )
+        # Also every deal that holds only staged points: a sandbox whose first
+        # upload was cut short before its commit has no deal_id anywhere, and
+        # a deal_id facet would never list it for the sweeper.
+        for collection, key in (
+            (PARENT_COLLECTION_NAME, "deal_id"),
+            (COLLECTION_NAME, STAGED_DEAL_FIELD),
+            (PARENT_COLLECTION_NAME, STAGED_DEAL_FIELD),
+        ):
+            try:
+                facet = await client.facet(collection_name=collection, key=key, limit=1000)
+                known = set(deal_ids)
+                deal_ids.extend(
+                    str(hit.value) for hit in facet.hits if str(hit.value) not in known
+                )
+            except Exception as e:
+                # The parent collection may not exist, or may not index the field.
+                logger.debug(
+                    "Could not enumerate deals from a collection",
+                    extra={"collection": collection, "key": key,
+                           "error_type": type(e).__name__},
+                )
     return deal_ids
 
 
@@ -885,14 +894,18 @@ async def _delete_deal_vectors(deal_id: str) -> None:
     from qdrant_client.models import FilterSelector, FieldCondition, Filter, MatchValue
 
     from src.vector_db.qdrant_client import get_qdrant_client
-    from src.vector_db.constants import COLLECTION_NAME, PARENT_COLLECTION_NAME
+    from src.vector_db.constants import (
+        COLLECTION_NAME, PARENT_COLLECTION_NAME, STAGED_DEAL_FIELD,
+    )
 
     client = get_qdrant_client()
-    selector = FilterSelector(
-        filter=Filter(
-            must=[FieldCondition(key="deal_id", match=MatchValue(value=deal_id))]
-        )
-    )
+    # The deal's points, and those a first-time upload staged and never
+    # committed (a crash or a cancelled request): they hold the upload's text
+    # under STAGED_DEAL_FIELD instead of deal_id.
+    selectors = [
+        FilterSelector(filter=Filter(must=[FieldCondition(key=key, match=MatchValue(value=deal_id))]))
+        for key in ("deal_id", STAGED_DEAL_FIELD)
+    ]
 
     # Parents first. The sweeper finds its candidates by faceting, and the
     # child collection is where it has always looked; if the children went
@@ -902,7 +915,8 @@ async def _delete_deal_vectors(deal_id: str) -> None:
     # fully discoverable for the next pass.
     for collection in (PARENT_COLLECTION_NAME, COLLECTION_NAME):
         try:
-            await client.delete(collection_name=collection, points_selector=selector)
+            for selector in selectors:
+                await client.delete(collection_name=collection, points_selector=selector)
         except Exception as e:
             # A parent collection that does not exist holds nothing to delete.
             # Any other failure there is a failed purge, exactly as it is for

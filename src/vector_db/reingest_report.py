@@ -28,6 +28,12 @@ says what each needs:
                        its doc_title / doc_parties
     nothing
 
+Points a first-time upload staged and never committed (its run was cut short
+by a crash or a cancelled request; ingest_pipeline.index_document) carry no
+deal_id, so no reader sees them. They are listed apart, under "staged", by the
+deal they were meant for: purging that deal deletes them, and uploading the
+same file again commits it.
+
 It writes nothing. With --files, the files under a directory are matched to
 documents by their bytes (doc_id = uuid5(deal, sha256(bytes))): a renamed file
 still finds its document, an edited one finds none.
@@ -44,9 +50,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import FieldCondition, Filter, MatchValue
+from qdrant_client.models import FieldCondition, Filter, IsEmptyCondition, MatchValue, PayloadField
 
-from src.vector_db.constants import COLLECTION_NAME, PARENT_COLLECTION_NAME
+from src.vector_db.constants import COLLECTION_NAME, PARENT_COLLECTION_NAME, STAGED_DEAL_FIELD
 from src.vector_db.identity_backfill import IdentityPlan
 from src.utils.logger import setup_logger
 
@@ -322,22 +328,59 @@ async def collect(
     docs: dict[tuple, DocumentPoints] = {}
     plan = IdentityPlan()
     flt = _deal_filter(deal_id)
-    fields = sorted(set(CHILD_FIELDS) | set(IdentityPlan.FIELDS))
+    fields = sorted(set(CHILD_FIELDS) | set(IdentityPlan.FIELDS) | {STAGED_DEAL_FIELD})
     async for record in _scroll(client, collection_name, flt, fields):
         payload = record.payload or {}
         key = (payload.get("deal_id") or "", payload.get("doc_id") or "")
-        if not key[1]:
+        if not key[1] or _uncommitted(payload):
             continue
         plan.add(record.id, payload)
         state = {k: payload[k] for k in CHILD_FIELDS if k in payload}
         docs.setdefault(key, DocumentPoints(*key)).children.append((str(record.id), state))
-    async for record in _scroll(client, parent_collection_name, flt, PARENT_FIELDS):
+    async for record in _scroll(client, parent_collection_name, flt, [*PARENT_FIELDS, STAGED_DEAL_FIELD]):
         payload = record.payload or {}
         key = (payload.get("deal_id") or "", payload.get("doc_id") or "")
-        if not key[1]:
+        if not key[1] or _uncommitted(payload):
             continue
         docs.setdefault(key, DocumentPoints(*key)).parents.append((str(record.id), payload))
     return docs, plan
+
+
+def _uncommitted(payload: dict) -> bool:
+    """A point a first-time upload staged and never committed: no deal_id yet."""
+    return not payload.get("deal_id") and bool(payload.get(STAGED_DEAL_FIELD))
+
+
+async def collect_staged(
+    client,
+    *,
+    deal_id: str | None = None,
+    collection_name: str = COLLECTION_NAME,
+    parent_collection_name: str = PARENT_COLLECTION_NAME,
+) -> list[dict]:
+    """
+    Documents whose first-time upload staged points and never committed them.
+
+    Returns:
+        [{"deal_id" (the deal they were staged for), "doc_id", "source_file",
+          "children", "parents"}], sorted.
+    """
+    must = [IsEmptyCondition(is_empty=PayloadField(key="deal_id"))]
+    if deal_id:
+        must.append(FieldCondition(key=STAGED_DEAL_FIELD, match=MatchValue(value=deal_id)))
+    flt = Filter(must=must)
+    found: dict[tuple, dict] = {}
+    for name, count in ((collection_name, "children"), (parent_collection_name, "parents")):
+        async for record in _scroll(client, name, flt, [STAGED_DEAL_FIELD, "doc_id", "source_file"]):
+            payload = record.payload or {}
+            if not _uncommitted(payload) or not payload.get("doc_id"):
+                continue
+            key = (str(payload[STAGED_DEAL_FIELD]), str(payload["doc_id"]))
+            row = found.setdefault(key, {"deal_id": key[0], "doc_id": key[1], "source_file": None,
+                                         "children": 0, "parents": 0})
+            row[count] += 1
+            row["source_file"] = row["source_file"] or payload.get("source_file")
+    return [found[k] for k in sorted(found)]
 
 
 def match_files(directory: str | Path, indexed: set[tuple]) -> tuple[dict[tuple, Path], list[Path]]:
@@ -397,7 +440,7 @@ async def build_report(
 
     Returns:
         {"ingest_version", "current_since", "sparse_encoding", "deals": {deal: {"documents": [...],
-         "totals": {...}}}, "files": {...} (with `files`)}
+         "totals": {...}}}, "staged": [collect_staged rows], "files": {...} (with `files`)}
     """
     from src.data_processing.ingest_pipeline import CURRENT_SINCE, INGEST_VERSION
     from src.vector_db.hybrid_search import SPARSE_ENCODING_VERSION
@@ -423,6 +466,8 @@ async def build_report(
         "current_since": dict(CURRENT_SINCE),
         "sparse_encoding": SPARSE_ENCODING_VERSION,
         "deals": {},
+        "staged": await collect_staged(client, deal_id=deal_id, collection_name=collection_name,
+                                       parent_collection_name=parent_collection_name),
     }
     if files is not None:
         matched, unmatched = await asyncio.to_thread(
@@ -494,6 +539,13 @@ def format_report(report: dict) -> str:
                              f"{'; '.join(row['reasons'])}{file_note}")
                 for field_name, values in row.get("conflicts", {}).items():
                     lines.append(f"        {field_name}: {json.dumps(values, ensure_ascii=True)}")
+    if report.get("staged"):
+        lines.append(f"\nstaged, never committed: {len(report['staged'])} documents (an upload cut short; "
+                     "nothing reads these points; purging the deal deletes them, uploading the same file "
+                     "again commits it)")
+        for row in report["staged"]:
+            lines.append(f"    {row['deal_id']}: {row['source_file']} ({row['doc_id']}): "
+                         f"{row['children']} children, {row['parents']} parents")
     if "files" in report:
         files = report["files"]
         lines.append(f"\nfiles under {files['directory']}: {files['matched']} matched to a document, "

@@ -47,6 +47,7 @@ dropped signal is auditable rather than silently gone.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import os
 import re
@@ -96,6 +97,7 @@ from src.vector_db.constants import (
     COLLECTION_NAME,
     PARENT_COLLECTION_NAME,
     QDRANT_BATCH_SIZE,
+    STAGED_DEAL_FIELD,
 )
 from src.utils.fail_open import fail_open, fail_open_async
 from src.utils.logger import setup_logger
@@ -1067,17 +1069,106 @@ def extract_and_chunk(
 # ==============================================================================
 
 
-def _doc_filter(deal_id: str, doc_id: str, keep_ids: list[str] | None = None):
-    """Filter for one document's points, optionally excluding the given ids."""
+def _doc_filter(deal_id: str, doc_id: str, keep_ids: list[str] | None = None,
+                only_ids: list[str] | None = None):
+    """Filter for one document's points, optionally excluding, or limited to, the given ids."""
     from qdrant_client.models import FieldCondition, Filter, HasIdCondition, MatchValue
+
+    must = [
+        FieldCondition(key="deal_id", match=MatchValue(value=deal_id)),
+        FieldCondition(key="doc_id", match=MatchValue(value=doc_id)),
+    ]
+    if only_ids:
+        must.append(HasIdCondition(has_id=only_ids))
+    return Filter(
+        must=must,
+        must_not=[HasIdCondition(has_id=keep_ids)] if keep_ids else None,
+    )
+
+
+def _staged_filter(deal_id: str, doc_id: str, keep_ids: list[str] | None = None):
+    """
+    Filter for one document's staged points: written by a first-time ingest
+    that has not committed them (no deal_id yet), optionally excluding ids.
+    """
+    from qdrant_client.models import (
+        FieldCondition, Filter, HasIdCondition, IsEmptyCondition, MatchValue, PayloadField,
+    )
 
     return Filter(
         must=[
-            FieldCondition(key="deal_id", match=MatchValue(value=deal_id)),
+            FieldCondition(key=STAGED_DEAL_FIELD, match=MatchValue(value=deal_id)),
             FieldCondition(key="doc_id", match=MatchValue(value=doc_id)),
+            IsEmptyCondition(is_empty=PayloadField(key="deal_id")),
         ],
         must_not=[HasIdCondition(has_id=keep_ids)] if keep_ids else None,
     )
+
+
+def _staged_payload(payload: dict, deal_id: str) -> dict:
+    """A point's payload as a first-time ingest writes it: deal_id held back."""
+    staged = {k: v for k, v in payload.items() if k != "deal_id"}
+    staged[STAGED_DEAL_FIELD] = deal_id
+    return staged
+
+
+async def _commit_staged(client, deal_id: str, written: list[tuple[str, list]]) -> None:
+    """
+    Makes a first-time ingest's staged points readable: sets deal_id on them.
+
+    Args:
+        client: AsyncQdrantClient.
+        deal_id: Deal.
+        written: (collection, points written) pairs, parents first: a child
+            must never be readable while its parent section is not.
+
+    Raises:
+        Whatever the client raises; the caller rolls the document back.
+    """
+    # One write per collection, naming exactly this run's points: once the
+    # server has the request it applies all of it (and replays it from its
+    # write-ahead log after a crash of its own), so a client that dies here
+    # leaves a collection committed or still staged — never the half-written
+    # document a crash in the batched upsert used to leave searchable. It is
+    # not isolated from readers: a search that runs while the server applies
+    # it can see part of the children, for that moment. Points an earlier,
+    # cut-short upload of this document staged under other ids are not named,
+    # so they stay staged (see _drop_staging_leftovers).
+    for name, points in written:
+        await client.set_payload(
+            collection_name=name,
+            payload={"deal_id": deal_id},
+            points=[p.id for p in points],
+            wait=True,
+        )
+
+
+async def _drop_staging_leftovers(client, deal_id: str, doc_id: str, written: list[tuple[str, list]]) -> None:
+    """
+    After a commit: removes the staging marker from this run's points, and
+    deletes what an earlier, cut-short upload of the same document staged
+    under ids this run did not write (it chunked the document differently).
+
+    Neither changes what a reader sees: the marker is read by nothing once
+    deal_id is set (it is removed so a committed point stores what it stored
+    before staging existed), and the leftovers carry no deal_id.
+    """
+    for name, points in written:
+        if points:
+            # Only from points that carry deal_id: one another process staged
+            # again since the commit (an upload of the same bytes outside this
+            # process's lock) keeps the marker purges and the sweeper find it by.
+            await client.delete_payload(
+                collection_name=name, keys=[STAGED_DEAL_FIELD],
+                points=_doc_filter(deal_id, doc_id, keep_ids=None, only_ids=[p.id for p in points]),
+                wait=True,
+            )
+    for name, points in written:
+        await client.delete(
+            collection_name=name,
+            points_selector=_staged_filter(deal_id, doc_id, [p.id for p in points]),
+            wait=True,
+        )
 
 
 async def _version_candidates(
@@ -1178,6 +1269,24 @@ async def _upsert_batches(client, collection_name: str, points: list) -> None:
         )
 
 
+_DOCUMENT_LOCKS: dict[tuple[str, str], list] = {}
+
+
+@contextlib.asynccontextmanager
+async def _document_lock(deal_id: str, doc_id: str):
+    """One write phase at a time per (deal_id, doc_id) in this process."""
+    key = (deal_id, doc_id)
+    entry = _DOCUMENT_LOCKS.setdefault(key, [asyncio.Lock(), 0])
+    entry[1] += 1
+    try:
+        async with entry[0]:
+            yield
+    finally:
+        entry[1] -= 1
+        if not entry[1]:
+            _DOCUMENT_LOCKS.pop(key, None)
+
+
 async def index_document(
     file_path: str,
     filename: str,
@@ -1201,9 +1310,15 @@ async def index_document(
     stale points (ids no longer produced, e.g. after a chunking change).
     Re-indexing identical bytes therefore replaces rather than duplicates.
 
-    If an upsert fails on a first-time ingest, every point for this
-    (deal_id, doc_id) is deleted from both collections before the error
-    propagates, so a new document is either fully indexed or absent. On a
+    A first-time ingest writes its points staged — deal_id held back in
+    STAGED_DEAL_FIELD — and commits them (sets deal_id) only once every point
+    is written, parents before children. Every reader filters on deal_id, so
+    a run cut short where no handler runs (a crash, an OOM kill, a cancelled
+    request) leaves points nothing reads; purging the deal deletes them, and
+    indexing the file again commits it. If an upsert or the commit fails, every point for this
+    (deal_id, doc_id), staged or committed, is deleted from both collections
+    before the error propagates, so a new document is either fully indexed or
+    absent. On a
     re-index nothing is deleted: when the chunking is unchanged the copy that
     was serving stays as it was; after an extraction or chunking change the
     document holds old and new chunks until it is indexed again (its points
@@ -1240,8 +1355,6 @@ async def index_document(
         IngestionError subclasses for client-attributable failures; other
         exceptions (Qdrant, embedding) propagate after rollback.
     """
-    from qdrant_client.models import PointStruct
-
     if client is None:
         from src.vector_db.qdrant_client import get_qdrant_client
         client = get_qdrant_client()
@@ -1275,6 +1388,37 @@ async def index_document(
         is_current_version=is_current_version,
         supersedes_doc_id=supersedes_doc_id,
     )
+
+    # Concurrent uploads of the same bytes write the same point ids. Staged,
+    # the later one's upserts would hide the earlier one's committed points
+    # again, and the earlier one's cleanup would strip the later one's marker;
+    # one at a time, the later one finds the document and re-indexes in place.
+    # The API runs a single worker (enforce_single_worker), so this serialises
+    # every upload of the API; a separate process (a CLI loader) is not covered.
+    async with _document_lock(deal_id, doc.doc_id):
+        return await _write_document(
+            doc, deal_id, filename, supersedes_doc_id,
+            client=client, collection_name=collection_name,
+            parent_collection_name=parent_collection_name,
+            embed_fn=embed_fn, sparse_fn=sparse_fn, sparse_encoding=sparse_encoding,
+        )
+
+
+async def _write_document(
+    doc,
+    deal_id: str,
+    filename: str,
+    supersedes_doc_id: str | None,
+    *,
+    client,
+    collection_name: str,
+    parent_collection_name: str,
+    embed_fn: EmbedFn,
+    sparse_fn: SparseFn,
+    sparse_encoding: int | None,
+) -> dict:
+    """index_document's write phase, run under the document's lock: see there."""
+    from qdrant_client.models import PointStruct
 
     existing = await client.count(
         collection_name=collection_name,
@@ -1316,11 +1460,19 @@ async def index_document(
     stamp = {"ingest_version": INGEST_VERSION}
     if sparse_encoding is not None:
         stamp["sparse_encoding"] = sparse_encoding
+
+    # A re-index writes in place (the copy that was serving stays readable
+    # throughout, audit I9); a first-time ingest stages until committed.
+    staged = not existing.count
+
+    def stored(payload: dict) -> dict:
+        return _staged_payload(payload, deal_id) if staged else payload
+
     child_points = [
         PointStruct(
             id=point_id_for(payload["chunk_id"]),
             vector={"dense": dense[i].tolist(), "sparse": sparse[i]},
-            payload={**payload, **stamp},
+            payload=stored({**payload, **stamp}),
         )
         for i, payload in enumerate(doc.chunks)
     ]
@@ -1337,12 +1489,16 @@ async def index_document(
         parent_points.append(PointStruct(
             id=point_id_for(parent["chunk_id"]),
             vector={"dense": (vector / norm).tolist()},
-            payload={**parent, "ingest_version": INGEST_VERSION},
+            payload=stored({**parent, "ingest_version": INGEST_VERSION}),
         ))
 
     try:
         await _upsert_batches(client, collection_name, child_points)
         await _upsert_batches(client, parent_collection_name, parent_points)
+        if staged:
+            await _commit_staged(client, deal_id, [
+                (parent_collection_name, parent_points), (collection_name, child_points),
+            ])
     except Exception:
         if existing.count:
             # A re-index of a document that was already serving. Deleting every
@@ -1367,20 +1523,31 @@ async def index_document(
             extra={"doc_id": doc.doc_id, "deal_id": deal_id},
             exc_info=True,
         )
+        # Committed points too: the commit writes parents first, so a failure
+        # writing the children's can leave this document's parents committed.
         for name in (collection_name, parent_collection_name):
-            try:
-                await client.delete(
-                    collection_name=name,
-                    points_selector=_doc_filter(deal_id, doc.doc_id),
-                    wait=True,
-                )
-            except Exception as rollback_error:
-                logger.error(
-                    "Rollback delete failed",
-                    extra={"doc_id": doc.doc_id, "collection": name,
-                           "error": str(rollback_error)},
-                )
+            for selector in (_doc_filter(deal_id, doc.doc_id), _staged_filter(deal_id, doc.doc_id)):
+                try:
+                    await client.delete(
+                        collection_name=name,
+                        points_selector=selector,
+                        wait=True,
+                    )
+                except Exception as rollback_error:
+                    logger.error(
+                        "Rollback delete failed",
+                        extra={"doc_id": doc.doc_id, "collection": name,
+                               "error": str(rollback_error)},
+                    )
         raise
+
+    if staged:
+        # Optional (Decision 88): the document is committed and whole by now.
+        await fail_open_async(
+            "staging_cleanup", _drop_staging_leftovers, client, deal_id, doc.doc_id,
+            [(parent_collection_name, parent_points), (collection_name, child_points)],
+            default=None,
+        )
 
     async def delete_stale() -> None:
         for name, points in (
