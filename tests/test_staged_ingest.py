@@ -28,6 +28,11 @@ from tests.fixtures.reingest_docs import default_bm25_is_a_stub  # noqa: F401  (
 
 COLLECTIONS = (COLLECTION_NAME, PARENT_COLLECTION_NAME)
 
+# Unit-weight sparse vectors, as tests/test_ingest_stamp.py: no FastEmbed
+# load, and a server store (float32) compares exactly with rd.fresh's
+# in-memory one (Python floats) — real BM25 weights differ past float32.
+pytestmark = pytest.mark.usefixtures("default_bm25_is_a_stub")
+
 
 class Crash(BaseException):
     """The process dying mid-call: not an Exception, so no rollback runs."""
