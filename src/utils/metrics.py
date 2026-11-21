@@ -201,7 +201,7 @@ def _register(metric):
 QUERIES = _register(
     Counter(
         "redline_queries_total",
-        "Query requests by transport and outcome (answered, refusal, error, timeout, "
+        "Query requests by transport and outcome (answered, refusal, synthesis_failed, error, timeout, "
         "cancelled, blocked, busy, daily_cap, rate_limited, draining).",
     )
 )

@@ -53,9 +53,17 @@ def test_the_image_fetches_each_model_at_its_build_arg():
         ("RERANKER_MODEL", "RERANKER_REVISION"),
         ("NLI_MODEL", "NLI_REVISION"),
     ):
-        assert f"('${{{model_arg}}}', revision='${{{revision_arg}}}')" in text, model_arg
+        assert re.search(
+            rf"\('\$\{{{model_arg}\}}', revision='\$\{{{revision_arg}\}}'[,)]", text
+        ), model_arg
     # No unpinned fetch of a default model is left.
     assert not re.search(r"(?:SentenceTransformer|CrossEncoder)\('\$\{\w+\}'\)", text)
+    # The embedder is fetched as its pinned snapshot and loaded from it offline:
+    # loaded by id, transformers fetched a 2.27 GB safetensors conversion of the
+    # .bin-only commit from the Hub's unpinned conversion branch (refs/pr/130).
+    assert "snapshot_download('${EMBEDDING_MODEL}', revision='${EMBEDDING_REVISION}'," in text
+    assert "SentenceTransformer('${EMBEDDING_MODEL}'" not in text
+    assert "HF_HUB_OFFLINE=1 python" in text and "SentenceTransformer(local)" in text
 
 
 def test_the_image_points_main_at_each_pin():

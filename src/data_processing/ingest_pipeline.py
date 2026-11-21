@@ -1609,6 +1609,56 @@ async def _write_document(
     return result
 
 
+async def delete_document(
+    deal_id: str,
+    doc_id: str,
+    *,
+    client=None,
+    collection_name: str = COLLECTION_NAME,
+    parent_collection_name: str = PARENT_COLLECTION_NAME,
+    unless: Callable[[], bool] | None = None,
+) -> bool:
+    """
+    Deletes every point of one document: committed and staged, children and
+    parents, the same selectors a failed ingest rolls back with.
+
+    Used when an upload must not stand although it was written: its deal was
+    purged while it was being indexed (api/routes/ingest.py). Held under the
+    document's lock, so it does not interleave with a write of the same bytes.
+
+    Args:
+        unless: Checked under the lock; when it returns True nothing is
+            deleted (another upload of the same bytes owns the points now).
+
+    Returns:
+        True if the delete ran, False if `unless` stopped it.
+
+    Raises:
+        Exception: the first delete that failed, after every delete was tried.
+    """
+    if client is None:
+        from src.vector_db.qdrant_client import get_qdrant_client
+        client = get_qdrant_client()
+    failed: Exception | None = None
+    async with _document_lock(deal_id, doc_id):
+        if unless is not None and unless():
+            return False
+        for name in (parent_collection_name, collection_name):
+            for selector in (_doc_filter(deal_id, doc_id), _staged_filter(deal_id, doc_id)):
+                try:
+                    await client.delete(collection_name=name, points_selector=selector, wait=True)
+                except Exception as e:
+                    logger.error(
+                        "Document delete failed",
+                        extra={"doc_id": doc_id, "deal_id": deal_id, "collection": name,
+                               "error": str(e)},
+                    )
+                    failed = failed or e
+    if failed is not None:
+        raise failed
+    return True
+
+
 async def mark_superseded(
     deal_id: str,
     superseded_doc_id: str,

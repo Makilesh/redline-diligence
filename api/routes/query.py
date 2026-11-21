@@ -46,6 +46,7 @@ from src.data_processing.injection_screen import flagged_locations
 from src.decisions.laya_client import LayaUnavailable
 from src.decisions.query_guard import BLOCKED_MESSAGE, check_query, query_guard_enabled
 from src.workflow.orchestrator import (
+    OUTCOME_SYNTHESIS_FAILED,
     checkpointer_connection_broken,
     node_timings,
     run_outcome,
@@ -227,6 +228,21 @@ def _audit(request: QueryRequest, response: QueryResponse, transport: str) -> No
             "llm_calls": response.llm_calls,
         },
     )
+
+
+def _metric_outcome(response: QueryResponse) -> str:
+    """
+    The `outcome` label a completed run is counted under.
+
+    A run whose model was unreachable is refused to the caller (is_refusal),
+    but it is an outage, not the system declining to answer: counted as
+    "refusal" it looked on a dashboard like a run of unanswerable questions
+    while the API and the audit log said synthesis_failed. Every other run
+    keeps its label.
+    """
+    if response.outcome == OUTCOME_SYNTHESIS_FAILED:
+        return OUTCOME_SYNTHESIS_FAILED
+    return "refusal" if response.is_refusal else "answered"
 
 
 def _record(transport: str, outcome: str, started: float | None = None) -> None:
@@ -441,7 +457,7 @@ async def query_endpoint(
     response = _build_response(
         result, session_id, client.request_id, public=not client.is_admin
     )
-    _record("blocking", "refusal" if response.is_refusal else "answered", started)
+    _record("blocking", _metric_outcome(response), started)
     _audit(request, response, transport="blocking")
     return response
 
@@ -585,7 +601,7 @@ async def query_stream_endpoint(
                     response = _build_response(
                         payload, session_id, client.request_id, public=not client.is_admin
                     )
-                    outcome = "refusal" if response.is_refusal else "answered"
+                    outcome = _metric_outcome(response)
                     _audit(request, response, transport="stream")
                     yield _sse("result", response.model_dump())
                 elif event == "error":
