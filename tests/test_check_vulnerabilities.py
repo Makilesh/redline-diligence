@@ -120,8 +120,44 @@ def test_the_committed_acceptances_are_valid_and_name_pinned_versions():
     day_before_first_review = min(e["review_by"] for e in entries) - dt.timedelta(days=1)
     acceptances, errors = cv.load_acceptances(data, day_before_first_review)
     assert errors == [] and len(acceptances) == len(entries)
-    pins = dict(re.findall(r"^([A-Za-z0-9_.\-]+)==(\S+)$", (ROOT / "constraints.txt").read_text(encoding="utf-8"), re.M))
-    pins = {cv._canon(k): v for k, v in pins.items()}
+    pins = cv.read_pins(cv.audit_input())
     for a in acceptances:
         # An upgrade must retire or re-review the entry: one for a version no longer pinned is dead.
         assert pins.get(a.package) == a.version, f"{a.package} {a.version} is accepted but {pins.get(a.package)} is pinned"
+
+
+def test_the_audit_input_is_every_constraint_plus_the_images_torch():
+    pins = cv.read_pins(cv.audit_input())
+    constraints = cv.read_pins((ROOT / "constraints.txt").read_text(encoding="utf-8"))
+    torch = re.search(r"^ARG TORCH_VERSION=(\S+)", (ROOT / "Dockerfile.hf").read_text(encoding="utf-8"), re.M).group(1)
+    assert "torch" not in constraints  # installed separately, so it was never audited before
+    assert pins == {**constraints, "torch": torch}
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert f"torch=={torch}" in ci  # the version CI tests is the one audited
+
+
+def test_a_pin_the_audit_skipped_or_missed_fails():
+    audit = _audit(("aiohttp", "3.14.4", []))
+    audit["dependencies"].append({"name": "weird", "version": "1.0", "skip_reason": "not on PyPI"})
+    problems = cv.coverage_problems(audit, {"aiohttp": "3.14.4", "weird": "1.0", "torch": "2.11.0"})
+    assert any("weird==1.0 was skipped" in p for p in problems)
+    assert any("torch==2.11.0 is not in the audit output" in p for p in problems)
+    assert cv.coverage_problems(_audit(("aiohttp", "3.14.4", [])), {"aiohttp": "3.14.4"}) == []
+
+
+def test_an_empty_audit_of_real_pins_fails(tmp_path):
+    reqs = tmp_path / "audit-input.txt"
+    reqs.write_text("aiohttp==3.14.4\ntorch==2.11.0\n", encoding="utf-8")
+    empty = tmp_path / "audit.json"
+    empty.write_text(json.dumps({"dependencies": [], "fixes": []}), encoding="utf-8")
+    accepted = tmp_path / "accepted.toml"
+    accepted.write_text("", encoding="utf-8")
+    args = ["--audit-json", str(empty), "--accepted", str(accepted), "--today", "2026-11-23"]
+    assert cv.main(args) == 0  # without --requirements an empty audit cannot be told from a clean one
+    assert cv.main([*args, "--requirements", str(reqs)]) == 1
+
+
+def test_write_audit_input(tmp_path):
+    out = tmp_path / "audit-input.txt"
+    assert cv.main(["--write-audit-input", str(out)]) == 0
+    assert out.read_text(encoding="utf-8") == cv.audit_input()

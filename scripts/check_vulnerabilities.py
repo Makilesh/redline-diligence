@@ -1,19 +1,22 @@
 """
 Fail on a published advisory against a pinned dependency unless it was accepted, with a reason.
 
-    pip-audit -r constraints.txt --no-deps --disable-pip -s osv --format json -o audit.json
-    python scripts/check_vulnerabilities.py --audit-json audit.json
+    python scripts/check_vulnerabilities.py --write-audit-input audit-input.txt
+    pip-audit -r audit-input.txt --no-deps --disable-pip -s osv --format json -o audit.json
+    python scripts/check_vulnerabilities.py --audit-json audit.json --requirements audit-input.txt
 
-constraints.txt pins every package the images and CI install (scripts/update_constraints.py),
-which keeps builds reproducible and freezes the versions: advisories keep being published
-against them and nothing looked (on 2026-11-22, ~135 against 13 pinned packages, all in the
-API image; Decision 104). The Dependency audit workflow runs this weekly and on every change
-to the pins.
+The audit input is every pin the images and CI install: constraints.txt
+(scripts/update_constraints.py), plus torch, which they install separately at Dockerfile.hf's
+TORCH_VERSION. Pinning keeps builds reproducible and freezes the versions: advisories keep
+being published against them and nothing looked (on 2026-11-22, ~135 against 13 pinned
+packages, all in the API image; Decision 104). The Dependency audit workflow runs this weekly
+and on every change to the pins.
 
 security/accepted-vulnerabilities.toml lists the advisories accepted for the version they
 were accepted at, each with why and a date by which to look again. Exit status:
-  0  every advisory reported is accepted;
-  1  an advisory is not accepted, an acceptance is past its review date, or the file is invalid;
+  0  every pin was audited and every advisory reported is accepted;
+  1  an advisory is not accepted, an acceptance is past its review date, the file is invalid,
+     or a pin is missing from the audit or was skipped by it;
   2  the audit output is missing or unreadable (the audit itself did not run).
 Accepted advisories no longer reported (fixed or withdrawn) are listed so the file can be pruned.
 """
@@ -23,6 +26,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import sys
 import tomllib
 from dataclasses import dataclass, field
@@ -30,12 +34,50 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ACCEPTED = ROOT / "security" / "accepted-vulnerabilities.toml"
+PIN = re.compile(r"^([A-Za-z0-9_.\-]+)==([^\s;#]+)")
 # An acceptance is a decision to look again, not to stop looking.
 MAX_REVIEW_HORIZON_DAYS = 200
 
 
 def _canon(name: str) -> str:
     return name.lower().replace("_", "-").replace(".", "-")
+
+
+def read_pins(text: str) -> dict[str, str]:
+    """name -> version for every `name==version` line."""
+    pins = {}
+    for line in text.splitlines():
+        m = PIN.match(line.strip())
+        if m:
+            pins[_canon(m.group(1))] = m.group(2)
+    return pins
+
+
+def audit_input(root: Path = ROOT) -> str:
+    """constraints.txt's pins plus torch at Dockerfile.hf's TORCH_VERSION, one per line."""
+    pins = read_pins((root / "constraints.txt").read_text(encoding="utf-8"))
+    m = re.search(r"^ARG TORCH_VERSION=(\S+)", (root / "Dockerfile.hf").read_text(encoding="utf-8"), re.M)
+    if not m:
+        raise SystemExit("Dockerfile.hf has no ARG TORCH_VERSION: torch would not be audited")
+    pins["torch"] = m.group(1)
+    return "".join(f"{name}=={version}\n" for name, version in sorted(pins.items()))
+
+
+def coverage_problems(audit: dict, pins: dict[str, str]) -> list[str]:
+    """Pins the audit did not report on, or skipped (no audit means nothing is known)."""
+    seen = {}
+    for dep in audit.get("dependencies", []):
+        seen[_canon(dep["name"])] = dep
+    problems = []
+    for name, version in sorted(pins.items()):
+        dep = seen.get(name)
+        if dep is None:
+            problems.append(f"{name}=={version} is not in the audit output")
+        elif dep.get("skip_reason"):
+            problems.append(f"{name}=={version} was skipped by the audit: {dep['skip_reason']}")
+        elif dep.get("version") != version:
+            problems.append(f"{name}: the audit checked {dep.get('version')}, the pin is {version}")
+    return problems
 
 
 @dataclass(frozen=True)
@@ -156,10 +198,19 @@ def _print(report: Report, annotate: bool) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--audit-json", required=True, type=Path, help="pip-audit --format json output")
+    parser.add_argument("--write-audit-input", type=Path,
+                        help="write the pins to audit (constraints.txt plus torch) to this file and exit")
+    parser.add_argument("--audit-json", type=Path, help="pip-audit --format json output")
+    parser.add_argument("--requirements", type=Path,
+                        help="the audit input: every pin in it must have been audited")
     parser.add_argument("--accepted", type=Path, default=ACCEPTED)
     parser.add_argument("--today", type=dt.date.fromisoformat, default=None, help="for tests")
     args = parser.parse_args(argv)
+    if args.write_audit_input:
+        args.write_audit_input.write_text(audit_input(), encoding="utf-8")
+        return 0
+    if args.audit_json is None:
+        parser.error("--audit-json is required")
     try:
         audit = json.loads(args.audit_json.read_text(encoding="utf-8"))
         if not isinstance(audit, dict) or "dependencies" not in audit:
@@ -170,6 +221,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     accepted = tomllib.loads(args.accepted.read_text(encoding="utf-8")) if args.accepted.exists() else {}
     report = evaluate(audit, accepted, args.today or dt.date.today())
+    if args.requirements is not None:
+        report.errors += coverage_problems(audit, read_pins(args.requirements.read_text(encoding="utf-8")))
     _print(report, annotate=os.environ.get("GITHUB_ACTIONS") == "true")
     return 0 if report.ok else 1
 

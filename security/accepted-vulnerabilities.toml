@@ -7,9 +7,10 @@
 # Accepted ids no longer reported are printed as notes, to be removed.
 #
 # The 2026-11-22 audit found ~135 distinct advisories against 13 pinned packages, all in the
-# API image; the upgrades of Decision 104 left the eight below. None is reachable as the
-# app runs: each needs a model, checkpoint or proxy request chosen by an attacker, or a code
-# path the app never runs. The app loads four checkpoints (bge-m3, the MiniLM reranker, the
+# API image; the upgrades of Decision 104 left the eight below, and torch (pinned in
+# Dockerfile.hf, audited since) one more. None is reachable as the app runs: each needs a
+# model, checkpoint, scripted function or proxy request chosen by an attacker, or a code path
+# the app never runs. The app loads four checkpoints (bge-m3, the MiniLM reranker, the
 # NLI cross-encoder, Laya), each at a pinned Hub commit baked into the image at build time
 # (Decision 100); no request names a model.
 #
@@ -93,6 +94,19 @@ pinned snapshots written into the image at build time: bge-m3's modules.json nam
 sentence-transformers' own Transformer, Pooling and Normalize, and the two cross-encoders have
 none (checked 2026-11-23). Changing those files takes write access to the image or the model
 cache, that is, control of the container already. Fixed in 5.6.0 (the measured stack upgrade).
+"""
+review_by = 2027-02-28
+
+[[accepted]]
+package = "torch"
+version = "2.11.0"
+ids = ["PYSEC-2025-194", "CVE-2025-3000", "GHSA-rrmf-rvhw-rf47"]
+reason = """
+Scripting a crafted function with torch.jit.script corrupts memory (a local attack vector,
+CVSS 3.1 AV:L). The app scripts only transformers' own DeBERTa-v2 helpers, at import, for the
+NLI checker; nothing a request supplies is scripted (checked 2026-11-23). Fixed in 2.13.0;
+torch is pinned to the build every benchmark ran on (Dockerfile.hf TORCH_VERSION, CI), and
+moving it re-measures the whole model stack.
 """
 review_by = 2027-02-28
 
