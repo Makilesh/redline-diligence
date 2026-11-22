@@ -1,0 +1,71 @@
+# Published advisories against the pinned dependencies (Decision 104).
+#
+# constraints.txt pins every Python package the images and CI install, and web/package-lock.json
+# every npm package: builds are reproducible and the versions are frozen, so advisories published
+# against them go unnoticed unless something looks. This looks weekly, and whenever the pins or the
+# accepted list change. An advisory fails the job until it is fixed (upgrade the pin) or accepted
+# with a reason and a review date in security/accepted-vulnerabilities.toml.
+name: Dependency audit
+
+on:
+  schedule:
+    - cron: "23 4 * * 1"  # Mondays 04:23 UTC
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - constraints.txt
+      - requirements*.txt
+      - web/package.json
+      - web/package-lock.json
+      - security/**
+      - scripts/check_vulnerabilities.py
+      - .github/workflows/dependency-audit.yml
+  pull_request:
+    paths:
+      - constraints.txt
+      - requirements*.txt
+      - web/package.json
+      - web/package-lock.json
+      - security/**
+      - scripts/check_vulnerabilities.py
+      - .github/workflows/dependency-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python pins (constraints.txt)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"  # matches CI and the images
+      - name: Install pip-audit
+        run: pip install pip-audit==2.10.1
+      - name: Audit the pins
+        # pip-audit exits 1 when it finds anything; whether that fails the job is decided
+        # against the accepted list below. A missing report (the audit did not run) fails it.
+        run: pip-audit -r constraints.txt --no-deps --disable-pip -s osv --format json -o audit.json || true
+      - name: Check against the accepted advisories
+        run: python scripts/check_vulnerabilities.py --audit-json audit.json
+
+  web:
+    name: npm packages (web/package-lock.json)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Packages that ship to the browser or the server
+        run: npm audit --omit=dev --audit-level=moderate
+      - name: All packages, including the build and lint toolchain
+        run: npm audit --audit-level=high
