@@ -27,6 +27,7 @@ from src.llm.failures import (
     FailureKind,
     LocalContextExceeded,
     ProseAgentFailed,
+    is_context_refusal,
     ResponseDeadlineExceeded,
     StructuredOutputError,
     TokenWindowFull,
@@ -229,16 +230,45 @@ LOCAL_VERIFICATION_MODEL = LOCAL_MODEL
 # lost. Only JSON calls set one (8,192), so every local synthesis prompt (4,100–
 # 6,100 tokens on the sample deal) was cut, came back uncited and was refused,
 # and the model reloaded each time the window size changed between calls
-# (Decision 106). One size for every call; 16,384 holds the synthesis context
-# budget. Measured with qwen2.5:14b on a 12 GB GPU: 8,192 fits it fully (~41
-# tokens/s), 16,384 keeps 83% on the GPU (~24 tokens/s). OLLAMA_NUM_CTX sets it.
+# (Decision 106). One size for every call. Measured with qwen2.5:14b on a 12 GB
+# GPU: 8,192 fits it fully (~41 tokens/s), 16,384 keeps 83% on the GPU
+# (~24 tokens/s). OLLAMA_NUM_CTX sets it.
 DEFAULT_LOCAL_NUM_CTX = 16_384
 _LOCAL_NUM_CTX_BOUNDS = (2_048, 131_072)
-# count_tokens uses the embedder's tokenizer, not the local model's: on the sample
-# deal qwen2.5 counts 1.18–1.20x as many tokens. The margin keeps an estimate from
-# passing a prompt that does not fit; the per-message term covers the chat template.
-_LOCAL_PROMPT_TOKEN_MARGIN = 1.25
-_LOCAL_TEMPLATE_TOKENS_PER_MESSAGE = 16
+
+
+def _move_ollama_flags_to_top_level() -> None:
+    """
+    Sends `truncate` and `shift` where Ollama reads them.
+
+    Ollama's own guards against the window: truncate=false refuses a prompt longer
+    than it (counted with the model's tokenizer, which no estimate here can match —
+    it splits every digit), and shift=false ends a reply that reaches it ("length")
+    instead of discarding the context's start. Both are top-level request fields.
+    LiteLLM (pinned 1.89.7) puts every provider option inside `options`, where Ollama
+    ignores them — measured: a prompt was truncated with both set there. This moves
+    the two flags up; tests/test_local_context_window.py checks the request LiteLLM
+    builds, so an upgrade that changes the builder fails there.
+    """
+    from litellm.llms.ollama.completion.transformation import OllamaConfig
+
+    original = OllamaConfig.transform_request
+    if getattr(original, "_moves_ollama_flags", False):
+        return
+
+    def transform_request(self, *args, **kwargs):
+        data = original(self, *args, **kwargs)
+        options = data.get("options") or {}
+        for flag in ("truncate", "shift"):
+            if flag in options:
+                data[flag] = options.pop(flag)
+        return data
+
+    transform_request._moves_ollama_flags = True
+    OllamaConfig.transform_request = transform_request
+
+
+_move_ollama_flags_to_top_level()
 
 
 def local_num_ctx() -> int:
@@ -261,34 +291,12 @@ def local_num_ctx() -> int:
     return min(max(value, low), high)
 
 
-def _estimated_prompt_tokens(messages: list[dict]) -> int:
-    """An upper estimate of the local model's token count for these messages."""
-    from src.utils.token_counter import count_tokens
-
-    body = sum(count_tokens(m.get("content") or "") for m in messages)
-    return int(body * _LOCAL_PROMPT_TOKEN_MARGIN) + _LOCAL_TEMPLATE_TOKENS_PER_MESSAGE * len(messages)
-
-
-def _local_options(messages: list[dict], model: str) -> dict:
+def _local_options() -> dict:
     """
-    The provider options of a local-model call: its context window.
-
-    Raises:
-        LocalContextExceeded: The prompt would not fit. It is not sent: Ollama
-            would drop its start without an error.
+    The provider options of every local-model call: one context window, and Ollama's
+    refusal of what does not fit it instead of silent truncation or context shifting.
     """
-    num_ctx = local_num_ctx()
-    estimate = _estimated_prompt_tokens(messages)
-    if estimate > num_ctx:
-        logger.warning(
-            "Local prompt exceeds the context window; not sent",
-            extra={"model": model, "estimated_tokens": estimate, "num_ctx": num_ctx},
-        )
-        raise LocalContextExceeded(
-            f"prompt of about {estimate} tokens exceeds the local context window of {num_ctx} "
-            "(OLLAMA_NUM_CTX)"
-        )
-    return {"num_ctx": num_ctx}
+    return {"num_ctx": local_num_ctx(), "truncate": False, "shift": False}
 
 # Retry policy for prose calls. Matches the 3-attempt budget the structured
 # agent already used, with linear backoff so a transient upstream 503 gets a
@@ -694,6 +702,12 @@ async def _acompletion(kwargs: dict, model: str, api_key: str | None):
         if reservation is not None and failure.refundable:
             reservation.release()
         await _settle_failure(model, api_key, failure)
+        if is_local(model) and is_context_refusal(e):
+            logger.warning("Local model refused a prompt longer than its context window",
+                           extra={"model": model, "num_ctx": kwargs.get("num_ctx"), "error": str(e)[-300:]})
+            raise LocalContextExceeded(
+                f"{model} refused a prompt longer than its context window ({kwargs.get('num_ctx')} "
+                f"tokens, OLLAMA_NUM_CTX): {str(e)[-200:]}") from e
         raise
     if reservation is not None:
         reservation.adjust(_prompt_tokens(getattr(response, "usage", None)))
@@ -813,7 +827,7 @@ async def _structured_request(
         ),
     }
     if is_local(model):
-        kwargs.update(_local_options(messages, model))
+        kwargs.update(_local_options())
     if api_key:
         # Explicit per-call credential. With key rotation the key is
         # chosen per request, so relying on the ambient GEMINI_API_KEY
@@ -1287,8 +1301,7 @@ async def call_prose_agent(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
-    # Checked once, before any attempt: a prompt that does not fit fails every attempt.
-    local_options = _local_options(messages, model) if is_local(model) else {}
+    local_options = _local_options() if is_local(model) else {}
 
     for attempt in range(1, MAX_RETRIES + 1):
         attempts = attempt
@@ -1822,7 +1835,7 @@ async def stream_prose_agent(
         "timeout": PROSE_TIMEOUT_SECONDS,
     }
     if is_local(model):
-        kwargs.update(_local_options(kwargs["messages"], model))
+        kwargs.update(_local_options())
     if api_key:
         kwargs["api_key"] = api_key
     metadata = _call_metadata(agent)
