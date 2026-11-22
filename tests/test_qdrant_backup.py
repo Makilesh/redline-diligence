@@ -29,12 +29,16 @@ class FakeQdrant:
     """Collections of points; a snapshot is the points serialised."""
 
     def __init__(self, collections: dict[str, list[dict]] | None = None, bad_checksum: bool = False,
-                 on_snapshot=None, fail_upload_for: str | None = None):
+                 on_snapshot=None, fail_upload_for: str | None = None, upload_failure="500",
+                 count_fails_after_upload: bool = False, delete_status: int = 200):
         self.points = {k: list(v) for k, v in (collections or {}).items()}
         self.snapshots: dict[tuple[str, str], bytes] = {}
         self.bad_checksum = bad_checksum
         self.on_snapshot = on_snapshot  # called after a snapshot is taken: a write landing mid-backup
         self.fail_upload_for = fail_upload_for
+        self.upload_failure = upload_failure  # "500", "400" or "timeout"
+        self.count_fails_after_upload = count_fails_after_upload
+        self.delete_status = delete_status
         self.uploads: list[str] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -44,6 +48,8 @@ class FakeQdrant:
         name = parts[1]
         if parts[2:] == ["points", "count"]:
             assert json.loads(request.content) == {"exact": True}
+            if self.count_fails_after_upload and self.uploads:
+                return httpx.Response(503, json={"status": {"error": "shards are being recovered"}})
             if name not in self.points:
                 return httpx.Response(404, json={"status": {"error": "Not found"}})
             return httpx.Response(200, json={"result": {"count": len(self.points[name])}})
@@ -60,11 +66,17 @@ class FakeQdrant:
             if request.method == "GET":
                 return httpx.Response(200, content=self.snapshots[key])
             if request.method == "DELETE":
+                if self.delete_status >= 300:
+                    return httpx.Response(self.delete_status, json={"status": {"error": "busy"}})
                 del self.snapshots[key]
                 return httpx.Response(200, json={"result": True})
         if parts[2:] == ["snapshots", "upload"]:
             assert request.url.params["priority"] == "snapshot"
             if name == self.fail_upload_for:
+                if self.upload_failure == "timeout":
+                    raise httpx.ReadTimeout("timed out waiting for the recovery", request=request)
+                if self.upload_failure == "400":
+                    return httpx.Response(400, json={"status": {"error": "Wrong input: checksum mismatch"}})
                 return httpx.Response(500, json={"status": {"error": "No space left on device"}})
             message = BytesParser(policy=email_policy).parsebytes(
                 b"Content-Type: " + request.headers["content-type"].encode() + b"\r\n\r\n" + request.content)
@@ -281,6 +293,64 @@ def test_a_restore_that_fails_halfway_says_what_it_replaced(source, tmp_path):
     message = str(failed.value)
     assert CHILD in message and "already replaced" in message and "mixes backup and live data" in message
     assert target.uploads == [CHILD]
+
+
+def test_a_write_to_one_collection_during_the_others_snapshot_fails_the_backup(tmp_path):
+    # A child chunk and its parent come from one upload: the two snapshots must show one state.
+    def child_grows_while_parent_is_snapshotted(fake, name):
+        if name == PARENT:
+            _append_point(fake, CHILD)
+
+    fake = FakeQdrant({CHILD: _points("c", 30), PARENT: _points("p", 5)},
+                      on_snapshot=child_grows_while_parent_is_snapshotted)
+    with pytest.raises(qb.BackupError, match=f"{CHILD} 30 -> 31 points"):
+        _backup(fake, tmp_path / "bk", fingerprint=False)
+
+
+def test_a_refused_upload_says_the_collection_was_not_replaced(source, tmp_path):
+    out = tmp_path / "bk"
+    _backup(source, out)
+    target = FakeQdrant(fail_upload_for=CHILD, upload_failure="400")
+    with pytest.raises(qb.BackupError) as failed:
+        _restore(target, out)
+    message = str(failed.value)
+    assert f"{CHILD} was not replaced" in message and "no other collection was replaced" in message
+    assert target.uploads == []
+
+
+@pytest.mark.parametrize("failure", ["timeout", "500"])
+def test_an_upload_that_may_still_be_running_is_not_reported_as_not_replaced(source, tmp_path, failure):
+    # Qdrant carries on a recovery it has accepted after the request ends.
+    out = tmp_path / "bk"
+    _backup(source, out)
+    target = FakeQdrant(fail_upload_for=PARENT, upload_failure=failure)
+    with pytest.raises(qb.BackupError) as failed:
+        _restore(target, out)
+    message = str(failed.value)
+    assert "may still be restoring" in message and "not replaced" not in message
+    assert f"{CHILD} already replaced" in message
+
+
+def test_a_replaced_collection_that_cannot_be_checked_is_named(source, tmp_path):
+    out = tmp_path / "bk"
+    _backup(source, out)
+    with pytest.raises(qb.BackupError, match=f"{CHILD} was replaced but could not be checked"):
+        _restore(FakeQdrant(count_fails_after_upload=True), out)
+
+
+def test_restored_audit_copies_are_backed_up_too(source, audit_dir, tmp_path):
+    (audit_dir / "audit_2026-11-23.jsonl.restored").write_text('{"event": "query", "from": "backup"}\n',
+                                                               encoding="utf-8")
+    manifest = _backup(source, tmp_path / "bk", audit_dir)
+    assert "audit_2026-11-23.jsonl.restored" in manifest["audit_files"]
+    assert qb.verify(tmp_path / "bk") == []
+
+
+def test_a_server_snapshot_that_cannot_be_deleted_is_reported(capsys, tmp_path):
+    fake = FakeQdrant({CHILD: _points("c", 3), PARENT: _points("p", 1)}, delete_status=503)
+    manifest = _backup(fake, tmp_path / "bk")
+    assert set(manifest["collections"]) == {CHILD, PARENT}
+    assert capsys.readouterr().err.count("could not delete server snapshot") == 2
 
 
 def test_a_fingerprint_does_not_depend_on_page_size(source):

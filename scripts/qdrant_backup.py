@@ -64,11 +64,20 @@ from src.vector_db.constants import COLLECTION_NAME, PARENT_COLLECTION_NAME  # n
 FORMAT = 1
 COLLECTIONS = (COLLECTION_NAME, PARENT_COLLECTION_NAME)
 CHUNK = 1 << 20
-AUDIT_NAME = re.compile(r"^audit_[A-Za-z0-9_.\-]+\.jsonl$")
+# Audit files, and the copies a restore wrote beside a live file it would not overwrite.
+AUDIT_NAME = re.compile(r"^audit_[A-Za-z0-9_.\-]+\.jsonl(\.restored)*$")
 
 
 class BackupError(Exception):
     pass
+
+
+class ServerRefused(BackupError):
+    """Qdrant answered with an error status."""
+
+    def __init__(self, message: str, status: int):
+        super().__init__(message)
+        self.status = status
 
 
 def _sha256(path: Path) -> str:
@@ -86,7 +95,7 @@ def _client(url: str, api_key: str | None, timeout: float) -> httpx.Client:
 
 def _result(response: httpx.Response, what: str):
     if response.status_code >= 400:
-        raise BackupError(f"{what}: HTTP {response.status_code} {response.text[:300]}")
+        raise ServerRefused(f"{what}: HTTP {response.status_code} {response.text[:300]}", response.status_code)
     return response.json().get("result")
 
 
@@ -169,10 +178,20 @@ def _snapshot_collection(client: httpx.Client, name: str, out: Path, keep_server
             # Also when the download failed: the server's snapshot directory is not on a
             # volume, and a scheduled backup that keeps failing would fill the disk.
             try:
-                client.delete(f"/collections/{quote(name)}/snapshots/{quote(snap_name)}", params={"wait": "true"})
+                r = client.delete(f"/collections/{quote(name)}/snapshots/{quote(snap_name)}", params={"wait": "true"})
+                if r.status_code >= 300:
+                    print(f"warning: could not delete server snapshot {snap_name}: HTTP {r.status_code}",
+                          file=sys.stderr)
             except httpx.HTTPError as e:
                 print(f"warning: could not delete server snapshot {snap_name}: {e}", file=sys.stderr)
     return {"snapshot": target.relative_to(out).as_posix(), "bytes": size, "sha256": digest}
+
+
+def _state(client: httpx.Client, name: str, with_fingerprint: bool) -> dict:
+    count = _count(client, name)
+    if count is None:
+        raise BackupError(f"collection {name} does not exist on the server: nothing to back up")
+    return {"count": count, "fingerprint": fingerprint(client, name) if with_fingerprint else None}
 
 
 def backup(client: httpx.Client, out: Path, *, audit_dir: Path | None, keep_server: bool,
@@ -190,26 +209,27 @@ def backup(client: httpx.Client, out: Path, *, audit_dir: Path | None, keep_serv
         "collections": {},
         "audit_files": {},
     }
+    # Both collections are read before either snapshot and after both: a child chunk and its
+    # parent are written by one upload, so the two snapshots must come from one state.
+    before = {name: _state(client, name, with_fingerprint) for name in COLLECTIONS}
+    entries = {name: _snapshot_collection(client, name, out, keep_server) for name in COLLECTIONS}
+    after = {name: _state(client, name, with_fingerprint) for name in COLLECTIONS}
+    changed = [name for name in COLLECTIONS if before[name] != after[name]]
+    if changed and not allow_changes:
+        moved = ", ".join(f"{n} {before[n]['count']} -> {after[n]['count']} points" for n in changed)
+        raise BackupError(
+            f"the index changed while it was backed up ({moved}): stop the API (or every upload) "
+            "and run the backup again, or pass --allow-changes to keep a backup no restore can be "
+            "checked against")
     for name in COLLECTIONS:
-        count_before = _count(client, name)
-        if count_before is None:
-            raise BackupError(f"collection {name} does not exist on the server: nothing to back up")
-        print_before = fingerprint(client, name) if with_fingerprint else None
-        entry = _snapshot_collection(client, name, out, keep_server)
-        count_after = _count(client, name)
-        print_after = fingerprint(client, name) if with_fingerprint else None
-        changed = count_before != count_after or print_before != print_after
-        if changed and not allow_changes:
-            raise BackupError(
-                f"{name} changed while it was backed up ({count_before} -> {count_after} points): "
-                "stop the API (or every upload) and run the backup again, or pass --allow-changes "
-                "to keep a backup no restore can be checked against")
+        entry = entries[name]
         entry.update({
-            "points_count": None if changed else count_after,
-            "changed_during_backup": changed,
+            # One collection changing makes both unverifiable: they no longer show one state.
+            "points_count": None if changed else after[name]["count"],
+            "changed_during_backup": bool(changed),
         })
         if with_fingerprint and not changed:
-            entry["fingerprint"] = print_after
+            entry["fingerprint"] = after[name]["fingerprint"]
         manifest["collections"][name] = entry
     if audit_sources:
         (out / "audit").mkdir(exist_ok=True)
@@ -272,6 +292,14 @@ def _plan_audit(backup_dir: Path, manifest: dict, audit_dir: Path) -> list[tuple
     return plan
 
 
+def _unknown_state(name: str, error: Exception, before: str) -> str:
+    # A recovery Qdrant has accepted carries on server-side after the request ends, with the
+    # collection's shards offline: neither "replaced" nor "not replaced" can be said here.
+    return (f"restoring {name} did not finish as far as this script can tell ({error}). Qdrant may still "
+            f"be restoring it; {before}. Wait until {name} answers and its point count stops changing, "
+            "then run the restore again with --replace-existing (with the API still stopped).")
+
+
 def restore(client: httpx.Client, backup_dir: Path, *, audit_dir: Path | None, replace: bool,
             timeout: float) -> dict:
     problems = verify(backup_dir)
@@ -291,6 +319,8 @@ def restore(client: httpx.Client, backup_dir: Path, *, audit_dir: Path | None, r
     for name in COLLECTIONS:
         entry = manifest["collections"][name]
         path = backup_dir / entry["snapshot"]
+        before = (f"{', '.join(replaced)} already replaced, so the index now mixes backup and live data"
+                  if replaced else "no other collection was replaced")
         try:
             with open(path, "rb") as f:
                 # checksum: Qdrant refuses a file whose SHA-256 differs before it replaces anything.
@@ -299,22 +329,29 @@ def restore(client: httpx.Client, backup_dir: Path, *, audit_dir: Path | None, r
                                 files={"snapshot": (path.name, f, "application/octet-stream")},
                                 timeout=timeout)
             _result(r, f"upload snapshot of {name}")
-        except (BackupError, httpx.HTTPError) as e:
-            state = (f"{', '.join(replaced)} already replaced: the index now mixes backup and live data. "
-                     if replaced else "nothing was replaced. ")
-            raise BackupError(f"restoring {name} failed ({e}); {state}"
-                              "Fix the cause and run the restore again with --replace-existing.") from e
+        except ServerRefused as e:
+            if e.status < 500:  # refused up front (a bad checksum, a bad request): not replaced
+                raise BackupError(f"Qdrant refused the snapshot of {name} ({e}): {name} was not "
+                                  f"replaced; {before}. Fix the cause and run the restore again "
+                                  "with --replace-existing.") from e
+            raise BackupError(_unknown_state(name, e, before)) from e
+        except httpx.HTTPError as e:
+            raise BackupError(_unknown_state(name, e, before)) from e
         replaced.append(name)
-        count = _count(client, name)
-        expected = entry.get("points_count")
-        result = {"points_count": count, "expected": expected,
-                  "ok": expected is not None and count == expected}
-        if expected is None:
-            result["unverified"] = "the collection changed while it was backed up"
-        if "fingerprint" in entry:
-            got = fingerprint(client, name)
-            result["fingerprint_ok"] = got == entry["fingerprint"]
-            result["ok"] = result["ok"] and result["fingerprint_ok"]
+        try:
+            count = _count(client, name)
+            expected = entry.get("points_count")
+            result = {"points_count": count, "expected": expected,
+                      "ok": expected is not None and count == expected}
+            if expected is None:
+                result["unverified"] = "the collection changed while it was backed up"
+            if "fingerprint" in entry:
+                got = fingerprint(client, name)
+                result["fingerprint_ok"] = got == entry["fingerprint"]
+                result["ok"] = result["ok"] and result["fingerprint_ok"]
+        except (BackupError, httpx.HTTPError) as e:
+            raise BackupError(f"{name} was replaced but could not be checked ({e}); replaced so far: "
+                              f"{', '.join(replaced)}. Check the collections before starting the API.") from e
         report["collections"][name] = result
         print(f"restored {name}: {count} points ({'checked' if result['ok'] else 'NOT matching the backup'})",
               file=sys.stderr)
