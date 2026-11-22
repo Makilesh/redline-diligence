@@ -168,6 +168,17 @@ class ResponseDeadlineExceeded(TimeoutError):
         self.seconds = seconds
 
 
+class LocalContextExceeded(RuntimeError):
+    """
+    A prompt larger than the local model's context window (OLLAMA_NUM_CTX), not sent.
+
+    Ollama does not refuse such a prompt: it keeps its first 4 tokens and the last
+    half-window, so the instructions at its start are dropped and the reply ignores
+    them (Decision 106). The same request fails the same way on every attempt, so it
+    is REQUEST_INVALID: not retried, and the caller's ladder ends as on any 4xx.
+    """
+
+
 class ProseAgentFailed(RuntimeError):
     """
     A prose call exhausted its same-model retries without a usable completion.
@@ -320,6 +331,8 @@ def classify_failure(exc: BaseException) -> Failure:
     """
     if isinstance(exc, StructuredOutputError):
         return Failure(FailureKind.BAD_OUTPUT)
+    if isinstance(exc, LocalContextExceeded):
+        return Failure(FailureKind.REQUEST_INVALID)
     if isinstance(exc, ProseAgentFailed):
         return Failure(FailureKind.MODEL_FAILED)
     if isinstance(exc, TokenWindowFull):
