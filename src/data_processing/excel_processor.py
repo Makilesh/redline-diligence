@@ -41,6 +41,23 @@ logger = setup_logger(__name__)
 # Above this size a workbook is opened in openpyxl's streaming mode, which
 # holds one row at a time but cannot report merged cells.
 _FULL_LOAD_MAX_BYTES = 25 * 1024 * 1024
+
+
+def _skip_embedded_images() -> None:
+    """
+    Stops openpyxl opening a workbook's embedded pictures with Pillow.
+
+    A full (non-streaming) load hands every picture in an uploaded workbook to
+    PIL.Image.open to read its size, the one path by which an upload reached
+    Pillow's image parsers, the subject of most published Pillow advisories
+    (Decision 104). Nothing here reads pictures, only cells, so they are
+    dropped the way openpyxl drops them when Pillow is not installed. Charts
+    are still read, and cell values are unchanged
+    (tests/test_excel_untrusted_images.py).
+    """
+    import openpyxl.reader.drawings as drawings
+
+    drawings.PILImage = False
 # A header is looked for in the first rows of a block only.
 _HEADER_SEARCH_ROWS = 15
 UNCALCULATED = "[formula not calculated]"
@@ -191,6 +208,7 @@ class ExcelProcessor:
         self.warnings = []
         streaming = path.stat().st_size > _FULL_LOAD_MAX_BYTES
 
+        _skip_embedded_images()
         values_wb = load_workbook(excel_path, data_only=True, read_only=streaming)
         # Second pass with formulas visible: the only way to tell an empty cell
         # from a formula whose result was never cached.
