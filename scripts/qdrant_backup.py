@@ -1,30 +1,40 @@
 """
 Back up and restore the index (both Qdrant collections) and the audit log, and check a backup.
 
-    python scripts/qdrant_backup.py backup  --out BACKUP_DIR [--audit-dir DIR] [--fingerprint]
+    python scripts/qdrant_backup.py backup  --out BACKUP_DIR [--audit-dir DIR] [--fingerprint] [--allow-changes]
     python scripts/qdrant_backup.py verify  BACKUP_DIR
     python scripts/qdrant_backup.py restore BACKUP_DIR [--audit-dir DIR] [--replace-existing]
 
 The server is QDRANT_URL (default http://localhost:6333) with QDRANT_API_KEY, as for the API;
---url and --api-key override them. In the production compose file Qdrant is reachable only
-inside the compose network, so run it in the api container and copy the result out:
+--url and --api-key override them. In production Qdrant is reachable only inside the compose
+network, so the script runs in a one-off container of the API image (DEPLOYMENT.md, "Backups"):
 
-    docker compose -f docker-compose.prod.yml exec api python scripts/qdrant_backup.py \
-        backup --out /tmp/backup --audit-dir /home/user/audit --fingerprint
-    docker compose -f docker-compose.prod.yml cp api:/tmp/backup ./backups/2026-11-23
-    docker compose -f docker-compose.prod.yml exec api rm -rf /tmp/backup
+    C="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+    mkdir -p backups && sudo chown 1000:1000 backups        # the image runs as uid 1000
+    $C stop api                                             # nothing writes while it runs
+    $C run --rm --no-deps -v "$PWD/backups:/backups" api python scripts/qdrant_backup.py \
+        backup --out /backups/$(date +%F) --audit-dir /home/user/audit --fingerprint
+    $C up -d api
 
 What is persistent is the index and the audit log (AUDIT_LOG_DIR). Postgres holds LangGraph
-checkpoints only, and every run clears its thread first; an uploaded file is deleted once it
-is indexed. An embedded index (QDRANT_LOCAL_PATH) has no snapshot API: stop the API and copy
-its directory.
+checkpoints (each run clears its own) and the day's quota counters (api_budget): neither is
+backed up, and losing the counters at most lets the app try requests the provider then refuses
+for the rest of that day. An uploaded file is deleted once it is indexed. An embedded index
+(QDRANT_LOCAL_PATH) has no snapshot API: stop the API and copy its directory.
 
-backup takes one snapshot per collection, downloads it with its SHA-256, deletes it from the
-server (unless --keep-server-snapshots) and writes manifest.json. --fingerprint also hashes
-every point (id, payload, vectors) so a restore can be compared point for point.
-verify re-hashes every file against the manifest. restore verifies first, refuses to replace a
-collection that holds points unless --replace-existing, uploads each snapshot, and checks the
-point counts (and the fingerprints, when the backup has them).
+backup records each collection's exact point count (and, with --fingerprint, a hash of every
+point) before and after its snapshot, and fails if they differ: a backup taken while the index
+changed matches no state that can be checked after a restore. --allow-changes keeps it anyway,
+unverifiable. Each snapshot is downloaded with its SHA-256 and deleted from the server, which
+keeps snapshots off its disk (/qdrant/snapshots is not on a volume), even when the backup fails.
+
+verify re-hashes every file against manifest.json. restore verifies first and plans the audit
+files before writing anything; it refuses to replace a collection that holds points unless
+--replace-existing, uploads each snapshot with its checksum (Qdrant refuses a damaged file
+before replacing anything), and checks the point counts and fingerprints. Run it with the API
+stopped. An audit file is never overwritten: the log is append-only. A live file that already
+contains the backup's copy is kept; any other difference is written beside it as *.restored and
+reported.
 
 Where backups are kept, whether they are encrypted, and for how long are the owner's decisions
 (DEPLOYMENT.md, "Backups"); this script writes plain files to the directory it is given.
@@ -36,6 +46,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -53,6 +64,7 @@ from src.vector_db.constants import COLLECTION_NAME, PARENT_COLLECTION_NAME  # n
 FORMAT = 1
 COLLECTIONS = (COLLECTION_NAME, PARENT_COLLECTION_NAME)
 CHUNK = 1 << 20
+AUDIT_NAME = re.compile(r"^audit_[A-Za-z0-9_.\-]+\.jsonl$")
 
 
 class BackupError(Exception):
@@ -123,28 +135,21 @@ def _git_commit() -> str | None:
         return None
 
 
-def backup(client: httpx.Client, out: Path, *, audit_dir: Path | None, keep_server: bool,
-           with_fingerprint: bool) -> dict:
-    if out.exists() and any(out.iterdir()):
-        raise BackupError(f"{out} is not empty; give each backup its own directory")
-    out.mkdir(parents=True, exist_ok=True)
-    server = client.get("/").json()
-    manifest: dict = {
-        "format": FORMAT,
-        "created_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-        "qdrant_version": server.get("version"),
-        "app_commit": _git_commit(),
-        "collections": {},
-        "audit_files": {},
-    }
-    for name in COLLECTIONS:
-        before = _count(client, name)
-        if before is None:
-            raise BackupError(f"collection {name} does not exist on the server: nothing to back up")
-        snap = _result(client.post(f"/collections/{quote(name)}/snapshots", params={"wait": "true"}),
-                       f"snapshot {name}")
-        snap_name = snap["name"]
-        target = out / "collections" / name / snap_name
+def _audit_files(audit_dir: Path) -> list[Path]:
+    if not audit_dir.is_dir():
+        raise BackupError(f"--audit-dir {audit_dir} is not a directory")
+    files = sorted(p for p in audit_dir.iterdir() if p.is_file() and AUDIT_NAME.match(p.name))
+    if not files:
+        raise BackupError(f"--audit-dir {audit_dir} holds no audit_*.jsonl file; is it AUDIT_LOG_DIR?")
+    return files
+
+
+def _snapshot_collection(client: httpx.Client, name: str, out: Path, keep_server: bool) -> dict:
+    snap = _result(client.post(f"/collections/{quote(name)}/snapshots", params={"wait": "true"}),
+                   f"snapshot {name}")
+    snap_name = snap["name"]
+    target = out / "collections" / name / snap_name
+    try:
         target.parent.mkdir(parents=True, exist_ok=True)
         h = hashlib.sha256()
         size = 0
@@ -159,25 +164,56 @@ def backup(client: httpx.Client, out: Path, *, audit_dir: Path | None, keep_serv
         digest = h.hexdigest()
         if snap.get("checksum") and snap["checksum"] != digest:
             raise BackupError(f"{snap_name}: downloaded SHA-256 {digest} differs from the server's {snap['checksum']}")
-        after = _count(client, name)
-        entry = {
-            "snapshot": target.relative_to(out).as_posix(),
-            "bytes": size,
-            "sha256": digest,
-            "points_count": before,
-            "points_count_after": after,
-            "changed_during_backup": before != after,
-        }
-        if with_fingerprint:
-            entry["fingerprint"] = fingerprint(client, name)
+    finally:
         if not keep_server:
-            _result(client.delete(f"/collections/{quote(name)}/snapshots/{quote(snap_name)}",
-                                  params={"wait": "true"}), f"delete server snapshot {snap_name}")
+            # Also when the download failed: the server's snapshot directory is not on a
+            # volume, and a scheduled backup that keeps failing would fill the disk.
+            try:
+                client.delete(f"/collections/{quote(name)}/snapshots/{quote(snap_name)}", params={"wait": "true"})
+            except httpx.HTTPError as e:
+                print(f"warning: could not delete server snapshot {snap_name}: {e}", file=sys.stderr)
+    return {"snapshot": target.relative_to(out).as_posix(), "bytes": size, "sha256": digest}
+
+
+def backup(client: httpx.Client, out: Path, *, audit_dir: Path | None, keep_server: bool,
+           with_fingerprint: bool, allow_changes: bool = False) -> dict:
+    if out.exists() and any(out.iterdir()):
+        raise BackupError(f"{out} is not empty; give each backup its own directory")
+    audit_sources = _audit_files(audit_dir) if audit_dir is not None else []
+    out.mkdir(parents=True, exist_ok=True)
+    server = client.get("/").json()
+    manifest: dict = {
+        "format": FORMAT,
+        "created_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        "qdrant_version": server.get("version"),
+        "app_commit": _git_commit(),
+        "collections": {},
+        "audit_files": {},
+    }
+    for name in COLLECTIONS:
+        count_before = _count(client, name)
+        if count_before is None:
+            raise BackupError(f"collection {name} does not exist on the server: nothing to back up")
+        print_before = fingerprint(client, name) if with_fingerprint else None
+        entry = _snapshot_collection(client, name, out, keep_server)
+        count_after = _count(client, name)
+        print_after = fingerprint(client, name) if with_fingerprint else None
+        changed = count_before != count_after or print_before != print_after
+        if changed and not allow_changes:
+            raise BackupError(
+                f"{name} changed while it was backed up ({count_before} -> {count_after} points): "
+                "stop the API (or every upload) and run the backup again, or pass --allow-changes "
+                "to keep a backup no restore can be checked against")
+        entry.update({
+            "points_count": None if changed else count_after,
+            "changed_during_backup": changed,
+        })
+        if with_fingerprint and not changed:
+            entry["fingerprint"] = print_after
         manifest["collections"][name] = entry
-    if audit_dir is not None:
-        files = sorted(audit_dir.glob("audit_*.jsonl"))
+    if audit_sources:
         (out / "audit").mkdir(exist_ok=True)
-        for f in files:
+        for f in audit_sources:
             shutil.copy2(f, out / "audit" / f.name)
             manifest["audit_files"][f.name] = _sha256(out / "audit" / f.name)
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -198,16 +234,42 @@ def verify(backup_dir: Path) -> list[str]:
         if entry is None:
             problems.append(f"collection {name} is not in the backup")
             continue
-        path = backup_dir / entry["snapshot"]
+        rel = Path(entry["snapshot"])
+        if rel.is_absolute() or ".." in rel.parts:
+            problems.append(f"{entry['snapshot']}: not a path inside the backup")
+            continue
+        path = backup_dir / rel
         if not path.exists():
             problems.append(f"{entry['snapshot']} is missing")
         elif _sha256(path) != entry["sha256"]:
             problems.append(f"{entry['snapshot']}: SHA-256 differs from the manifest")
     for fname, digest in manifest.get("audit_files", {}).items():
+        if not AUDIT_NAME.match(fname):
+            problems.append(f"audit file name {fname!r} is not an audit_*.jsonl name")
+            continue
         path = backup_dir / "audit" / fname
         if not path.exists() or _sha256(path) != digest:
             problems.append(f"audit/{fname} is missing or differs from the manifest")
     return problems
+
+
+def _plan_audit(backup_dir: Path, manifest: dict, audit_dir: Path) -> list[tuple[str, Path, Path]]:
+    """(action, source, destination) per audit file; nothing is written here."""
+    plan = []
+    for fname in manifest.get("audit_files", {}):
+        src, dest = backup_dir / "audit" / fname, audit_dir / fname
+        if not dest.exists():
+            plan.append(("copy", src, dest))
+            continue
+        live, saved = dest.read_bytes(), src.read_bytes()
+        if live.startswith(saved):
+            plan.append(("keep", src, dest))  # the live log already holds every saved line
+            continue
+        beside = dest.with_name(dest.name + ".restored")
+        if beside.exists():
+            raise BackupError(f"{beside} exists from an earlier restore; move it away first")
+        plan.append(("conflict", src, beside))
+    return plan
 
 
 def restore(client: httpx.Client, backup_dir: Path, *, audit_dir: Path | None, replace: bool,
@@ -216,38 +278,58 @@ def restore(client: httpx.Client, backup_dir: Path, *, audit_dir: Path | None, r
     if problems:
         raise BackupError("the backup does not verify, nothing restored: " + "; ".join(problems))
     manifest = json.loads((backup_dir / "manifest.json").read_text(encoding="utf-8"))
+    plan = _plan_audit(backup_dir, manifest, audit_dir) if audit_dir is not None else []
     server = client.get("/").json().get("version")
-    report = {"qdrant_version": server, "backup_qdrant_version": manifest.get("qdrant_version"), "collections": {}}
+    report: dict = {"qdrant_version": server, "backup_qdrant_version": manifest.get("qdrant_version"),
+                    "collections": {}}
     for name in COLLECTIONS:
         existing = _count(client, name)
         if existing and not replace:
             raise BackupError(f"collection {name} holds {existing} points; "
-                              "pass --replace-existing to replace it")
+                              "pass --replace-existing to replace it (with the API stopped)")
+    replaced: list[str] = []
     for name in COLLECTIONS:
         entry = manifest["collections"][name]
         path = backup_dir / entry["snapshot"]
-        with open(path, "rb") as f:
-            # checksum: Qdrant refuses a file whose SHA-256 differs before it replaces anything.
-            r = client.post(f"/collections/{quote(name)}/snapshots/upload",
-                            params={"wait": "true", "priority": "snapshot", "checksum": entry["sha256"]},
-                            files={"snapshot": (path.name, f, "application/octet-stream")},
-                            timeout=timeout)
-        _result(r, f"upload snapshot of {name}")
+        try:
+            with open(path, "rb") as f:
+                # checksum: Qdrant refuses a file whose SHA-256 differs before it replaces anything.
+                r = client.post(f"/collections/{quote(name)}/snapshots/upload",
+                                params={"wait": "true", "priority": "snapshot", "checksum": entry["sha256"]},
+                                files={"snapshot": (path.name, f, "application/octet-stream")},
+                                timeout=timeout)
+            _result(r, f"upload snapshot of {name}")
+        except (BackupError, httpx.HTTPError) as e:
+            state = (f"{', '.join(replaced)} already replaced: the index now mixes backup and live data. "
+                     if replaced else "nothing was replaced. ")
+            raise BackupError(f"restoring {name} failed ({e}); {state}"
+                              "Fix the cause and run the restore again with --replace-existing.") from e
+        replaced.append(name)
         count = _count(client, name)
-        result = {"points_count": count, "expected": entry["points_count_after"], "ok": count == entry["points_count_after"]}
+        expected = entry.get("points_count")
+        result = {"points_count": count, "expected": expected,
+                  "ok": expected is not None and count == expected}
+        if expected is None:
+            result["unverified"] = "the collection changed while it was backed up"
         if "fingerprint" in entry:
             got = fingerprint(client, name)
             result["fingerprint_ok"] = got == entry["fingerprint"]
             result["ok"] = result["ok"] and result["fingerprint_ok"]
         report["collections"][name] = result
-    if audit_dir is not None and manifest.get("audit_files"):
+        print(f"restored {name}: {count} points ({'checked' if result['ok'] else 'NOT matching the backup'})",
+              file=sys.stderr)
+    if plan:
         audit_dir.mkdir(parents=True, exist_ok=True)
-        for fname in manifest["audit_files"]:
-            src, dest = backup_dir / "audit" / fname, audit_dir / fname
-            if dest.exists() and _sha256(dest) != manifest["audit_files"][fname] and not replace:
-                raise BackupError(f"{dest} exists with other content; pass --replace-existing to replace it")
-            shutil.copy2(src, dest)
-        report["audit_files"] = len(manifest["audit_files"])
+        for action, src, dest in plan:
+            if action in ("copy", "conflict"):
+                if dest.exists():
+                    raise BackupError(f"{dest} exists; move it away and run the restore again")
+                shutil.copy2(src, dest)
+        report["audit"] = {a: sorted(d.name for act, _, d in plan if act == a) for a in ("copy", "keep", "conflict")}
+        if report["audit"]["conflict"]:
+            print("warning: audit files differ from the backup's copies; each copy was written beside the "
+                  "live file as *.restored and nothing was overwritten: " + ", ".join(report["audit"]["conflict"]),
+                  file=sys.stderr)
     report["ok"] = all(c["ok"] for c in report["collections"].values())
     return report
 
@@ -263,6 +345,8 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--audit-dir", type=Path)
     b.add_argument("--keep-server-snapshots", action="store_true")
     b.add_argument("--fingerprint", action="store_true")
+    b.add_argument("--allow-changes", action="store_true",
+                   help="keep a backup taken while the index changed (no restore can be checked against it)")
     v = sub.add_parser("verify")
     v.add_argument("backup_dir", type=Path)
     r = sub.add_parser("restore")
@@ -278,12 +362,9 @@ def main(argv: list[str] | None = None) -> int:
         with _client(args.url, args.api_key, args.timeout) as client:
             if args.command == "backup":
                 manifest = backup(client, args.out, audit_dir=args.audit_dir,
-                                  keep_server=args.keep_server_snapshots, with_fingerprint=args.fingerprint)
+                                  keep_server=args.keep_server_snapshots, with_fingerprint=args.fingerprint,
+                                  allow_changes=args.allow_changes)
                 print(json.dumps(manifest, indent=2))
-                changed = [n for n, c in manifest["collections"].items() if c["changed_during_backup"]]
-                if changed:
-                    print(f"warning: {', '.join(changed)} changed while the backup ran; "
-                          "the snapshots are consistent each, but not with each other", file=sys.stderr)
                 return 0
             report = restore(client, args.backup_dir, audit_dir=args.audit_dir,
                              replace=args.replace_existing, timeout=args.timeout)
