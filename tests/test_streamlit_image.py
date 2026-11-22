@@ -112,8 +112,11 @@ def test_the_console_imports_in_the_image_layout(tmp_path):
 
 
 def test_the_console_needs_only_what_requirements_ui_lists():
+    # The console's own code and the src modules the image copies for it, lazy imports included.
+    copied_src = [ROOT / source for source, _ in _copies() if source.startswith("src/") and source.endswith(".py")]
+    assert copied_src
     stdlib = set(sys.stdlib_module_names)
-    third_party = {n.split(".")[0] for n in _imports([ROOT / "app"])} - stdlib - {"app", "src", "__future__"}
+    third_party = {n.split(".")[0] for n in _imports([ROOT / "app", *copied_src])} - stdlib - {"app", "src", "__future__"}
     owners = md.packages_distributions()
     listed = _requirement_names(ROOT / "requirements-ui.txt")
     for module in sorted(third_party):

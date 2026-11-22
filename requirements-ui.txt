@@ -16,3 +16,6 @@ streamlit>=1.67.0,<2.0.0
 pyarrow>=14.0.0,<25.0.0
 # The console's HTTP client (app/components/*).
 requests>=2.31.0,<3.0.0
+# src/utils/admin_client.py reads ADMIN_API_KEY from the project's .env when it is not set
+# in the environment (the image has no .env; a console run from a checkout does).
+python-dotenv>=1.0.0,<2.0.0
