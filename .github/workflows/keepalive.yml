@@ -7,8 +7,9 @@
 # Configure a repository VARIABLE (not a secret — the URL is public) named
 # BACKEND_URL, e.g. https://redline-dd.duckdns.org, under Settings → Secrets and
 # variables → Actions → Variables. SPACE_URL is still honoured for older setups.
-# While neither is set the job skips with a notice instead of failing — a red
-# run every 6 hours trains you to ignore the one that matters.
+# While neither is set the job is skipped (grey) rather than failing — a red
+# run every 6 hours trains you to ignore the one that matters. It used to run
+# and exit 0, which showed green four times a day while checking nothing.
 #
 # GitHub disables scheduled workflows in a repository with no activity for 60
 # days. When that happens the check stops silently; any commit resets the clock.
@@ -27,6 +28,7 @@ permissions: {}
 
 jobs:
   ping:
+    if: ${{ vars.BACKEND_URL != '' || vars.SPACE_URL != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -34,11 +36,6 @@ jobs:
         env:
           BACKEND_URL: ${{ vars.BACKEND_URL || vars.SPACE_URL }}
         run: |
-          if [ -z "$BACKEND_URL" ]; then
-            echo "::notice::BACKEND_URL repository variable is not set; skipping."
-            exit 0
-          fi
-
           # A sleeping host wakes on the first request but can take minutes to
           # load models, so the request must outlast a cold start rather than
           # time out and report failure on a backend that is in fact starting.
