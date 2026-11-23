@@ -249,6 +249,10 @@ async def lifespan(app: FastAPI):
                 pass
     _checkpoint_sweeper_task = _identity_check_task = None
     await stop_sandbox_sweeper()
+    # A PDF parse still running in its child process is stopped rather than waited
+    # for, which could outlast the shutdown grace period (Decision 110).
+    from src.data_processing import parse_isolation
+    parse_isolation.shutdown()
     await close_checkpointer()
     await close_qdrant_client()
     await BudgetTracker.close()

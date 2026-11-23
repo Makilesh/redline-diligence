@@ -72,6 +72,17 @@ CHILD_FIELDS = [
 PARENT_FIELDS = ["deal_id", "doc_id", "chunk_id", "child_chunk_ids", "ingest_version", "is_current_version",
                  "superseded_by"]
 
+# What collect() keeps of a child's structured_rows (see rows_unordered).
+ROWS_UNORDERED = "_rows_unordered"
+
+
+def rows_unordered(rows) -> bool:
+    """Whether any table row was stored without its column order (Decision 111)."""
+    from src.utils.numerical_registry import column_order_known
+
+    return any(isinstance(r, dict) and not column_order_known(r) for r in rows or [])
+
+
 ACTIONS = ("reingest", "operator", "identity_failed", "backfill_identity", "nothing")
 
 # Per document, fields every child of one upload carries with one value.
@@ -244,7 +255,6 @@ def plan_document(doc: DocumentPoints, identity: dict | None, identity_unchanged
         The document's row of the report.
     """
     from src.data_processing.ingest_pipeline import CURRENT_SINCE, INGEST_VERSION
-    from src.utils.numerical_registry import column_order_known
     from src.vector_db.hybrid_search import SPARSE_ENCODING_VERSION
 
     child_payloads = [p for _, p in doc.children]
@@ -267,7 +277,7 @@ def plan_document(doc: DocumentPoints, identity: dict | None, identity_unchanged
     # read correctly at any version.
     unordered = sum(
         1 for p in child_payloads
-        if any(isinstance(r, dict) and not column_order_known(r) for r in p.get("structured_rows") or [])
+        if p.get(ROWS_UNORDERED, rows_unordered(p.get("structured_rows")))
     )
     if unordered:
         reasons.append(f"{unordered} table chunk(s) store rows without their column order "
@@ -352,6 +362,9 @@ async def collect(
             continue
         plan.add(record.id, payload)
         state = {k: payload[k] for k in CHILD_FIELDS if k in payload}
+        # A table's rows are read for one flag, not kept for the whole corpus.
+        if "structured_rows" in state:
+            state[ROWS_UNORDERED] = rows_unordered(state.pop("structured_rows"))
         docs.setdefault(key, DocumentPoints(*key)).children.append((str(record.id), state))
     async for record in _scroll(client, parent_collection_name, flt, [*PARENT_FIELDS, STAGED_DEAL_FIELD]):
         payload = record.payload or {}
