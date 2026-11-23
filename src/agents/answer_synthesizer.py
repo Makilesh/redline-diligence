@@ -10,7 +10,7 @@ Temp: 0.1 | Tokens: SYNTHESIS_MAX_TOKENS (8192, thinking included) | JSON mode: 
 import os
 import re
 
-from src.llm.failures import CompletionTruncated
+from src.llm.failures import CompletionTruncated, LocalContextExceeded
 from src.llm.litellm_wrapper import (
     ProseOutcome,
     StreamInterrupted,
@@ -23,6 +23,7 @@ from src.llm.litellm_wrapper import (
     stream_prose_agent,
 )
 from src.llm.budget_tracker import BudgetTracker
+from src.llm.model_registry import is_local
 from src.llm.prompt_templates.answer_synthesizer import (
     ANSWER_SYNTHESIZER_SYSTEM_PROMPT,
     ANSWER_SYNTHESIZER_USER_TEMPLATE,
@@ -133,7 +134,29 @@ def _hop_bound(tracker) -> int:
 MAX_CONTEXT_CHARS = 64_000
 
 
-def _format_context_for_synthesis(chunks: list[dict]) -> str:
+def _select_context(chunks: list[dict], max_chars: int) -> list[tuple[str, dict]]:
+    """(evidence text, chunk) pairs, in rank order, within max_chars of evidence."""
+    selected: list[tuple[str, dict]] = []
+    shown_parents: set[str] = set()
+    used = 0
+    for chunk in chunks:
+        key = parent_key(chunk)
+        if key is not None and key in shown_parents:
+            continue
+        body = chunk_evidence_text(chunk)
+        if used + len(body) > max_chars:
+            body = chunk.get("text", "") or ""
+            key = None  # parent not shown, so siblings may still contribute
+            if used + len(body) > max_chars:
+                continue
+        if key is not None:
+            shown_parents.add(key)
+        used += len(body)
+        selected.append((body, chunk))
+    return selected
+
+
+def _format_context_for_synthesis(chunks: list[dict], max_chars: int = MAX_CONTEXT_CHARS) -> str:
     """
     Formats expanded context chunks for the synthesis prompt.
 
@@ -152,28 +175,58 @@ def _format_context_for_synthesis(chunks: list[dict]) -> str:
 
     Args:
         chunks: List of expanded context chunk dicts, best first.
+        max_chars: Evidence budget; lower than MAX_CONTEXT_CHARS only for a
+            local model whose window the full context did not fit (Decision 113).
 
     Returns:
         Formatted string for inclusion in the synthesis prompt.
     """
-    parts = []
-    shown_parents: set[str] = set()
-    used = 0
-    for chunk in chunks:
-        key = parent_key(chunk)
-        if key is not None and key in shown_parents:
-            continue
-        body = chunk_evidence_text(chunk)
-        if used + len(body) > MAX_CONTEXT_CHARS:
-            body = chunk.get("text", "") or ""
-            key = None  # parent not shown, so siblings may still contribute
-            if used + len(body) > MAX_CONTEXT_CHARS:
-                continue
-        if key is not None:
-            shown_parents.add(key)
-        used += len(body)
-        parts.append(wrap_document(len(parts) + 1, body, **chunk_attributes(chunk)))
-    return "\n\n".join(parts)
+    return "\n\n".join(
+        wrap_document(i, body, **chunk_attributes(chunk))
+        for i, (body, chunk) in enumerate(_select_context(chunks, max_chars), start=1)
+    )
+
+
+# A local model's window (OLLAMA_NUM_CTX) holds the prompt AND the reply: Ollama
+# is asked not to shift the context (shift=false), so a reply that reaches the
+# window stops there. A fitted prompt leaves this share of the window, or the
+# output budget if smaller, for the reply.
+_LOCAL_REPLY_SHARE = 4
+# Below this much evidence a fitted context answers too little to be worth a
+# call: the run ends as a synthesis failure with Ollama's count, as before.
+MIN_FITTED_CONTEXT_CHARS = 4_000
+# Refusals answered by fitting, per synthesis. The first fit uses Ollama's own
+# count; a second covers a prompt whose evidence was denser in tokens than its
+# average.
+MAX_CONTEXT_FITS = 2
+
+
+def fitted_context_chars(
+    prompt_chars: int, prompt_tokens: int, window: int, context_chars: int, reply_tokens: int
+) -> int:
+    """
+    The evidence budget that brings a refused prompt inside a local window (Decision 113).
+
+    Ollama's refusal states the prompt's size in the model's own tokens; no estimate
+    here can match its tokenizer (qwen2.5 splits every digit), so the excess is
+    measured on this very prompt: the tokens over the target, at this prompt's own
+    characters per token, plus a tenth. Cutting evidence — the densest text in the
+    prompt, figures and tables — removes at least that many tokens.
+
+    Args:
+        prompt_chars: Characters of the refused prompt (system and user).
+        prompt_tokens: Its tokens, as Ollama counted them.
+        window: The window it was refused for.
+        context_chars: The evidence characters it carried.
+        reply_tokens: The synthesis output budget.
+
+    Returns:
+        The evidence budget for the next attempt (may be at or below zero).
+    """
+    target = window - min(reply_tokens, window // _LOCAL_REPLY_SHARE)
+    excess_tokens = max(prompt_tokens - target, 1)
+    chars_per_token = prompt_chars / max(prompt_tokens, 1)
+    return context_chars - int(excess_tokens * chars_per_token * 1.1) - 1
 
 
 # A citation marker is any bracketed group containing a pipe, which is the
@@ -445,6 +498,7 @@ def _build_user_prompt(
     state: AgentState,
     chunks: list[dict],
     revision_feedback: list[str] | None,
+    max_context_chars: int = MAX_CONTEXT_CHARS,
 ) -> str:
     """
     Assembles the synthesis user prompt.
@@ -458,6 +512,7 @@ def _build_user_prompt(
         state: Current AgentState.
         chunks: Context chunks.
         revision_feedback: Unsupported statements from a failed validation.
+        max_context_chars: The evidence budget (see _format_context_for_synthesis).
 
     Returns:
         The formatted user prompt.
@@ -482,7 +537,7 @@ def _build_user_prompt(
         query=question,
         query_type=state["query_type"],
         search_focus=search_focus,
-        context=_format_context_for_synthesis(chunks),
+        context=_format_context_for_synthesis(chunks, max_context_chars),
         financial_verification=financial_verification,
         inconsistencies=inconsistencies,
         revision_feedback=feedback,
@@ -590,16 +645,28 @@ async def synthesize_answer(
     content_rejections = 0
     budget = synthesis_max_tokens()
     outcome = ProseOutcome(budget)
+    # The evidence budget for the local model once Ollama has refused a context
+    # too long for its window, and each fit made (Decision 113). Cloud rungs keep
+    # the full context.
+    local_context_chars: int | None = None
+    fits: list[dict] = []
 
-    for _ in range(_hop_bound(tracker)):
+    # A fit's retry is not a hop down the ladder: it is given back, so an outage
+    # still walks at most _hop_bound rungs. Fits are capped (MAX_CONTEXT_FITS).
+    hops = 0
+    while hops < _hop_bound(tracker):
+        hops += 1
         choice = await tracker.get_model_for_synthesis()
         model = choice.model
         outcome = ProseOutcome(budget)
+        prompt = user_prompt
+        if local_context_chars is not None and is_local(model):
+            prompt = _build_user_prompt(state, chunks, revision_feedback, local_context_chars)
         try:
             if sink is not None:
                 candidate = await stream_prose_agent(
                     system_prompt=ANSWER_SYNTHESIZER_SYSTEM_PROMPT,
-                    user_prompt=user_prompt,
+                    user_prompt=prompt,
                     model=model,
                     on_token=emit_token,
                     temperature=0.1,
@@ -616,7 +683,7 @@ async def synthesize_answer(
                 # four hung calls cost 120s on this path.
                 candidate = await call_prose_agent(
                     system_prompt=ANSWER_SYNTHESIZER_SYSTEM_PROMPT,
-                    user_prompt=user_prompt,
+                    user_prompt=prompt,
                     model=model,
                     temperature=0.1,
                     max_tokens=budget,
@@ -663,6 +730,33 @@ async def synthesize_answer(
             logger.warning(
                 "Synthesis stream interrupted, trying another model",
                 extra={"model": model, "emitted_chars": e.emitted_chars},
+            )
+            continue
+        except LocalContextExceeded as e:
+            # The local model's window did not hold the prompt. Answering from
+            # the best-ranked evidence that fits beats failing the question
+            # (Decision 113): the context is cut by what Ollama counted over,
+            # and the same model is asked again. Without the counts, past the
+            # fits allowed, or with too little evidence left, the run fails
+            # with Ollama's count as before.
+            last_error = e
+            current = MAX_CONTEXT_CHARS if local_context_chars is None else local_context_chars
+            carried = sum(len(body) for body, _ in _select_context(chunks, current))
+            fitted = None
+            if e.prompt_tokens and e.window and len(fits) < MAX_CONTEXT_FITS:
+                fitted = fitted_context_chars(
+                    len(ANSWER_SYNTHESIZER_SYSTEM_PROMPT) + len(prompt),
+                    e.prompt_tokens, e.window, carried, budget,
+                )
+            if fitted is None or fitted < MIN_FITTED_CONTEXT_CHARS:
+                break
+            fits.append({"window": e.window, "prompt_tokens": e.prompt_tokens,
+                         "context_chars": carried, "fitted_chars": fitted})
+            local_context_chars = fitted
+            hops -= 1
+            logger.warning(
+                "Local model's window did not hold the context; answering from less of it",
+                extra={"model": model, **fits[-1]},
             )
             continue
         except CompletionTruncated as e:
@@ -737,6 +831,7 @@ async def synthesize_answer(
                     "synthesis_failed": True,
                     "content_rejections": content_rejections,
                     "error": str(e),
+                    **({"context_fits": fits} if fits else {}),
                 }
             ],
         }
@@ -802,6 +897,9 @@ async def synthesize_answer(
                 "finish_reason": outcome.finish_reason,
                 "length_retries": outcome.length_retries,
                 "answer_truncated": truncated,
+                # The local model answered from less evidence than retrieved
+                # (Decision 113): each fit's window, counts and budget.
+                **({"context_fits": fits} if fits else {}),
             }
         ],
     }

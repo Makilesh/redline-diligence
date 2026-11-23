@@ -178,12 +178,49 @@ class LocalContextExceeded(RuntimeError):
     refuse (truncate=false) and to stop instead of shifting (shift=false); its refusal,
     counted with the model's own tokenizer, is this error (Decision 106). The same request
     fails the same way every time: REQUEST_INVALID, not retried.
+
+    Carries Ollama's two counts when its message states them: the prompt's tokens and the
+    window. Synthesis uses them to shorten its context by what did not fit (Decision 113).
     """
+
+    def __init__(self, message: str, prompt_tokens: int | None = None, window: int | None = None):
+        super().__init__(message)
+        self.prompt_tokens = prompt_tokens
+        self.window = window
 
 
 def is_context_refusal(exc: BaseException) -> bool:
     """True for Ollama's refusal of a prompt longer than the context window."""
     return "exceed_context_size_error" in str(exc) or "exceeds the available context size" in str(exc)
+
+
+# "request (5507 tokens) exceeds the available context size (4096 tokens)", or the
+# JSON fields beside it ("n_prompt_tokens":5507,"n_ctx":4096), quotes escaped or not.
+_REFUSAL_SIZES = re.compile(
+    r"request \((?P<prompt>\d+) tokens\) exceeds the available context size \((?P<window>\d+) tokens\)"
+)
+_N_PROMPT = re.compile(r'n_prompt_tokens\\*"?\s*:\s*(\d+)')
+_N_CTX = re.compile(r'n_ctx\\*"?\s*:\s*(\d+)')
+
+
+def context_refusal_sizes(exc: BaseException) -> tuple[int, int] | None:
+    """
+    (prompt tokens, window) from Ollama's refusal, counted by the model's tokenizer.
+
+    Args:
+        exc: The provider's exception.
+
+    Returns:
+        Both counts, or None when the message does not state them.
+    """
+    text = str(exc)
+    m = _REFUSAL_SIZES.search(text)
+    if m:
+        return int(m.group("prompt")), int(m.group("window"))
+    prompt, window = _N_PROMPT.search(text), _N_CTX.search(text)
+    if prompt and window:
+        return int(prompt.group(1)), int(window.group(1))
+    return None
 
 
 class ProseAgentFailed(RuntimeError):

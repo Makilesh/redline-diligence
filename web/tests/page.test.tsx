@@ -143,6 +143,28 @@ describe("Home", () => {
     expect(await screen.findByText(/Declined — the data room does not support an answer/)).toBeInTheDocument();
   });
 
+  it("shows a not-found under its own banner, with the model's explanation and no confidence", async () => {
+    engine.script =async (emit) => {
+      emit(planned);
+      emit({
+        event: "result",
+        data: response({
+          outcome: "not_found",
+          confidence_score: 0.93,
+          answer: "The provided documents do not contain the revenue share of the top ten customers.",
+          claim_checks: [],
+        }),
+      });
+    };
+    await ask();
+    expect(await screen.findByText("Not found in the passages searched")).toBeInTheDocument();
+    expect(screen.getByText(/do not contain the revenue share of the top ten customers/)).toBeInTheDocument();
+    expect(screen.getByText("Not found: the documents searched do not contain the answer.")).toBeInTheDocument();
+    expect(screen.queryByText("Verified")).not.toBeInTheDocument();
+    expect(screen.queryByText("93%")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Declined/)).not.toBeInTheDocument();
+  });
+
   it("marks a failed answer and shows which statement failed, with its source", async () => {
     engine.script =async (emit) => {
       emit(planned);

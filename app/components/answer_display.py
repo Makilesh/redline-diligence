@@ -6,7 +6,12 @@ import html
 
 import streamlit as st
 
-from app.components.verification import answer_verdict, injection_note, render_claim_checks
+from app.components.verification import (
+    NOT_FOUND_DETAIL,
+    answer_verdict,
+    injection_note,
+    render_claim_checks,
+)
 from app.markdown_safety import inert_markdown
 from app.styles import escape_currency, pill, stat_row
 
@@ -16,6 +21,7 @@ _VERDICT_PILL = {
     "failed": ("✕", "bad"),
     "no_claims": ("○", "muted"),
     "unknown": ("?", "warn"),
+    "not_found": ("⌕", "warn"),
 }
 
 
@@ -46,7 +52,7 @@ def render_answer(
         latency_ms: Total pipeline latency.
         rewrite_iterations: Number of query rewrites performed.
         claim_checks: Per-claim verification results.
-        outcome: The run's outcome (answered | answered_unverified).
+        outcome: The run's outcome (answered | answered_unverified | not_found).
         answer_truncated: The answer stopped at the model's output limit.
         injection_review: QueryResponse.injection_review — retrieved passages
             with instruction-like text, by location (Decision 82).
@@ -58,7 +64,9 @@ def render_answer(
     st.markdown(
         stat_row(
             [
-                ("Confidence", f"{confidence_score:.0%}"),
+                # A score on "the documents do not say" reads as confidence that
+                # they do not, which nothing measured (Decision 112).
+                ("Confidence", "—" if outcome == "not_found" else f"{confidence_score:.0%}"),
                 ("Query Type", (query_type or "—").replace("_", " ").title()),
                 ("Latency", f"{latency_ms / 1000:.1f}s"),
                 ("Rewrites", str(rewrite_iterations)),
@@ -151,6 +159,32 @@ def render_unavailable(request_id: str = "") -> None:
         )
     if request_id:
         st.caption(f"Request ID: `{request_id}`")
+
+
+def render_not_found(rewrite_count: int) -> None:
+    """
+    Renders the banner above a "not found" answer (Decision 112).
+
+    The answer said the documents do not contain what was asked. Like a refusal
+    it is not an answer, and unlike one the pipeline did find passages: the
+    model's explanation follows, with what it did find, under this banner.
+
+    Args:
+        rewrite_count: Query rewrites performed (search attempts minus one).
+    """
+    st.markdown(pill("⌕ NOT FOUND IN THE PASSAGES SEARCHED", "warn"), unsafe_allow_html=True)
+    attempts = rewrite_count + 1
+    with st.container(border=True):
+        st.markdown(
+            f"{NOT_FOUND_DETAIL} Searched {attempts} time{'s' if attempts != 1 else ''}."
+        )
+        st.markdown(
+            "**Try this:**\n"
+            "- Name the document or schedule you expect the answer to be in\n"
+            "- Rephrase using the terminology the documents themselves use\n"
+            "- Confirm the relevant documents have been uploaded to this deal"
+        )
+    st.write("")
 
 
 def render_refusal(quality_score: float, rewrite_count: int) -> None:

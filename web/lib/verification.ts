@@ -26,6 +26,11 @@ export type ResultView =
   | "answer"
   /** A considered refusal: the data room did not support an answer. */
   | "refusal"
+  /**
+   * The answer says the documents searched do not contain what was asked
+   * (Decision 112): shown as not-an-answer, with the model's explanation.
+   */
+  | "not_found"
   /** An outage: no model produced an answer, so there is nothing to show or verify. */
   | "unavailable";
 
@@ -38,6 +43,8 @@ export function resultView(result: QueryResponse): ResultView {
   switch (result.outcome) {
     case "refused":
       return "refusal";
+    case "not_found":
+      return "not_found";
     case "synthesis_failed":
       return "unavailable";
     default:
@@ -66,7 +73,7 @@ export function countClaims(checks: ClaimCheck[]): ClaimCounts {
 }
 
 export interface AnswerVerdict {
-  key: "verified" | "partial" | "failed" | "no_claims" | "unknown";
+  key: "verified" | "partial" | "failed" | "not_found" | "no_claims" | "unknown";
   label: string;
   /** One sentence stating exactly what was and was not established. */
   detail: string;
@@ -74,6 +81,13 @@ export interface AnswerVerdict {
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/**
+ * What a reader must know before trusting a "not found" (Decision 112): the
+ * absence was checked against the passages retrieved, not the data room.
+ */
+export const NOT_FOUND_DETAIL =
+  "The answer says the documents do not contain this. That was checked against the passages retrieved for this question, not against every document in the data room, so the information may still be there.";
 
 /** Ends a verdict sentence for an answer cut off at the model's output limit. */
 const CUT_OFF = "the answer was cut off before it finished.";
@@ -106,6 +120,17 @@ export function answerVerdict(result: QueryResponse): AnswerVerdict {
           : "The answer did not pass verification, even after a revision. Treat it as unconfirmed.") +
         (result.answer_truncated ? ` Also, ${CUT_OFF}` : ""),
       tone: "bad",
+    };
+  }
+
+  // Never "verified": its absence statements hold for the passages searched,
+  // not necessarily for the data room (Decision 112).
+  if (result.outcome === "not_found") {
+    return {
+      key: "not_found",
+      label: "Not found",
+      detail: NOT_FOUND_DETAIL + (result.answer_truncated ? ` Also, ${CUT_OFF}` : ""),
+      tone: "warn",
     };
   }
 

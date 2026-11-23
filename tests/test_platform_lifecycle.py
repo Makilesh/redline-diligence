@@ -521,3 +521,28 @@ def test_completed_queries_are_appended_to_the_audit_file(
     assert entries[0]["event"] == "query_completed"
     assert entries[0]["request_id"] == first.headers[security.REQUEST_ID_HEADER]
     assert entries[0]["outcome"] == "answered" and entries[0]["include_pii"] is False
+
+
+def test_a_not_found_answer_is_reported_and_counted_as_one(client, stub_pipeline, monkeypatch):
+    """Decision 112: through the real wiring, both routes, its own metric label."""
+    from tests.test_not_found import ROUND_16
+
+    async def declining_synthesis(state):
+        stub_pipeline.calls.append("answer_synthesizer")
+        return {"generated_answer": ROUND_16, "confidence_score": 0.9,
+                "agent_trace": [{"agent": "answer_synthesizer"}]}
+
+    monkeypatch.setattr(orchestrator, "answer_synthesizer_node", declining_synthesis)
+    compiled = orchestrator.build_graph().compile(checkpointer=MemorySaver())
+    monkeypatch.setattr(api_main, "_app_graph", compiled)
+
+    body = client.post("/api/v1/query", json=QUERY).json()
+    assert body["outcome"] == "not_found"
+    assert body["is_refusal"] is False  # the text is shown; older clients keep showing it
+
+    client.post("/api/v1/query/stream", json=QUERY)
+    monkeypatch.setenv("ADMIN_API_KEY", ADMIN_KEY)
+    text = client.get("/metrics", headers={security.ADMIN_HEADER: ADMIN_KEY}).text
+    assert 'redline_queries_total{outcome="not_found",transport="blocking"} 1' in text
+    assert 'redline_queries_total{outcome="not_found",transport="stream"} 1' in text
+    assert 'outcome="answered"' not in text

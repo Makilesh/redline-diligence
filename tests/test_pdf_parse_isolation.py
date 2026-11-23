@@ -197,3 +197,81 @@ def test_the_child_is_the_one_the_oom_killer_takes():
     # parser, not the API holding the models.
     assert iso._run(_oom_score_adj) == "1000"
     assert _oom_score_adj() != "1000"
+
+
+# ── DOCX, PPTX, XLSX (Decision 114) ──────────────────────────────────────────
+
+
+def _office_in_process(extension, path):
+    return iso._office(extension, str(path), "doc-1", "deal_doc-1")
+
+
+@pytest.mark.parametrize("writer, extension", [
+    (sx.write_stress_docx, ".docx"),
+    (sx.write_stress_pptx, ".pptx"),
+    (sx.write_stress_xlsx, ".xlsx"),
+], ids=["docx", "pptx", "xlsx"])
+def test_office_output_equals_an_in_process_parse(tmp_path, writer, extension):
+    path = writer(tmp_path)
+    isolated = iso.parse_office(extension, str(path), "doc-1", "deal_doc-1")
+    assert isolated == _office_in_process(extension, path)
+    assert isolated  # the fixture has content
+
+
+@pytest.mark.parametrize("writer, extension", [
+    (sx.write_encrypted_office_file, ".xlsx"),
+    (sx.write_docx_without_body, ".docx"),
+], ids=["encrypted-xlsx", "docx-without-body"])
+def test_an_office_parsers_error_crosses_unchanged(tmp_path, writer, extension):
+    path = writer(tmp_path)
+    with pytest.raises(Exception) as in_process:
+        _office_in_process(extension, path)
+    with pytest.raises(Exception) as isolated:
+        iso.parse_office(extension, str(path), "doc-1", "deal_doc-1")
+    assert type(isolated.value) is type(in_process.value)
+    assert str(isolated.value) == str(in_process.value)
+
+
+def _crash_office(*_args):
+    os._exit(3)
+
+
+def test_an_office_parser_that_dies_fails_its_upload_naming_the_format(tmp_path, monkeypatch):
+    monkeypatch.setattr(iso, "_parse_office", _crash_office)
+    with pytest.raises(DocumentExtractionError, match="The DOCX could not be parsed: the parser stopped"):
+        iso.parse_office(".docx", str(sx.write_stress_docx(tmp_path)), "doc-1")
+    monkeypatch.undo()
+    path = sx.write_stress_pptx(tmp_path)
+    assert iso.parse_office(".pptx", str(path), "doc-2") == _office_in_process(".pptx", path)
+
+
+@pytest.mark.parametrize("writer", [sx.write_stress_docx, sx.write_stress_pptx, sx.write_stress_xlsx],
+                         ids=["docx", "pptx", "xlsx"])
+def test_ingest_parses_office_files_in_the_child(tmp_path, monkeypatch, writer):
+    from src.data_processing.ingest_pipeline import extract_and_chunk
+
+    calls = []
+    real = iso.parse_office
+    monkeypatch.setattr(iso, "parse_office", lambda *a, **k: calls.append(a[0]) or real(*a, **k))
+    path = writer(tmp_path)
+    doc = extract_and_chunk(str(path), path.name, "deal-iso", "financial")
+    assert calls == [path.suffix] and doc.chunks
+
+
+def test_an_error_that_does_not_pickle_still_names_its_cause(tmp_path):
+    """lxml's XMLSyntaxError (a malformed DOCX part) cannot cross by pickle."""
+    import zipfile
+
+    from src.data_processing.ingest_pipeline import extract_and_chunk
+
+    good = sx.write_stress_docx(tmp_path)
+    bad = tmp_path / "malformed.docx"
+    with zipfile.ZipFile(good) as zin, zipfile.ZipFile(bad, "w") as zout:
+        for item in zin.infolist():
+            data = b"<w:document" if item.filename == "word/document.xml" else zin.read(item.filename)
+            zout.writestr(item, data)
+    with pytest.raises(RuntimeError, match="XMLSyntaxError"):
+        iso.parse_office(".docx", str(bad), "doc-1")
+    # The client's error is the one it always was.
+    with pytest.raises(DocumentExtractionError, match=r"^The \.docx file could not be parsed$"):
+        extract_and_chunk(str(bad), bad.name, "deal-iso", "legal")

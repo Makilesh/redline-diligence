@@ -426,6 +426,105 @@ def split_claims(answer: str) -> list[Claim]:
     return claims
 
 
+# What the answer says about the evidence AS A WHOLE: "the provided documents do
+# not contain", "it is not possible to determine", "insufficient information".
+# Narrower than DECLINES_TO_ANSWER on purpose: "the merger agreement does not
+# contain a financing condition" is a finding about a contract — a named
+# document — and answers the question; only the evidence in front of the model
+# (or the data room) failing to say something makes an answer a "not found".
+#
+# A bare noun counts only as "the documents", "the context" — not "the transaction
+# documents contain no financing condition" (a finding about the contracts) nor "in
+# the context of the merger" (found in review). An impossibility ("cannot be
+# determined", "unable to", "insufficient information") counts only in a sentence
+# that names the evidence searched: "the outcome of the litigation cannot be
+# determined at this time" reports what a document says.
+_SEARCHED = (
+    r"(?:(?:provided|retrieved|available|given|supplied|uploaded|above)\s+"
+    r"(?:documents?|context|materials?|excerpts?|passages?|information|sources?|data|files?)"
+    r"|data\s+room"
+    r"|(?<=\bthe\s)(?:documents|context|materials|excerpts|passages|sources)(?!\s+of\b))"
+)
+_IMPOSSIBLE = (
+    r"(?:(?:it\s+is\s+)?(?:not\s+possible|impossible)\s+to\s+(?:determine|calculate|compute|identify"
+    r"|establish|answer|quantify|confirm)"
+    r"|(?:cannot|can\s*not|could\s+not)\s+be\s+(?:determined|calculated|computed|identified"
+    r"|established|answered|quantified|confirmed)"
+    r"|unable\s+to\s+(?:determine|calculate|compute|identify|establish|answer|quantify|confirm"
+    r"|find|locate)"
+    r"|(?:insufficient|not\s+(?:enough|sufficient))\s+(?:information|data|context|evidence|details?))"
+)
+NOT_FOUND = re.compile(
+    rf"\b{_SEARCHED}\b[^.;]{{0,100}}\b(?:do(?:es)?|did)\s+not\s+{_HEDGE}{_INFO_VERB}"
+    rf"|\b{_SEARCHED}\b[^.;]{{0,60}}\b(?:contains?|includes?|provides?)\s+no\b"
+    rf"|\b{_SEARCHED}\s+(?:currently\s+)?lack(?:s|ed)?\b"
+    rf"|\bnone\s+of\s+the\s+{_SEARCHED}\b"
+    # "Based on the provided documents, the FY2025 projection is not available."
+    rf"|\b(?:based\s+on|according\s+to|in|within|from)\s+the\s+{_SEARCHED}\b[^.;]{{0,160}}"
+    rf"\b(?:is|are|was|were)\s+not\s+{_HEDGE}(?:available|disclosed|provided|stated|specified"
+    r"|included|given|present|possible)\b"
+    rf"|\bnot\s+{_HEDGE}(?:found|available|disclosed|provided|included|stated|specified|mentioned"
+    rf"|present|contained|addressed)\s+(?:in|within|anywhere\s+in)\s+the\s+{_SEARCHED}\b"
+    rf"|\bno\s+(?:specific\s+)?(?:information|data|details?|figures?|breakdowns?|disclosures?|mention)\b"
+    rf"[^.;]{{0,100}}\b(?:in|within)\s+the\s+{_SEARCHED}\b"
+    # "… cannot be calculated from the provided documents."
+    rf"|\b{_IMPOSSIBLE}\b[^.;]{{0,160}}\b(?:from|in|within|with|based\s+on|given|using)\s+the\s+"
+    rf"{_SEARCHED}\b"
+    # "Based on the given context, it is not possible to determine …"
+    rf"|\b(?:based\s+on|according\s+to|from|in|within|given)\s+the\s+{_SEARCHED}\b[^.;]{{0,160}}"
+    rf"\b{_IMPOSSIBLE}\b",
+    re.IGNORECASE,
+)
+_LEAD_PREFIX = re.compile(r"^(?:no|unfortunately|regrettably)\s*[,.:;—-]\s*", re.IGNORECASE)
+
+
+def not_found_lead(answer: str | None) -> str | None:
+    """
+    The sentence with which an answer says the documents do not contain what was asked.
+
+    An answer is a "not found" (Decision 112) when its opening section — the
+    direct answer: the text after any leading headings, up to the next heading
+    or rule — only declines: every sentence in it says the evidence does not
+    contain the answer (the first in the words of NOT_FOUND, about the evidence
+    as a whole), and it states no figure and cites nothing. A cited or figured
+    opening is answering something — "not provided … However, operating cash
+    flow was $52.1 million [source]" is a partial answer. The sections after the
+    opening are not read: they routinely cite what the documents DO contain, to
+    show what was searched.
+
+    Args:
+        answer: Generated answer text.
+
+    Returns:
+        The opening's first sentence, cleaned, or None for any other answer.
+    """
+    if not answer:
+        return None
+    section: list[str] = []
+    for line in answer.strip().splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _HRULE.match(stripped) or _is_heading(stripped):
+            if section:
+                break
+            continue
+        section.append(stripped)
+    lead = " ".join(section)
+    if not lead or CITATION_MARKER.search(lead) or extract_numbers(lead):
+        return None
+    sentences = [_clean(s) for s in _split_sentences(lead)]
+    sentences = [s for s in sentences if s]
+    if not sentences:
+        return None
+    first = _LEAD_PREFIX.sub("", sentences[0])
+    if not NOT_FOUND.search(first):
+        return None
+    if not all(NOT_FOUND.search(s) or DECLINES_TO_ANSWER.search(s) for s in sentences[1:]):
+        return None
+    return sentences[0]
+
+
 def cited_documents(markers: list[str], chunks: list[dict]) -> list[str]:
     """
     The retrieved documents a claim's citation markers name.

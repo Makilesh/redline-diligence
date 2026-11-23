@@ -16,9 +16,12 @@ it, and nothing is retried. The child is not reused (max_tasks_per_child=1): wha
 document left in the parser's memory goes with the process. Nothing falls back to parsing
 in the API's process, where a file that kills the parser would kill the API.
 
-Only the PDF parse moves. The rest of extract_and_chunk (classification with the Laya
+Only the parse moves. The rest of extract_and_chunk (classification with the Laya
 model, chunking, PII and risk scans) needs models the child would have to load again, and
-measured, the parse was the stall.
+measured, the parse was the stall. The DOCX, PPTX and XLSX processors moved here too
+(Decision 114): measured the same way, a contract's parse ran a question's model work 13
+times slower and a workbook's put a 2.5 s pause in it. PDF_PARSE_TIMEOUT_SECONDS bounds
+all four.
 """
 from __future__ import annotations
 
@@ -81,14 +84,12 @@ def _volunteer_for_the_oom_killer() -> None:
         pass
 
 
-def _parse(pdf_path: str, doc_id: str, legal_mode: bool):
+def _counting_failed_steps(fn, *args):
     """
-    Runs in the child: PDFProcessor.process, its warnings, and the optional steps that
-    failed — fail_open counts those in this process's metrics, which nobody scrapes, so
-    their names go back to be counted in the API's.
+    Runs fn(*args) in the child and returns (its result, the optional steps that
+    failed): fail_open counts those in this process's metrics, which nobody scrapes,
+    so their names go back to be counted in the API's.
     """
-    from src.data_processing.pdf_processor import PDFProcessor
-
     failed: list[str] = []
     count = metrics.record_optional_step_failure
 
@@ -98,11 +99,69 @@ def _parse(pdf_path: str, doc_id: str, legal_mode: bool):
 
     metrics.record_optional_step_failure = record
     try:
-        processor = PDFProcessor(legal_mode=legal_mode)
-        sections = processor.process(pdf_path, doc_id)
+        return fn(*args), failed
+    except Exception as e:
+        raise _crossable(e) from None
     finally:
         metrics.record_optional_step_failure = count
-    return sections, list(processor.warnings), failed
+
+
+def _crossable(e: Exception) -> Exception:
+    """
+    The exception itself when it survives pickling, else a RuntimeError naming it.
+
+    An exception goes back to the API pickled. lxml's XMLSyntaxError (python-docx on a
+    malformed part) does not pickle: the API then got "cannot pickle
+    'lxml.etree._ListErrorLog' object" in place of the cause. The client's message is
+    the same either way ("The .docx file could not be parsed"); the log keeps the cause.
+    """
+    import pickle
+
+    try:
+        # A self-check on an object this process just created, not data from
+        # outside; concurrent.futures pickles the result the same way.
+        pickle.loads(pickle.dumps(e))
+        return e
+    except Exception:
+        return RuntimeError(f"{type(e).__module__}.{type(e).__name__}: {e}")
+
+
+def _pdf(pdf_path: str, doc_id: str, legal_mode: bool):
+    from src.data_processing.pdf_processor import PDFProcessor
+
+    processor = PDFProcessor(legal_mode=legal_mode)
+    return processor.process(pdf_path, doc_id), list(processor.warnings)
+
+
+def _parse(pdf_path: str, doc_id: str, legal_mode: bool):
+    """Runs in the child: PDFProcessor.process, its warnings, and the failed optional steps."""
+    (sections, warnings), failed = _counting_failed_steps(_pdf, pdf_path, doc_id, legal_mode)
+    return sections, warnings, failed
+
+
+def _office(extension: str, path: str, doc_id: str, table_id_prefix: str):
+    """The format's processor, as ingest called it in the API's process before Decision 114."""
+    if extension == ".docx":
+        from src.data_processing.docx_processor import process_docx_with_versions
+
+        return process_docx_with_versions(path, doc_id)
+    if extension == ".pptx":
+        from src.data_processing.pptx_processor import PPTXProcessor
+
+        processor = PPTXProcessor()
+        return processor.to_text_chunks(processor.process(path, doc_id))
+    if extension == ".xlsx":
+        from src.data_processing.excel_processor import ExcelProcessor
+
+        processor = ExcelProcessor()
+        sheets = processor.process(path, doc_id, table_id_prefix=table_id_prefix)
+        return processor.to_chunks(sheets), list(processor.failed_sheets), list(processor.warnings)
+    raise ValueError(f"not an isolated office format: {extension}")
+
+
+def _parse_office(extension: str, path: str, doc_id: str, table_id_prefix: str):
+    """Runs in the child: the office processor's output and the failed optional steps."""
+    return _counting_failed_steps(_office, extension, path, doc_id, table_id_prefix)
 
 
 def _child_pid() -> int:
@@ -170,18 +229,61 @@ def parse_pdf(pdf_path: str, doc_id: str, legal_mode: bool = False):
         DocumentExtractionError: The parser process died on this file, or did not
             finish within PDF_PARSE_TIMEOUT_SECONDS.
     """
-    seconds = timeout_seconds()
-    try:
-        sections, warnings, failed = _run(_parse, pdf_path, doc_id, legal_mode, timeout=seconds)
-    except BrokenProcessPool as e:
-        logger.warning("PDF parser process stopped", extra={"doc_id": doc_id})
-        raise DocumentExtractionError(PARSER_STOPPED) from e
-    except FutureTimeout as e:
-        logger.warning("PDF parse timed out", extra={"doc_id": doc_id, "seconds": seconds})
-        raise DocumentExtractionError(PARSER_TIMED_OUT.format(seconds=seconds)) from e
+    sections, warnings, failed = _isolated("PDF", doc_id, _parse, pdf_path, doc_id, legal_mode)
     for step in failed:
         metrics.record_optional_step_failure(step)
     return sections, warnings
+
+
+def parse_office(extension: str, path: str, doc_id: str, table_id_prefix: str = ""):
+    """
+    A DOCX, PPTX or XLSX processor, run in a child process (Decision 114).
+
+    Measured on the development machine, the parsers were most of the extraction's
+    time — a 5.9 MB workbook 21.3 s, a long contract 4.4 s — and while a contract
+    parsed on ingest's thread a question's model work ran 13 times slower (0.79 s
+    against 0.06 s). Isolated as the PDF parse is: the API keeps its GIL, and a file
+    that crashes or hangs the parser fails its own upload.
+
+    Args:
+        extension: ".docx", ".pptx" or ".xlsx".
+        path: Absolute path to the file.
+        doc_id: Document identifier.
+        table_id_prefix: The workbook's table id prefix (XLSX only).
+
+    Returns:
+        What ingest used to get from the processor in its own process:
+        .docx (clean chunks, redline chunks); .pptx the slide text chunks;
+        .xlsx (chunks, failed sheets, warnings).
+
+    Raises:
+        The processor's own exceptions, unchanged; DocumentExtractionError when the
+        parser process died or did not finish within PDF_PARSE_TIMEOUT_SECONDS.
+    """
+    result, failed = _isolated(
+        extension.lstrip(".").upper(), doc_id, _parse_office, extension, path, doc_id, table_id_prefix
+    )
+    for step in failed:
+        metrics.record_optional_step_failure(step)
+    return result
+
+
+def _isolated(kind: str, doc_id: str, fn, *args):
+    """fn(*args) in the child; a parser that died or timed out fails this upload."""
+    seconds = timeout_seconds()
+    try:
+        return _run(fn, *args, timeout=seconds)
+    except BrokenProcessPool as e:
+        logger.warning(f"{kind} parser process stopped", extra={"doc_id": doc_id})
+        raise DocumentExtractionError(_for(kind, PARSER_STOPPED)) from e
+    except FutureTimeout as e:
+        logger.warning(f"{kind} parse timed out", extra={"doc_id": doc_id, "seconds": seconds})
+        raise DocumentExtractionError(_for(kind, PARSER_TIMED_OUT.format(seconds=seconds))) from e
+
+
+def _for(kind: str, message: str) -> str:
+    """The client's message for a PDF, naming the format for the others."""
+    return message.replace("The PDF", f"The {kind}", 1)
 
 
 def warm_up() -> int:

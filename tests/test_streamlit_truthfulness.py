@@ -119,6 +119,36 @@ def _text(at) -> str:
     return "\n".join(str(p) for p in parts)
 
 
+NOT_FOUND_ANSWER = (
+    "### Direct Answer\nThe provided documents do not contain the revenue share of the top "
+    "ten customers for FY2023.\n\n### Supporting Evidence\nRevenue was $452.8 million in "
+    "FY2023 [📄 10-K.pdf | p.4 | Income statement]."
+)
+
+
+class TestNotFound:
+    """Decision 112: never verified, banner first, the explanation still shown."""
+
+    def test_the_verdict_is_not_found_even_when_every_claim_passed(self):
+        key, label, detail = answer_verdict(_result(outcome="not_found", answer=NOT_FOUND_ANSWER))
+        assert (key, label) == ("not_found", "NOT FOUND")
+        assert "not against every document in the data room" in detail
+
+    def test_a_failed_validation_still_reads_as_failed(self):
+        key, _, _ = answer_verdict(_result(outcome="not_found", validation_status="failed",
+                                           claim_checks=[CONTRADICTED]))
+        assert key == "failed"
+
+    def test_rendering(self):
+        text = _text(_app_with(_result(outcome="not_found", answer=NOT_FOUND_ANSWER,
+                                       confidence_score=0.93)))
+        assert "NOT FOUND IN THE PASSAGES SEARCHED" in text
+        assert "do not contain the revenue share" in text
+        assert "✓ VERIFIED" not in text
+        assert "93%" not in text
+        assert "INSUFFICIENT CONTEXT" not in text
+
+
 class TestRendering:
     def test_synthesis_failure_is_not_shown_as_a_refusal(self):
         at = _app_with(_result(outcome="synthesis_failed", is_refusal=True, claim_checks=[],

@@ -27,6 +27,7 @@ from src.llm.failures import (
     FailureKind,
     LocalContextExceeded,
     ProseAgentFailed,
+    context_refusal_sizes,
     is_context_refusal,
     ResponseDeadlineExceeded,
     StructuredOutputError,
@@ -691,6 +692,22 @@ async def _reserve_input_tokens(kwargs: dict, model: str, api_key: str | None):
         raise
 
 
+def _context_refusal(e: BaseException, model: str, kwargs: dict) -> LocalContextExceeded:
+    """Ollama's refusal of a prompt longer than the window, with its counts when stated."""
+    sizes = context_refusal_sizes(e)
+    logger.warning("Local model refused a prompt longer than its context window",
+                   extra={"model": model, "num_ctx": kwargs.get("num_ctx"),
+                          "prompt_tokens": sizes[0] if sizes else None, "error": str(e)[-300:]})
+    detail = (f"request ({sizes[0]} tokens) exceeds the available context size ({sizes[1]} tokens)"
+              if sizes else str(e)[-200:])
+    return LocalContextExceeded(
+        f"{model} refused a prompt longer than its context window ({kwargs.get('num_ctx')} "
+        f"tokens, OLLAMA_NUM_CTX): {detail}",
+        prompt_tokens=sizes[0] if sizes else None,
+        window=sizes[1] if sizes else None,
+    )
+
+
 async def _acompletion(kwargs: dict, model: str, api_key: str | None):
     """
     litellm.acompletion with the accounts settled either way: input tokens
@@ -706,11 +723,7 @@ async def _acompletion(kwargs: dict, model: str, api_key: str | None):
             reservation.release()
         await _settle_failure(model, api_key, failure)
         if is_local(model) and is_context_refusal(e):
-            logger.warning("Local model refused a prompt longer than its context window",
-                           extra={"model": model, "num_ctx": kwargs.get("num_ctx"), "error": str(e)[-300:]})
-            raise LocalContextExceeded(
-                f"{model} refused a prompt longer than its context window ({kwargs.get('num_ctx')} "
-                f"tokens, OLLAMA_NUM_CTX): {str(e)[-200:]}") from e
+            raise _context_refusal(e, model, kwargs) from e
         raise
     if reservation is not None:
         reservation.adjust(_prompt_tokens(getattr(response, "usage", None)))
@@ -1759,6 +1772,9 @@ async def _streamed_text(
                 extra={"model": model, "deadline_seconds": round(e.seconds, 1),
                        "phase": e.phase},
             )
+        if is_local(model) and is_context_refusal(e):
+            # The same error the blocking path raises, counts included.
+            raise _context_refusal(e, model, kwargs) from e
         raise
 
     _log_usage(

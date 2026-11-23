@@ -116,8 +116,10 @@ class QueryResponse(BaseModel):
         "answered",
         description=(
             "How the run ended: answered | answered_unverified (failed validation "
-            "after the retry; shipped with flags) | refused (no usable context) | "
-            "synthesis_failed (no model returned a usable answer)"
+            "after the retry; shipped with flags) | not_found (the answer says the "
+            "documents searched do not contain what was asked; checked against the "
+            "retrieved passages only, not the whole data room) | refused (no usable "
+            "context) | synthesis_failed (no model returned a usable answer)"
         ),
     )
     node_timings: list[dict] = Field(

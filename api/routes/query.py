@@ -46,6 +46,7 @@ from src.data_processing.injection_screen import flagged_locations
 from src.decisions.laya_client import LayaUnavailable
 from src.decisions.query_guard import BLOCKED_MESSAGE, check_query, query_guard_enabled
 from src.workflow.orchestrator import (
+    OUTCOME_NOT_FOUND,
     OUTCOME_SYNTHESIS_FAILED,
     checkpointer_connection_broken,
     node_timings,
@@ -238,10 +239,12 @@ def _metric_outcome(response: QueryResponse) -> str:
     but it is an outage, not the system declining to answer: counted as
     "refusal" it looked on a dashboard like a run of unanswerable questions
     while the API and the audit log said synthesis_failed. Every other run
-    keeps its label.
+    keeps its label, except a "not found" (Decision 112): the documents searched
+    did not contain the answer, which a dashboard should tell apart from both an
+    answer and a refusal.
     """
-    if response.outcome == OUTCOME_SYNTHESIS_FAILED:
-        return OUTCOME_SYNTHESIS_FAILED
+    if response.outcome in (OUTCOME_SYNTHESIS_FAILED, OUTCOME_NOT_FOUND):
+        return response.outcome
     return "refusal" if response.is_refusal else "answered"
 
 
