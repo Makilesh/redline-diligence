@@ -75,6 +75,12 @@ def test_a_whole_decline_is_recognised(answer):
     # A decline followed by an uncited assertion is not only a decline.
     "The provided documents do not contain the top-ten share. Meridian Health is the largest "
     "customer.",
+    # Found in review: findings that read like gaps in the evidence.
+    "The transaction documents contain no financing condition.\n\n## Details\nx",
+    "In the context of the merger, a financing condition is not provided for.\n\n## Details\nx",
+    "The target could not identify a successor CEO before signing.\n\n## Details\nx",
+    "The outcome of the DataFlow litigation cannot be determined at this time.\n\n## Details\nx",
+    "The seller provided insufficient information to the regulator.\n\n## Details\nx",
     "",
     None,
 ])

@@ -21,7 +21,8 @@ import src.agents.answer_synthesizer as synth
 import src.llm.litellm_wrapper as wrapper
 from src.llm.failures import LocalContextExceeded, context_refusal_sizes
 from src.llm.model_registry import LOCAL_MODEL
-from tests.test_local_context_window import REFUSAL, _Resp, no_keys  # noqa: F401 - fixture
+import src.llm.budget_tracker as bt
+from tests.test_local_context_window import REFUSAL, _Resp
 
 CITED = "Revenue was $452.8 million [📄 fin_00.txt | p.1]."
 
@@ -45,6 +46,20 @@ class Script:
         if isinstance(reply, Exception):
             raise reply
         return _Resp(reply)
+
+
+@pytest.fixture
+def no_keys(monkeypatch):
+    """No cloud key: the ladder's only rung is the local model."""
+    t = bt.BudgetTracker.__new__(bt.BudgetTracker)
+    t._api_keys = []
+    t._rate_limiters = {}
+    t._is_mock = True
+    t._mock_budgets = {}
+    monkeypatch.setattr(bt.BudgetTracker, "_instance", t)
+    for name in ("PROSE_FIRST_TOKEN_TIMEOUT_SECONDS", "SYNTHESIS_MODEL_PIN", "SYNTHESIS_MAX_TOKENS"):
+        monkeypatch.delenv(name, raising=False)
+    return t
 
 
 @pytest.fixture

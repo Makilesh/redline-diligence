@@ -432,10 +432,27 @@ def split_claims(answer: str) -> list[Claim]:
 # contain a financing condition" is a finding about a contract — a named
 # document — and answers the question; only the evidence in front of the model
 # (or the data room) failing to say something makes an answer a "not found".
+#
+# A bare noun counts only as "the documents", "the context" — not "the transaction
+# documents contain no financing condition" (a finding about the contracts) nor "in
+# the context of the merger" (found in review). An impossibility ("cannot be
+# determined", "unable to", "insufficient information") counts only in a sentence
+# that names the evidence searched: "the outcome of the litigation cannot be
+# determined at this time" reports what a document says.
 _SEARCHED = (
     r"(?:(?:provided|retrieved|available|given|supplied|uploaded|above)\s+"
     r"(?:documents?|context|materials?|excerpts?|passages?|information|sources?|data|files?)"
-    r"|documents|data\s+room|context|materials|excerpts|passages|sources)"
+    r"|data\s+room"
+    r"|(?<=\bthe\s)(?:documents|context|materials|excerpts|passages|sources)(?!\s+of\b))"
+)
+_IMPOSSIBLE = (
+    r"(?:(?:it\s+is\s+)?(?:not\s+possible|impossible)\s+to\s+(?:determine|calculate|compute|identify"
+    r"|establish|answer|quantify|confirm)"
+    r"|(?:cannot|can\s*not|could\s+not)\s+be\s+(?:determined|calculated|computed|identified"
+    r"|established|answered|quantified|confirmed)"
+    r"|unable\s+to\s+(?:determine|calculate|compute|identify|establish|answer|quantify|confirm"
+    r"|find|locate)"
+    r"|(?:insufficient|not\s+(?:enough|sufficient))\s+(?:information|data|context|evidence|details?))"
 )
 NOT_FOUND = re.compile(
     rf"\b{_SEARCHED}\b[^.;]{{0,100}}\b(?:do(?:es)?|did)\s+not\s+{_HEDGE}{_INFO_VERB}"
@@ -450,9 +467,12 @@ NOT_FOUND = re.compile(
     rf"|present|contained|addressed)\s+(?:in|within|anywhere\s+in)\s+the\s+{_SEARCHED}\b"
     rf"|\bno\s+(?:specific\s+)?(?:information|data|details?|figures?|breakdowns?|disclosures?|mention)\b"
     rf"[^.;]{{0,100}}\b(?:in|within)\s+the\s+{_SEARCHED}\b"
-    r"|\b(?:(?:it\s+is\s+)?(?:not\s+possible|impossible)\s+to|unable\s+to|cannot|can\s*not|could\s+not)"
-    r"\s+(?:be\s+)?(?:determine|calculate|compute|identify|establish|answer|quantify|confirm)d?\b"
-    r"|\b(?:insufficient|not\s+(?:enough|sufficient))\s+(?:information|data|context|evidence|detail)s?\b",
+    # "… cannot be calculated from the provided documents."
+    rf"|\b{_IMPOSSIBLE}\b[^.;]{{0,160}}\b(?:from|in|within|with|based\s+on|given|using)\s+the\s+"
+    rf"{_SEARCHED}\b"
+    # "Based on the given context, it is not possible to determine …"
+    rf"|\b(?:based\s+on|according\s+to|from|in|within|given)\s+the\s+{_SEARCHED}\b[^.;]{{0,160}}"
+    rf"\b{_IMPOSSIBLE}\b",
     re.IGNORECASE,
 )
 _LEAD_PREFIX = re.compile(r"^(?:no|unfortunately|regrettably)\s*[,.:;—-]\s*", re.IGNORECASE)

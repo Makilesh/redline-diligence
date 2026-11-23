@@ -100,8 +100,30 @@ def _counting_failed_steps(fn, *args):
     metrics.record_optional_step_failure = record
     try:
         return fn(*args), failed
+    except Exception as e:
+        raise _crossable(e) from None
     finally:
         metrics.record_optional_step_failure = count
+
+
+def _crossable(e: Exception) -> Exception:
+    """
+    The exception itself when it survives pickling, else a RuntimeError naming it.
+
+    An exception goes back to the API pickled. lxml's XMLSyntaxError (python-docx on a
+    malformed part) does not pickle: the API then got "cannot pickle
+    'lxml.etree._ListErrorLog' object" in place of the cause. The client's message is
+    the same either way ("The .docx file could not be parsed"); the log keeps the cause.
+    """
+    import pickle
+
+    try:
+        # A self-check on an object this process just created, not data from
+        # outside; concurrent.futures pickles the result the same way.
+        pickle.loads(pickle.dumps(e))
+        return e
+    except Exception:
+        return RuntimeError(f"{type(e).__module__}.{type(e).__name__}: {e}")
 
 
 def _pdf(pdf_path: str, doc_id: str, legal_mode: bool):

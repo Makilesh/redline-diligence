@@ -256,3 +256,22 @@ def test_ingest_parses_office_files_in_the_child(tmp_path, monkeypatch, writer):
     path = writer(tmp_path)
     doc = extract_and_chunk(str(path), path.name, "deal-iso", "financial")
     assert calls == [path.suffix] and doc.chunks
+
+
+def test_an_error_that_does_not_pickle_still_names_its_cause(tmp_path):
+    """lxml's XMLSyntaxError (a malformed DOCX part) cannot cross by pickle."""
+    import zipfile
+
+    from src.data_processing.ingest_pipeline import extract_and_chunk
+
+    good = sx.write_stress_docx(tmp_path)
+    bad = tmp_path / "malformed.docx"
+    with zipfile.ZipFile(good) as zin, zipfile.ZipFile(bad, "w") as zout:
+        for item in zin.infolist():
+            data = b"<w:document" if item.filename == "word/document.xml" else zin.read(item.filename)
+            zout.writestr(item, data)
+    with pytest.raises(RuntimeError, match="XMLSyntaxError"):
+        iso.parse_office(".docx", str(bad), "doc-1")
+    # The client's error is the one it always was.
+    with pytest.raises(DocumentExtractionError, match=r"^The \.docx file could not be parsed$"):
+        extract_and_chunk(str(bad), bad.name, "deal-iso", "legal")
