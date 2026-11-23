@@ -168,6 +168,24 @@ class ResponseDeadlineExceeded(TimeoutError):
         self.seconds = seconds
 
 
+class LocalContextExceeded(RuntimeError):
+    """
+    Ollama refused a prompt larger than the local model's context window (OLLAMA_NUM_CTX).
+
+    Left to its defaults, Ollama does not refuse: it keeps a prompt's first 4 tokens and
+    the last half-window, dropping the instructions at its start, and shifts the context
+    the same way when a reply runs past the window. Every local call therefore asks it to
+    refuse (truncate=false) and to stop instead of shifting (shift=false); its refusal,
+    counted with the model's own tokenizer, is this error (Decision 106). The same request
+    fails the same way every time: REQUEST_INVALID, not retried.
+    """
+
+
+def is_context_refusal(exc: BaseException) -> bool:
+    """True for Ollama's refusal of a prompt longer than the context window."""
+    return "exceed_context_size_error" in str(exc) or "exceeds the available context size" in str(exc)
+
+
 class ProseAgentFailed(RuntimeError):
     """
     A prose call exhausted its same-model retries without a usable completion.
@@ -320,6 +338,10 @@ def classify_failure(exc: BaseException) -> Failure:
     """
     if isinstance(exc, StructuredOutputError):
         return Failure(FailureKind.BAD_OUTPUT)
+    if isinstance(exc, LocalContextExceeded) or is_context_refusal(exc):
+        # LiteLLM reports Ollama's 400 as an APIConnectionError (status 500), which would
+        # otherwise read as a connection failure and be retried.
+        return Failure(FailureKind.REQUEST_INVALID)
     if isinstance(exc, ProseAgentFailed):
         return Failure(FailureKind.MODEL_FAILED)
     if isinstance(exc, TokenWindowFull):

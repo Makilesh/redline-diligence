@@ -33,7 +33,10 @@ sentence-transformers>=2.7.0,<3.0.0
 # skipped because it holds onnxruntime at 1.19. BM25 text is normalised in
 # src/vector_db/hybrid_search.py before encoding, so this range and the old one
 # produce the same ranking (retrieval eval identical on 0.3.6 and 0.7.4).
-fastembed>=0.5.0,<0.8.0
+# 0.9 lets Pillow move to 13 (0.7.x held it below 12, under 54 published
+# Pillow advisories). Its BM25 output is bit-identical to 0.7.4's on 12,000
+# stored chunks and 68 queries, so existing indexes stay valid (Decision 104).
+fastembed>=0.5.0,<0.10.0
 transformers>=4.40.0,<5.0.0
 # Local decision model (src/decisions): typed yes/no and choice judgments with
 # probabilities, no text generation. Pinned exactly — the package is weeks old
@@ -78,14 +81,11 @@ psycopg2-binary>=2.9.9,<3.0.0
 langgraph-checkpoint-postgres>=3.2.0,<4.0.0
 psycopg[binary]>=3.1.0,<4.0.0
 
-# API and UI
+# API
+# The Streamlit console's packages are in requirements-ui.txt. The API never
+# imports them, and the API image (Dockerfile.hf) does not install them.
 fastapi>=0.110.0,<1.0.0
 uvicorn[standard]>=0.29.0,<1.0.0
-streamlit>=1.35.0,<2.0.0
-# Streamlit's tables (st.dataframe, the Tie-out tab) load pyarrow, and
-# pyarrow 26 refuses to import beside numpy 1.x ("pyarrow requires NumPy 2.0
-# or newer"), which is pinned above. 24.x is the build this was tested with.
-pyarrow>=14.0.0,<25.0.0
 # Required by FastAPI for the multipart upload form on /ingest. It was only
 # present transitively, and FastAPI raises at route registration without it.
 python-multipart>=0.0.9,<1.0.0

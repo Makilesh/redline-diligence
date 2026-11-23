@@ -860,7 +860,7 @@ class NumericalRegistry:
             label = str(row.get("line_item", "")).strip()
             if not label:
                 continue
-            cells = list((row.get("values") or {}).items())
+            cells = row_cells(row)
             if not _has_values(row):
                 subheading = label
                 continue
@@ -1496,6 +1496,35 @@ def _basis_parts(entries: list[NumericalEntry]) -> tuple[list[list[NumericalEntr
 # What a statement prints in a value column for nil or "not meaningful": the
 # converter keeps such a cell as printed, with no value.
 _NIL_MARKS = {"-", "—", "–", "−", "n/a", "na", "n.a.", "nm", "n.m.", "n/m"}
+
+
+_PLACEHOLDER_COLUMN = re.compile(r"^Column (\d+)$")
+
+
+def row_cells(row: dict) -> list[tuple[str, object]]:
+    """
+    A structured row's (column, cell) pairs in the table's left-to-right order.
+
+    `values` is a JSON object, and a Qdrant server reached over gRPC (the app's
+    client whenever no API key is set) does not keep a JSON object's key order:
+    protobuf maps carry none. Rows came back with their columns shuffled, and a
+    period read from a neighbouring column went to another figure — on the
+    28-document batch the tie-out moved by 45 figures without a period and 42
+    single-source ones (Decision 105). Rows written since carry the order in
+    `columns`, a list, which keeps it. For rows written before: placeholder
+    names ("Column 2", "Column 3", ...) sort by their number, which is their
+    order; other names keep the order stored, the best there is without
+    re-ingesting the document.
+    """
+    values = row.get("values") or {}
+    columns = row.get("columns")
+    if isinstance(columns, list) and len(columns) == len(values) and set(columns) == set(values):
+        return [(column, values[column]) for column in columns]
+    numbers = [_PLACEHOLDER_COLUMN.match(str(column)) for column in values]
+    if values and all(numbers):
+        return [item for _, item in sorted(zip((int(m.group(1)) for m in numbers), values.items()),
+                                           key=lambda pair: pair[0])]
+    return list(values.items())
 
 
 def _has_values(row: dict) -> bool:

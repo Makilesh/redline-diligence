@@ -1,0 +1,125 @@
+# Published advisories accepted for the versions pinned in constraints.txt, each with why.
+#
+# scripts/check_vulnerabilities.py (the "Dependency audit" workflow: weekly, and on every
+# change to the pins) fails on an advisory not listed here, and on an entry past its
+# review_by date. An entry holds for the version it names only: upgrading the package
+# retires it, and an advisory still open on the new version must be looked at again.
+# Accepted ids no longer reported are printed as notes, to be removed.
+#
+# The 2026-11-22 audit found ~135 distinct advisories against 13 pinned packages, all in the
+# API image; the upgrades of Decision 104 left the eight below, and torch (pinned in
+# Dockerfile.hf, audited since) one more. None is reachable as the app runs: each needs a
+# model, checkpoint, scripted function or proxy request chosen by an attacker, or a code path
+# the app never runs. The app loads four checkpoints (bge-m3, the MiniLM reranker, the
+# NLI cross-encoder, Laya), each at a pinned Hub commit baked into the image at build time
+# (Decision 100); no request names a model.
+#
+# The transformers and sentence-transformers fixes need transformers 5, which
+# sentence-transformers 2.7 (the embedder and cross-encoder loader) does not allow, and
+# that upgrade moves the whole embedding, reranking and NLI stack, every score the
+# calibration depends on: it is measured on its own (Decision 104).
+
+[[accepted]]
+package = "transformers"
+version = "4.57.6"
+ids = ["PYSEC-2026-2289", "CVE-2026-4372", "GHSA-29pf-2h5f-8g72"]
+reason = """
+A config.json that names a Hub repository in `_attn_implementation_internal` makes
+from_pretrained() run that repository's code. None of the four pinned checkpoints' config
+files sets the field (checked 2026-11-23), and a pinned commit cannot change. Fixed in 5.3.0.
+"""
+review_by = 2027-02-28
+
+[[accepted]]
+package = "transformers"
+version = "4.57.6"
+ids = ["PYSEC-2026-2288", "CVE-2026-1839", "GHSA-69w3-r845-3855"]
+reason = """
+Trainer._load_rng_state() unpickles a checkpoint without weights_only on torch < 2.6. The
+app never trains (no Trainer), and torch is 2.11, whose torch.load defaults to
+weights_only=True. Fixed in 5.0.0.
+"""
+review_by = 2027-02-28
+
+[[accepted]]
+package = "transformers"
+version = "4.57.6"
+ids = ["PYSEC-2026-2290", "CVE-2026-5241", "GHSA-fgcw-684q-jj6r"]
+reason = """
+Loading a LightGlue (vision) model from an attacker's repository runs code despite
+trust_remote_code. The app loads no LightGlue model. Fixed in 5.5.0.
+"""
+review_by = 2027-02-28
+
+[[accepted]]
+package = "transformers"
+version = "4.57.6"
+ids = ["PYSEC-2026-4174", "CVE-2026-80047", "GHSA-x9r9-c232-4q39"]
+reason = """
+load_custom_generate() writes a remote module to disk before the trust_remote_code check.
+The app never generates text with transformers (its models are encoders and classifiers)
+and never calls it. No fixed version is published.
+"""
+review_by = 2027-02-28
+
+[[accepted]]
+package = "transformers"
+version = "4.57.6"
+ids = ["PYSEC-2026-3929", "CVE-2026-9856", "GHSA-xrqw-3rrv-vx5w"]
+reason = """
+save_pretrained() writes files named by a malicious chat_template's keys outside the target
+directory. The app never calls save_pretrained(); the image fetches the pinned snapshots with
+huggingface_hub.snapshot_download (Dockerfile.hf). Fixed in 5.10.0.
+"""
+review_by = 2027-02-28
+
+[[accepted]]
+package = "transformers"
+version = "4.57.6"
+ids = ["PYSEC-2025-217", "CVE-2025-14929"]
+reason = """
+The X-CLIP checkpoint conversion script deserializes untrusted data. The app runs no
+conversion script and loads no X-CLIP model. No fixed version is published.
+"""
+review_by = 2027-02-28
+
+[[accepted]]
+package = "sentence-transformers"
+version = "2.7.0"
+ids = ["PYSEC-2026-4164", "CVE-2026-68770", "GHSA-jhr6-gm9c-rqjv"]
+reason = """
+import_module_class() trusts any existing local path, so a model directory whose
+modules.json names a custom module runs it without trust_remote_code. The app loads only the
+pinned snapshots written into the image at build time: bge-m3's modules.json names
+sentence-transformers' own Transformer, Pooling and Normalize, and the two cross-encoders have
+none (checked 2026-11-23). Changing those files takes write access to the image or the model
+cache, that is, control of the container already. Fixed in 5.6.0 (the measured stack upgrade).
+"""
+review_by = 2027-02-28
+
+[[accepted]]
+package = "torch"
+version = "2.11.0"
+ids = ["PYSEC-2025-194", "CVE-2025-3000", "GHSA-rrmf-rvhw-rf47"]
+reason = """
+Scripting a crafted function with torch.jit.script corrupts memory (a local attack vector,
+CVSS 3.1 AV:L). The app scripts only transformers' own DeBERTa-v2 helpers, at import, for the
+NLI checker; nothing a request supplies is scripted (checked 2026-11-23). Fixed in 2.13.0;
+torch is pinned to the build every benchmark ran on (Dockerfile.hf TORCH_VERSION, CI), and
+moving it re-measures the whole model stack.
+"""
+review_by = 2027-02-28
+
+[[accepted]]
+package = "litellm"
+version = "1.89.7"
+ids = ["GHSA-g5ff-637f-6q2m"]
+reason = """
+A LiteLLM proxy endpoint (/utils/transform_request) reads a local file named in a request's
+vertex_ai_credentials. The app does not run the LiteLLM proxy: it calls the SDK with the
+model and key from its own configuration, and no request field reaches those parameters.
+Fixed only in 1.95.0, six minor releases on, in the layer every LLM call goes through, which
+is not upgraded without a live check against the provider; the 1.89 line's security release
+1.89.7 (which fixes CVE-2026-84377) is installed.
+"""
+review_by = 2027-02-28

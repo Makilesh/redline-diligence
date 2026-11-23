@@ -461,6 +461,71 @@ diagnosis, and a deal's are deleted with the deal.
 in `PUBLIC_DEAL_IDS` (default `aurora_vertex_2024`) and their own sandbox
 deals; any other deal answers 404 without the admin key.
 
+## Backups and restore
+
+**What is backed up.** The index (both Qdrant collections) and the audit log
+(`AUDIT_LOG_DIR`, the `audit_logs` volume) are the state that cannot be
+rebuilt. Nothing else needs a backup: an uploaded file is deleted once it is
+indexed (keep the data room export — it is also what a re-ingest needs);
+Postgres holds LangGraph checkpoints, which every run clears, and the day's
+quota counters (`api_budget`), whose loss at most lets the app try requests
+the provider then refuses for the rest of that day.
+
+**Back up** with `scripts/qdrant_backup.py` (Decision 105), in a one-off
+container of the API image, with the API stopped so that nothing writes while
+it runs:
+
+```bash
+C="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+mkdir -p backups && sudo chown 1000:1000 backups    # the image runs as uid 1000
+$C stop api
+$C run --rm --no-deps -v "$PWD/backups:/backups" api python scripts/qdrant_backup.py \
+  backup --out /backups/$(date +%F) --audit-dir /home/user/audit --fingerprint
+$C up -d api
+$C run --rm --no-deps -v "$PWD/backups:/backups:ro" api \
+  python scripts/qdrant_backup.py verify /backups/$(date +%F)
+```
+
+It takes one snapshot per collection, downloads it with its SHA-256 and
+deletes it from the server (whose `/qdrant/snapshots` is not on a volume),
+copies the audit files, and writes `manifest.json`: exact point counts and,
+with `--fingerprint`, a hash of every point. Each collection is counted (and
+fingerprinted) before and after its snapshot; if it changed, the backup fails,
+because no restore could be checked against it (`--allow-changes` keeps it,
+marked unverifiable). `--fingerprint` reads every point twice: on a large
+index it is the slow part, and what makes a restore checkable point by point.
+
+**Restore** with the API stopped:
+
+```bash
+$C stop api
+$C run --rm --no-deps -v "$PWD/backups:/backups:ro" api python scripts/qdrant_backup.py \
+  restore /backups/2026-11-23 --audit-dir /home/user/audit --replace-existing
+$C up -d api
+```
+
+It verifies every file first and decides what to do with each audit file
+before writing anything. A collection that holds points is replaced only with
+`--replace-existing`; each snapshot is uploaded with its checksum (Qdrant
+refuses a damaged file before replacing anything) and the collection's count
+and fingerprint are compared with the manifest's. If an upload fails after
+another collection was replaced, the error says which: the index then mixes
+backup and live data until the restore is run again. An audit file is never
+overwritten — the log is append-only: a live file that already holds the
+saved lines is kept, any other difference is written beside it as
+`*.restored` and reported. Restore onto the same Qdrant minor version (a
+snapshot moves at most one minor version).
+
+**Decided by the owner, not by the script** (H3): where backups are kept (the
+`backups/` directory is on the same VM, so it survives a broken index, not a
+lost VM — copy it off the host), whether they are encrypted at rest, how often
+they run (a cron entry around the block above) and how long they are kept.
+The audit files carry the questions asked; a backup holds them too, and
+outlives a deal's purge unless the retention decision says otherwise.
+
+An embedded index (`QDRANT_MODE=local`) has no snapshot API: stop the API and
+copy `$QDRANT_LOCAL_PATH` and `AUDIT_LOG_DIR`.
+
 ## Re-ingesting an existing index
 
 Three changes take effect only on documents indexed after them: two to PDF
@@ -502,31 +567,21 @@ ORIG=/srv/originals            # the original files, any layout
 
 ### Phase 0 · Freeze and snapshot
 
+A backup with `scripts/qdrant_backup.py` (section "Backups and restore"), the
+API stopped for the whole run:
+
 ```bash
 $C stop api
 mkdir -p qdrant-backup && sudo chown 1000:1000 qdrant-backup   # the API image runs as uid 1000
-for c in manda_due_diligence manda_parent_chunks; do
-  $C run --rm --no-deps -T -v "$PWD/qdrant-backup:/backup" api python - "$c" <<'PY'
-import json, sys, urllib.request
-c = sys.argv[1]
-base = f"http://qdrant:6333/collections/{c}"
-snap = json.load(urllib.request.urlopen(urllib.request.Request(f"{base}/snapshots", method="POST"), timeout=3600))["result"]
-urllib.request.urlretrieve(f"{base}/snapshots/{snap['name']}", f"/backup/{c}.snapshot")
-# An exact count: the collection info's points_count is documented as approximate.
-count = json.load(urllib.request.urlopen(urllib.request.Request(
-    f"{base}/points/count", data=b'{"exact": true}', headers={"Content-Type": "application/json"},
-    method="POST"), timeout=600))["result"]["count"]
-json.dump({**snap, "points_count": count}, open(f"/backup/{c}.json", "w"))
-print(c, snap["name"], snap["size"], "bytes,", count, "points")
-PY
-done
+$C run --rm --no-deps -v "$PWD/qdrant-backup:/backup" api python scripts/qdrant_backup.py \
+  backup --out /backup/before-reingest --audit-dir /home/user/audit --fingerprint
 ```
 
-Check: both `.snapshot` files exist with the sizes printed, and
-`qdrant-backup/*.json` records each collection's point count and the
-snapshot's sha256 (`checksum`), which the rollback passes back to Qdrant. The
-snapshot files live outside the Qdrant container, whose own snapshot directory
-(`/qdrant/snapshots`) is not on a volume.
+Check: the command exits 0 and `qdrant-backup/before-reingest/manifest.json`
+records both collections, each with its exact point count, its snapshot's
+SHA-256 and a fingerprint of every point; `verify` (as in "Backups and
+restore") reports every file matching. On a Qdrant 1.18.0 server holding the
+28-document batch (7,761 + 1,556 points) the backup took 12 s (Decision 105).
 
 Local mode (`QDRANT_MODE=local`): stop the API, then copy the store folder,
 `cp -a "$QDRANT_LOCAL_PATH" "$QDRANT_LOCAL_PATH.before-reingest"`. Check: the
@@ -621,40 +676,28 @@ gives), because Decision 93's headers give more figures a period.
 
 ### Rollback (from any phase)
 
-Server — stop the API, then upload each snapshot over its collection with
-`priority=snapshot` (the snapshot's data wins; the collection is created if
-it is missing) and the sha256 phase 0 saved, so that a damaged file is
-refused before anything is replaced. Nothing is deleted first: a failed
-upload leaves the collection as it was, not empty. The API starts again only
-when both collections hold the snapshot's point count; otherwise it stays
-stopped and the block says why:
+Server — stop the API and restore phase 0's backup over the collections. The
+script verifies every file first, uploads each snapshot with its checksum
+(Qdrant refuses a damaged file before replacing anything; nothing is deleted
+first), and checks each collection's exact count and per-point fingerprint
+against the manifest; the API starts again only if it exits 0:
 
 ```bash
 $C stop api
-(
-  set -e
-  for c in manda_due_diligence manda_parent_chunks; do
-    sum=$(python3 -c "import json; print(json.load(open('qdrant-backup/$c.json'))['checksum'])")
-    $C run --rm --no-deps -v "$PWD/qdrant-backup:/backup:ro" api curl -fsS -X POST \
-      "http://qdrant:6333/collections/$c/snapshots/upload?priority=snapshot&checksum=$sum" \
-      -F "snapshot=@/backup/$c.snapshot"
-  done
-  for c in manda_due_diligence manda_parent_chunks; do
-    want=$(python3 -c "import json; print(json.load(open('qdrant-backup/$c.json'))['points_count'])")
-    got=$($C run --rm --no-deps -T api python -c "import json, urllib.request as u; r = u.Request('http://qdrant:6333/collections/$c/points/count', data=b'{\"exact\": true}', headers={'Content-Type': 'application/json'}, method='POST'); print(json.load(u.urlopen(r, timeout=600))['result']['count'])")
-    [ "$got" = "$want" ] || { echo "$c holds $got points, the snapshot $want: the API stays stopped"; exit 1; }
-  done
-) && $C up -d api
+$C run --rm --no-deps -v "$PWD/qdrant-backup:/backup:ro" api python scripts/qdrant_backup.py \
+  restore /backup/before-reingest --audit-dir /home/user/audit --replace-existing \
+  && $C up -d api
 ```
 
-Check: the block ends by starting the API (otherwise investigate before
-anything else; the snapshot files are untouched), and the report (with the
-same `--files`) equals `report-before.json`, which also shows that no point
-the re-ingest added survived the restore. Restore onto the same Qdrant minor version (a snapshot
-moves at most one minor version). Before phase 2, you can rehearse the
-restore without touching the live collections by uploading each snapshot to a
-new name (`.../collections/<collection>_restore_check/snapshots/upload?priority=snapshot`),
-comparing its `points_count`, and deleting it.
+Check: the command prints `"ok": true` with `fingerprint_ok` for both
+collections and starts the API (otherwise investigate before anything else;
+the backup files are untouched, and a failure after the first collection was
+replaced says so), and the report (with the same `--files`) equals
+`report-before.json`. Restore onto the same Qdrant minor version (a snapshot
+moves at most one minor version). Rehearsed on a Qdrant 1.18.0 server
+(Decision 105): the restore over the re-ingested batch (8,511 points) took 8 s
+and gave back the pre-procedure index point for point (both fingerprints
+equal); without `--replace-existing` it refused ("holds 8511 points").
 
 Local mode — stop the API, then
 `rm -rf "$QDRANT_LOCAL_PATH" && cp -a "$QDRANT_LOCAL_PATH.before-reingest" "$QDRANT_LOCAL_PATH"`.
@@ -678,17 +721,21 @@ one deal at a time (`--deal`), each with its own report before and after.
 
 ## Not yet verified
 
-- **The image has not been built on ARM.** The dependency set was checked
-  statically for both architectures (`uv pip compile requirements.txt
-  --python-platform aarch64-manylinux_2_28 --python-version 3.11
-  --only-binary :all:`, and the same for x86_64): all 162 packages resolve to
-  wheels. The previous blocker — fastembed 0.3.x requiring PyStemmer, which has
-  no aarch64 wheel and whose source build downloaded with no timeout — is gone
-  with fastembed 0.5+. The merged compose file and the Caddyfile were validated
+- **The real ARM host.** The image is built for linux/arm64 and smoke-tested
+  under emulation (QEMU) on the development machine (rounds 12–14: the models
+  load offline at their pins; round 16's arm64 build was not run). It has never run on the Oracle A1
+  host, so its speed there — embedding a deal on two or four ARM cores — is
+  unmeasured. The merged compose file and the Caddyfile were validated
   (`docker compose config`, `caddy validate`).
 - **Quality Assessor floor recalibration** for the MiniLM reranker — see step 9.
-- **Re-ingestion on a Qdrant server.** The procedure above ran in local mode
-  only (Decision 97). Its snapshot, download and restore commands follow
-  Qdrant's snapshot API documentation and were not run, nor were the
-  one-off-container invocations, the mixed-chunk window or the write costs
-  on a server, or the two-core ARM host's embedding time.
+- **Re-ingestion in one-off containers.** The procedure above was rehearsed on
+  Qdrant 1.18.0 servers with round 12's 28-document batch (Decision 105):
+  backup, report, re-ingest, identity backfill, report, and the rollback —
+  every step as written, and the result matched a fresh ingest by every
+  pre-registered check once table rows kept their column order (Decision 108).
+  The tools ran from the host against the server containers, not in one-off
+  containers of the image, and the two-core ARM host's embedding time is
+  unmeasured.
+- **Indexes written to a server before Decision 108** keep the columns of
+  header-named table rows shuffled until each document is re-ingested from
+  its file; the tie-out reads those rows in the stored order.

@@ -25,7 +25,9 @@ from src.llm.failures import (
     CompletionTruncated,
     Failure,
     FailureKind,
+    LocalContextExceeded,
     ProseAgentFailed,
+    is_context_refusal,
     ResponseDeadlineExceeded,
     StructuredOutputError,
     TokenWindowFull,
@@ -222,6 +224,80 @@ class ProseOutcome:
 # rotates across keys like every other cloud call instead of pinning one model.
 LOCAL_VERIFICATION_MODEL = LOCAL_MODEL
 
+# Context window (tokens) of every call to the local Ollama model. Without it
+# Ollama uses its own default — 4,096 on a GPU under 24 GiB — and a longer prompt
+# is cut to its first 4 and last ~2,046 tokens: the instructions at its start are
+# lost. Only JSON calls set one (8,192), so every local synthesis prompt (4,100–
+# 6,100 tokens on the sample deal) was cut, came back uncited and was refused,
+# and the model reloaded each time the window size changed between calls
+# (Decision 106). One size for every call. Measured with qwen2.5:14b on a 12 GB
+# GPU: 8,192 fits it fully (~41 tokens/s), 16,384 keeps 83% on the GPU
+# (~24 tokens/s). OLLAMA_NUM_CTX sets it.
+DEFAULT_LOCAL_NUM_CTX = 16_384
+_LOCAL_NUM_CTX_BOUNDS = (2_048, 131_072)
+
+
+def _move_ollama_flags_to_top_level() -> None:
+    """
+    Sends `truncate` and `shift` where Ollama reads them.
+
+    Ollama's own guards against the window: truncate=false refuses a prompt longer
+    than it (counted with the model's tokenizer, which no estimate here can match —
+    it splits every digit), and shift=false ends a reply that reaches it ("length")
+    instead of discarding the context's start. Both are top-level request fields.
+    LiteLLM (pinned 1.89.7) puts every provider option inside `options`, where Ollama
+    ignores them — measured: a prompt was truncated with both set there. This moves
+    the two flags up; tests/test_local_context_window.py checks the request LiteLLM
+    builds, so an upgrade that changes the builder fails there.
+    """
+    from litellm.llms.ollama.completion.transformation import OllamaConfig
+
+    original = OllamaConfig.transform_request
+    if getattr(original, "_moves_ollama_flags", False):
+        return
+
+    def transform_request(self, *args, **kwargs):
+        data = original(self, *args, **kwargs)
+        options = data.get("options") or {}
+        for flag in ("truncate", "shift"):
+            if flag in options:
+                data[flag] = options.pop(flag)
+        return data
+
+    transform_request._moves_ollama_flags = True
+    OllamaConfig.transform_request = transform_request
+
+
+_move_ollama_flags_to_top_level()
+
+
+def local_num_ctx() -> int:
+    """
+    The context window sent with every local-model call: OLLAMA_NUM_CTX, else 16,384.
+
+    Returns:
+        The window, clamped to [2,048, 131,072]; an unreadable value falls back to
+        the default with a warning.
+    """
+    raw = os.getenv("OLLAMA_NUM_CTX", "").strip()
+    if not raw:
+        return DEFAULT_LOCAL_NUM_CTX
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Ignoring OLLAMA_NUM_CTX: not an integer", extra={"value": raw})
+        return DEFAULT_LOCAL_NUM_CTX
+    low, high = _LOCAL_NUM_CTX_BOUNDS
+    return min(max(value, low), high)
+
+
+def _local_options() -> dict:
+    """
+    The provider options of every local-model call: one context window, and Ollama's
+    refusal of what does not fit it instead of silent truncation or context shifting.
+    """
+    return {"num_ctx": local_num_ctx(), "truncate": False, "shift": False}
+
 # Retry policy for prose calls. Matches the 3-attempt budget the structured
 # agent already used, with linear backoff so a transient upstream 503 gets a
 # meaningful gap before the next attempt.
@@ -266,9 +342,12 @@ REPAIR_ECHO_CHARS = 4000
 # a hung Lite model charged in full on each of the ~3 structured calls a query
 # makes. The local model is not held to it: it has no rung below it, and a 14B
 # model on a consumer GPU reading an 8K-token prompt is slower than any cloud
-# rung without being unhealthy.
+# rung without being unhealthy. Its 60s became 120s with the 16K window
+# (Decision 106): qwen2.5:14b then runs ~24 tokens/s on a 12 GB GPU (~41 at
+# 8K), so the judge's 1,500-token budget alone takes ~62s; the slowest local
+# call of the end-to-end run (532 tokens) took 27s.
 STRUCTURED_TIMEOUT_SECONDS = 20.0
-LOCAL_STRUCTURED_TIMEOUT_SECONDS = 60.0
+LOCAL_STRUCTURED_TIMEOUT_SECONDS = 120.0
 
 # Prose: the TOTAL budget for one synthesis request. Healthy synthesis takes
 # 5-14s (59 calls in the live run; one outlier at 34s). On its own this bound
@@ -626,6 +705,12 @@ async def _acompletion(kwargs: dict, model: str, api_key: str | None):
         if reservation is not None and failure.refundable:
             reservation.release()
         await _settle_failure(model, api_key, failure)
+        if is_local(model) and is_context_refusal(e):
+            logger.warning("Local model refused a prompt longer than its context window",
+                           extra={"model": model, "num_ctx": kwargs.get("num_ctx"), "error": str(e)[-300:]})
+            raise LocalContextExceeded(
+                f"{model} refused a prompt longer than its context window ({kwargs.get('num_ctx')} "
+                f"tokens, OLLAMA_NUM_CTX): {str(e)[-200:]}") from e
         raise
     if reservation is not None:
         reservation.adjust(_prompt_tokens(getattr(response, "usage", None)))
@@ -745,7 +830,7 @@ async def _structured_request(
         ),
     }
     if is_local(model):
-        kwargs["num_ctx"] = 8192  # Expand context window for local Ollama to prevent truncation
+        kwargs.update(_local_options())
     if api_key:
         # Explicit per-call credential. With key rotation the key is
         # chosen per request, so relying on the ambient GEMINI_API_KEY
@@ -1215,6 +1300,11 @@ async def call_prose_agent(
     streamed = stream_with_deadline and not is_local(model)
     outcome = outcome if outcome is not None else ProseOutcome()
     room = max_tokens
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    local_options = _local_options() if is_local(model) else {}
 
     for attempt in range(1, MAX_RETRIES + 1):
         attempts = attempt
@@ -1231,13 +1321,11 @@ async def call_prose_agent(
         try:
             prose_kwargs = {
                 "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+                "messages": [dict(m) for m in messages],  # a fresh list per attempt, as before
                 "temperature": temperature,
                 "max_tokens": room,
                 "timeout": PROSE_TIMEOUT_SECONDS,
+                **local_options,
             }
             if api_key:
                 prose_kwargs["api_key"] = api_key
@@ -1749,6 +1837,8 @@ async def stream_prose_agent(
         "max_tokens": max_tokens,
         "timeout": PROSE_TIMEOUT_SECONDS,
     }
+    if is_local(model):
+        kwargs.update(_local_options())
     if api_key:
         kwargs["api_key"] = api_key
     metadata = _call_metadata(agent)
