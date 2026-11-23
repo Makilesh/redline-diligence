@@ -651,7 +651,11 @@ async def synthesize_answer(
     local_context_chars: int | None = None
     fits: list[dict] = []
 
-    for _ in range(_hop_bound(tracker) + MAX_CONTEXT_FITS):
+    # A fit's retry is not a hop down the ladder: it is given back, so an outage
+    # still walks at most _hop_bound rungs. Fits are capped (MAX_CONTEXT_FITS).
+    hops = 0
+    while hops < _hop_bound(tracker):
+        hops += 1
         choice = await tracker.get_model_for_synthesis()
         model = choice.model
         outcome = ProseOutcome(budget)
@@ -749,6 +753,7 @@ async def synthesize_answer(
             fits.append({"window": e.window, "prompt_tokens": e.prompt_tokens,
                          "context_chars": carried, "fitted_chars": fitted})
             local_context_chars = fitted
+            hops -= 1
             logger.warning(
                 "Local model's window did not hold the context; answering from less of it",
                 extra={"model": model, **fits[-1]},
