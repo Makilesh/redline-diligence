@@ -272,8 +272,8 @@ class TestBatchedPasses:
         assert [p["candidates"] for p in out["retrieval_passes"]] == [0, 0]
 
     @pytest.mark.asyncio
-    async def test_sub_questions_still_drop_the_parents_category(self, monkeypatch):
-        """Batching must not blur which filters belong to which pass."""
+    async def test_every_pass_gets_the_same_isolation_filters(self, monkeypatch):
+        """Batching must not blur which filters belong to which pass; none carries a category."""
         rec = _Recorder(monkeypatch, {})
 
         await rx.retrieval_executor_node(_state(sub_questions=["gamma"]))
@@ -281,6 +281,6 @@ class TestBatchedPasses:
 
         decomposed, single = rec.search_calls[:2], rec.search_calls[2]
         assert all("document_category" not in c["metadata_filters"] for c in decomposed)
-        assert single["metadata_filters"]["document_category"] == "financial"
+        assert "document_category" not in single["metadata_filters"]
         assert all(c["deal_id"] == "deal-1" for c in rec.search_calls)
         assert all(c["metadata_filters"]["include_pii"] is False for c in rec.search_calls)

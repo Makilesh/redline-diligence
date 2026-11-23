@@ -111,13 +111,13 @@ async def query_intelligence_node(state: AgentState) -> dict:
         )
 
     # Metadata filters are a PROPOSAL. Only document_category, and only a known
-    # value, becomes a filter — through the same whitelist the rewriter's
-    # proposals pass. The dict used to be forwarded whole (minus include_pii),
-    # and hybrid search accepts doc_id, content_type and is_table as hard
-    # filters that nothing ever relaxes: a model that volunteered a doc_id made
-    # every retrieval pass search an empty set, and the query ended in a
-    # refusal after two wasted rewrites. include_pii and is_current_version are
-    # never accepted (compliance).
+    # value, is kept — through the same whitelist the rewriter's proposals pass —
+    # and retrieval records it as a hint without filtering on it (Decision 109:
+    # a wrong guess removed the answer from the search space). The dict used to
+    # be forwarded whole (minus include_pii), and hybrid search accepts doc_id,
+    # content_type and is_table as hard filters that nothing ever relaxed: a
+    # model that volunteered a doc_id made every retrieval pass search an empty
+    # set. include_pii and is_current_version are never accepted (compliance).
     extracted_filters = apply_filter_overrides({}, parsed.metadata_filters)
 
     logger.info(

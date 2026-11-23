@@ -1020,7 +1020,10 @@ def _summarize_stage(node: str, delta: dict) -> tuple[str, dict]:
         return summary, {
             "query_type": qtype,
             "sub_questions": subs,
-            "filters": {k: v for k, v in filters.items() if v},
+            # Agent 1's guess at the document category. Retrieval records it and
+            # does not filter on it (Decision 109), so it is not called a filter.
+            **({"category_hint": filters["document_category"]}
+               if filters.get("document_category") else {}),
             "model": trace.get("model", ""),
         }
 

@@ -491,12 +491,15 @@ def test_a_stage_field_nobody_classified_is_left_out():
     stage = _stage("retrieval_executor", _DELTAS["retrieval_executor"])
     stage["detail"]["passages"] = [{"text": "Revenue was $452.8 million.", "score": 0.9}]
     stage["context"] = "Revenue was $452.8 million."
+    # Stage details stopped carrying `filters` (Decision 109: the category is a hint).
     stage["detail"]["filters"] = {"Revenue | FY2023": "x", "document_category": "financial"}
+    stage["detail"]["category_hint"] = "financial"
 
     public = public_stage(stage)
 
     assert "passages" not in public["detail"] and "context" not in public
-    assert public["detail"]["filters"] == {"document_category": "financial"}
+    assert "filters" not in public["detail"]
+    assert public["detail"]["category_hint"] == "financial"
 
 
 def test_garbage_stage_payloads_do_not_break_the_public_form():
