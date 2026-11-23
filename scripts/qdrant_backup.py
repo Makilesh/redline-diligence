@@ -6,7 +6,7 @@ Back up and restore the index (both Qdrant collections) and the audit log, and c
     python scripts/qdrant_backup.py restore BACKUP_DIR [--audit-dir DIR] [--replace-existing]
 
 The server is QDRANT_URL (default http://localhost:6333) with QDRANT_API_KEY, as for the API;
---url and --api-key override them. In production Qdrant is reachable only inside the compose
+Its command-line URL and key options take precedence. In production Qdrant is reachable only inside the compose
 network, so the script runs in a one-off container of the API image (DEPLOYMENT.md, "Backups"):
 
     C="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
