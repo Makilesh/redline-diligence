@@ -659,7 +659,8 @@ def structured_rows(table: TableData, meta: TableNormalizationMeta, start: int =
                                "normalized_value": 452800000.0,
                                "scale_factor": 1000.0, "currency": "USD",
                                "period": "FY2023", "kind": "currency",
-                               "decimals": 0}}}
+                               "decimals": 0}},
+         "columns": ["FY2023"]}
 
     `raw` is the cell as printed; `raw_value` its number as stated;
     `normalized_value` = raw_value x scale_factor. The table's scale is applied
@@ -704,7 +705,10 @@ def structured_rows(table: TableData, meta: TableNormalizationMeta, start: int =
                 "kind": cell.kind if cell.kind in ("percent", "multiple") else "currency",
                 "decimals": len(fraction.group(1)) if fraction else 0,
             }
-        result.append({"line_item": row.label, "unit": row.unit, "values": values})
+        # `columns` keeps the left-to-right order: a JSON object's key order does not
+        # survive a Qdrant server reached over gRPC, a list does (Decision 105;
+        # numerical_registry.row_cells).
+        result.append({"line_item": row.label, "unit": row.unit, "values": values, "columns": list(values)})
     return result
 
 
