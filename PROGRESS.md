@@ -22,7 +22,7 @@ citation. What stands between the two is hosting, legal and access decisions
 | Models load at pinned commits, also offline | 7/7, and 7/7 with the network off (Decisions 84, 100) | `pytest -m models` (with `HF_HUB_OFFLINE=1`) |
 | A real LLM end to end | sample deal, local qwen2.5:14b, deployed CPU profile, API and console: 5 of 6 answerable questions answered with the expected figures, cited and verified; out-of-scope refused; an outage reported as one (Decision 106) | the questions, settings and checks are in Decision 106; no hosted LLM was called |
 | Backups restore | restore drill and the re-ingestion runbook on Qdrant servers, matching a fresh ingest once table columns kept their order (Decisions 105, 108) | `scripts/qdrant_backup.py` (DEPLOYMENT.md, "Backups and restore") |
-| Images build and run | IMAGE_SUMMARY (Decision 104) | Dockerfile.hf, Dockerfile.streamlit |
+| Images build and run | amd64: API 3.09 GB and Streamlit 192 MB images build, pin, smoke-test and serve; arm64 not built this round (Decision 104) | Dockerfile.hf, Dockerfile.streamlit |
 | Dependencies have no unaccepted advisory | weekly Dependency audit workflow; 9 accepted, each unreachable, review by 2027-02-28 (Decision 104) | `scripts/check_vulnerabilities.py` |
 | CI | every push: ruff, offline pytest, verification gate, web typecheck/lint/test/build, golden retrieval eval | GitHub Actions |
 
