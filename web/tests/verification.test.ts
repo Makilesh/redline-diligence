@@ -20,6 +20,30 @@ describe("resultView", () => {
     expect(resultView(response({ outcome: "answered" }))).toBe("answer");
     expect(resultView(response({ outcome: "answered_unverified", validation_status: "failed" }))).toBe("answer");
   });
+
+  it("shows a not-found as its own surface (Decision 112)", () => {
+    expect(resultView(response({ outcome: "not_found" }))).toBe("not_found");
+  });
+});
+
+describe("answerVerdict for a not-found (Decision 112)", () => {
+  it("is never Verified, even when the server passed it and every claim is supported", () => {
+    const v = answerVerdict(response({ outcome: "not_found" }));
+    expect(v.key).toBe("not_found");
+    expect(v.tone).toBe("warn");
+    expect(v.detail).toMatch(/not against every document in the data room/);
+  });
+
+  it("still reads as failed when the validation failed", () => {
+    const v = answerVerdict(
+      response({ outcome: "not_found", validation_status: "failed", claim_checks: [contradictedClaim] }),
+    );
+    expect(v.key).toBe("failed");
+  });
+
+  it("is kept by the normaliser", () => {
+    expect(normalizeQueryResponse({ ...response(), outcome: "not_found" })!.outcome).toBe("not_found");
+  });
 });
 
 describe("answerVerdict", () => {

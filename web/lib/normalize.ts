@@ -70,6 +70,7 @@ const FIGURE_BINDINGS: readonly FigureBinding[] = ["bound", "unbound", "conflict
 const OUTCOMES: readonly Outcome[] = [
   "answered",
   "answered_unverified",
+  "not_found",
   "refused",
   "synthesis_failed",
 ];

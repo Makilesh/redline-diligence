@@ -171,12 +171,16 @@ export interface CitationMismatch {
  *   answered            — verified, or verified with warnings
  *   answered_unverified — failed verification after the one re-synthesis;
  *                         shipped with its flags
+ *   not_found           — the answer says the documents searched do not
+ *                         contain what was asked (Decision 112); checked
+ *                         against the retrieved passages only
  *   refused             — no usable context; the pipeline declined
  *   synthesis_failed    — no model returned a usable answer; nothing verified
  */
 export type Outcome =
   | "answered"
   | "answered_unverified"
+  | "not_found"
   | "refused"
   | "synthesis_failed";
 

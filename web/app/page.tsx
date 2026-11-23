@@ -9,6 +9,7 @@ import AskBar from "@/components/AskBar";
 import DataRoomPanel from "@/components/DataRoomPanel";
 import ErrorPanel from "@/components/ErrorPanel";
 import Masthead from "@/components/Masthead";
+import NotFoundPanel from "@/components/NotFoundPanel";
 import PipelineTimeline from "@/components/PipelineTimeline";
 import RefusalPanel from "@/components/RefusalPanel";
 import SourcesRail from "@/components/SourcesRail";
@@ -259,6 +260,8 @@ export default function Home() {
           ? `Answer ready. ${answerVerdict(result).label}.`
           : view === "refusal"
             ? "The engine declined: the data room does not support an answer."
+            : view === "not_found"
+              ? "Not found: the documents searched do not contain the answer."
             : "No answer: the language models did not respond."
         : "";
 
@@ -400,7 +403,10 @@ export default function Home() {
                   {view === "unavailable" && result && (
                     <UnavailablePanel result={result} onRetry={handleRetry} />
                   )}
-                  {view === "answer" && result && (
+                  {/* Not an answer, but the model's explanation and what it
+                      did find are worth reading: the banner, then the text. */}
+                  {view === "not_found" && result && <NotFoundPanel result={result} />}
+                  {(view === "answer" || view === "not_found") && result && (
                     <AnswerPanel result={result} onSelectCitation={handleSelectCitation} />
                   )}
 
@@ -417,7 +423,7 @@ export default function Home() {
                 </div>
 
                 <aside className="space-y-4 lg:sticky lg:top-20 lg:self-start">
-                  {view === "answer" && (
+                  {(view === "answer" || view === "not_found") && (
                     <SourcesRail
                       citations={parsedCitations}
                       highlighted={highlighted}

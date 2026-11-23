@@ -31,7 +31,12 @@ from src.utils.admin_client import admin_headers
 from app.components.deal_manager import render_deal_manager
 from app.components.document_uploader import render_document_uploader
 from app.components.query_interface import render_query_interface
-from app.components.answer_display import render_answer, render_refusal, render_unavailable
+from app.components.answer_display import (
+    render_answer,
+    render_not_found,
+    render_refusal,
+    render_unavailable,
+)
 from app.components.verification import result_outcome
 from app.components.citation_viewer import render_citations
 from app.components.agent_trace_viewer import render_agent_trace
@@ -331,6 +336,9 @@ def render_results(result: dict, deal_id: str) -> None:
         elif outcome == "synthesis_failed":
             render_unavailable(request_id=result.get("request_id", ""))
         else:
+            if outcome == "not_found":
+                # Not an answer: the model's explanation follows the banner.
+                render_not_found(rewrite_count=result.get("rewrite_iterations", 0))
             render_answer(
                 answer=result.get("answer", ""),
                 confidence_score=result.get("confidence_score", 0.0),

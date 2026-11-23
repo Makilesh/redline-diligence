@@ -44,6 +44,7 @@ from src.agents.answer_synthesizer import answer_synthesizer_node, synthesize_an
 from src.agents.hallucination_validator import hallucination_validator_node
 from src.llm.litellm_wrapper import set_trace_context
 from src.verification.claim_checker import revision_feedback
+from src.verification.claims import not_found_lead
 from src.utils import metrics, runtime_status
 from src.utils.logger import setup_logger
 
@@ -337,6 +338,13 @@ async def synthesis_unavailable_node(state: AgentState) -> dict:
 OUTCOME_ANSWERED = "answered"
 OUTCOME_ANSWERED_UNVERIFIED = "answered_unverified"  # failed validation twice; shipped flagged
 OUTCOME_REFUSED = "refused"  # no usable context, or the assessor said so
+# The answer's direct answer says the documents searched do not contain what was
+# asked (Decision 112). Its absence statements can only be checked against the
+# passages retrieved, not the whole data room, so it is not presented as a
+# verified answer: in round 16 a retrieval filter hid the customer schedule and
+# "the provided documents do not contain" the top-ten share shipped as
+# "answered" (Decision 109).
+OUTCOME_NOT_FOUND = "not_found"
 # Every model failed, in synthesis or in the assessment that gates it (the gate
 # then fails closed with nothing known about the context); apology returned.
 OUTCOME_SYNTHESIS_FAILED = "synthesis_failed"
@@ -366,6 +374,10 @@ def run_outcome(final_state: dict) -> str:
         return OUTCOME_SYNTHESIS_FAILED
     if final_state.get("force_refusal") or not final_state.get("generated_answer"):
         return OUTCOME_REFUSED
+    # Before a failed validation: how the run ended is "the documents searched
+    # do not say"; the validation status still travels with the response.
+    if not_found_lead(final_state.get("generated_answer")):
+        return OUTCOME_NOT_FOUND
     if final_state.get("validation_status") == "failed":
         return OUTCOME_ANSWERED_UNVERIFIED
     return OUTCOME_ANSWERED

@@ -24,7 +24,15 @@ from app.markdown_safety import inert_markdown
 from app.styles import escape_currency, pill
 
 CLAIM_STATUSES = ("supported", "contradicted", "unsupported", "unverified")
-OUTCOMES = ("answered", "answered_unverified", "refused", "synthesis_failed")
+OUTCOMES = ("answered", "answered_unverified", "not_found", "refused", "synthesis_failed")
+
+# A "not found" (Decision 112): what the reader must know before trusting it.
+# Shared with the banner above the answer (answer_display.render_not_found).
+NOT_FOUND_DETAIL = (
+    "The answer says the documents do not contain this. That was checked against the "
+    "passages retrieved for this question, not against every document in the data room, "
+    "so the information may still be there."
+)
 
 
 def result_outcome(result: dict) -> str:
@@ -189,7 +197,7 @@ def answer_verdict(result: dict) -> tuple[str, str, str]:
 
     Returns:
         (key, label, detail) — key is one of verified | partial | failed |
-        no_claims | unknown.
+        not_found | no_claims | unknown.
     """
     checks = result.get("claim_checks") or []
     counts = claim_counts(checks)
@@ -213,6 +221,10 @@ def answer_verdict(result: dict) -> tuple[str, str, str]:
                 else "The answer did not pass verification, even after a revision."
             ) + (f" Also, {_CUT_OFF}" if cut else ""),
         )
+    # Never "verified": its absence statements hold for the passages searched,
+    # not necessarily for the data room (Decision 112).
+    if result_outcome(result) == "not_found":
+        return ("not_found", "NOT FOUND", NOT_FOUND_DETAIL + (f" Also, {_CUT_OFF}" if cut else ""))
     injected = bool(tainted) or cites_flagged
     if status == "warning" or (
         status == "passed" and (not_confirmed or cut or miscited or injected)

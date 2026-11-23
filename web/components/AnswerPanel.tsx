@@ -13,6 +13,7 @@ import {
   Loader2,
   RefreshCw,
   Scissors,
+  SearchX,
   ShieldAlert,
   ShieldQuestion,
   ShieldX,
@@ -55,6 +56,7 @@ const VERDICT_STYLE: Record<AnswerVerdict["key"], { icon: React.ElementType; cla
   failed: { icon: ShieldX, className: "text-bad bg-bad/12 border-bad/30" },
   no_claims: { icon: CircleDashed, className: "text-ash-300 bg-ink-850/70 border-line" },
   unknown: { icon: ShieldQuestion, className: "text-warn bg-warn/12 border-warn/30" },
+  not_found: { icon: SearchX, className: "text-warn bg-warn/12 border-warn/30" },
 };
 
 function Metric({
@@ -152,12 +154,16 @@ export default function AnswerPanel({
           <span className="text-[0.74rem] text-ash-500">{verdict.detail}</span>
         ) : result && (
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          <Metric
-            icon={Gauge}
-            label="Confidence"
-            value={`${confidence}%`}
-            tone={confidenceTone}
-          />
+          {/* A score on "the documents do not say" reads as confidence that
+              they do not, which nothing measured (Decision 112). */}
+          {result.outcome !== "not_found" && (
+            <Metric
+              icon={Gauge}
+              label="Confidence"
+              value={`${confidence}%`}
+              tone={confidenceTone}
+            />
+          )}
           <Metric
             icon={Clock}
             label="Latency"
@@ -178,7 +184,10 @@ export default function AnswerPanel({
       {/* The badge's tooltip is not enough for a failed or partial answer:
           the reader must see, before reading the text, that it is not all
           backed by the documents. */}
-      {(verdict.key === "failed" || verdict.key === "partial" || verdict.key === "unknown") && (
+      {(verdict.key === "failed" ||
+        verdict.key === "partial" ||
+        verdict.key === "unknown" ||
+        verdict.key === "not_found") && (
         <p
           role="note"
           className={`border-b border-line px-6 py-2.5 text-[0.8rem] leading-snug ${
