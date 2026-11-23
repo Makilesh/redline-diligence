@@ -102,7 +102,7 @@ routing:
 deadlines:
   # Per request, enforced in src/llm/litellm_wrapper.py.
   structured_timeout_seconds: 20    # cloud; 118 live calls took <= 2.5s
-  local_structured_timeout_seconds: 60
+  local_structured_timeout_seconds: 120   # 16K local window: ~24 tokens/s on a 12 GB GPU (Decision 106)
   prose_total_seconds: 120
   # Synthesis is streamed (also on the blocking /query path) so a model that
   # has not STARTED answering is abandoned early: 2 + max_tokens / 150 = 56.6s

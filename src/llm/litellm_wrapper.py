@@ -342,9 +342,12 @@ REPAIR_ECHO_CHARS = 4000
 # a hung Lite model charged in full on each of the ~3 structured calls a query
 # makes. The local model is not held to it: it has no rung below it, and a 14B
 # model on a consumer GPU reading an 8K-token prompt is slower than any cloud
-# rung without being unhealthy.
+# rung without being unhealthy. Its 60s became 120s with the 16K window
+# (Decision 106): qwen2.5:14b then runs ~24 tokens/s on a 12 GB GPU (~41 at
+# 8K), so the judge's 1,500-token budget alone takes ~62s; the slowest local
+# call of the end-to-end run (532 tokens) took 27s.
 STRUCTURED_TIMEOUT_SECONDS = 20.0
-LOCAL_STRUCTURED_TIMEOUT_SECONDS = 60.0
+LOCAL_STRUCTURED_TIMEOUT_SECONDS = 120.0
 
 # Prose: the TOTAL budget for one synthesis request. Healthy synthesis takes
 # 5-14s (59 calls in the live run; one outlier at 34s). On its own this bound
