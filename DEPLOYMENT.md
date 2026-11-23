@@ -722,8 +722,8 @@ one deal at a time (`--deal`), each with its own report before and after.
 ## Not yet verified
 
 - **The real ARM host.** The image is built for linux/arm64 and smoke-tested
-  under emulation (QEMU) on the development machine (rounds 12–14: the models
-  load offline at their pins; round 16's arm64 build was not run). It has never run on the Oracle A1
+  under emulation (QEMU) on the development machine (rounds 12–16: the models
+  load offline at their pins). It has never run on the Oracle A1
   host, so its speed there — embedding a deal on two or four ARM cores — is
   unmeasured. The merged compose file and the Caddyfile were validated
   (`docker compose config`, `caddy validate`).
