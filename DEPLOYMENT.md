@@ -739,3 +739,12 @@ one deal at a time (`--deal`), each with its own report before and after.
 - **Indexes written to a server before Decision 108** keep the columns of
   header-named table rows shuffled until each document is re-ingested from
   its file; the tie-out reads those rows in the stored order.
+  `python -m src.vector_db.reingest_report` names those documents
+  ("table chunk(s) store rows without their column order", Decision 111).
+- **Capacity on the host.** On the development machine a large PDF upload no
+  longer stalls the questions asked while it is parsed: the parse runs in a
+  child process of the API container (Decision 110; a fresh one per document,
+  inside the API's `mem_limit`, and the first process the OOM killer takes).
+  While the upload's chunks are embedded, a question still shares the CPU
+  with it (there: retrieval 1.4 s instead of 0.3 s, validation slower too).
+  How that plays out on two ARM cores is unmeasured.

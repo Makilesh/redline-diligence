@@ -573,3 +573,47 @@ class TestDriver:
         assert '"planned": 1' in capsys.readouterr().out
         assert reingest_run.main(["--path", str(store), "--files", str(originals)]) == 0
         assert '"planned": 0' in capsys.readouterr().out
+
+
+# ==============================================================================
+# Tables stored without their column order (Decision 108)
+# ==============================================================================
+
+
+def _table_document(rows: list[dict]) -> reingest_report.DocumentPoints:
+    from src.vector_db.hybrid_search import SPARSE_ENCODING_VERSION
+
+    children = _state(["0000", "0001"], ingest_version=1, file_type="xlsx",
+                      sparse_encoding=SPARSE_ENCODING_VERSION, is_current_version=1)
+    children[1][1]["structured_rows"] = rows
+    return reingest_report.DocumentPoints("d", "x", children, [])
+
+
+@pytest.mark.parametrize("rows, action", [
+    ([{"label": "Revenue", "values": {"FY2023": "452.8", "FY2022": "387.1"}}], "reingest"),
+    ([{"label": "Revenue", "values": {"FY2023": "452.8", "FY2022": "387.1"},
+       "columns": ["FY2023", "FY2022"]}], "nothing"),
+    ([{"label": "Revenue", "values": {"Column 2": "452.8", "Column 3": "387.1"}}], "nothing"),
+    ([{"label": "Revenue", "values": {"FY2023": "452.8"}}], "nothing"),
+    ([], "nothing"),
+], ids=["header-names", "with-columns", "placeholders", "one-cell", "no-rows"])
+def test_tables_stored_without_their_column_order_are_reingested(rows, action):
+    row = reingest_report.plan_document(_table_document(rows), None, None)
+    assert row["action"] == action
+    assert row["unordered_table_chunks"] == (1 if action == "reingest" else 0)
+    if action == "reingest":
+        assert "without their column order" in row["reasons"][0]
+
+
+def test_the_report_reads_the_rows_it_checks():
+    assert "structured_rows" in reingest_report.CHILD_FIELDS
+
+
+def test_collect_keeps_a_flag_not_the_rows():
+    rows = [{"label": "Revenue", "values": {"FY2023": "452.8", "FY2022": "387.1"}}]
+    assert reingest_report.rows_unordered(rows) is True
+    assert reingest_report.rows_unordered(None) is False
+    doc = _table_document([])
+    doc.children[1][1].pop("structured_rows")
+    doc.children[1][1][reingest_report.ROWS_UNORDERED] = True
+    assert reingest_report.plan_document(doc, None, None)["unordered_table_chunks"] == 1

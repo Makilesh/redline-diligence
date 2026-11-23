@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from src.utils.numerical_registry import NumericalRegistry, row_cells
+from src.utils.numerical_registry import NumericalRegistry, column_order_known, row_cells
 from tests.test_table_conversion import MIXED_UNIT_ROWS, _structured
 
 FIXTURE = Path(__file__).parent / "fixtures" / "table_column_order_chunk.json"
@@ -107,3 +107,16 @@ def test_the_converter_writes_each_rows_column_order():
     assert rows
     for row in rows.values():
         assert row["columns"] == list(row["values"])
+
+
+@pytest.mark.parametrize("row, known", [
+    ({"values": {"FY2023": 1, "FY2022": 2}, "columns": ["FY2023", "FY2022"]}, True),
+    ({"values": {"Column 3": 1, "Column 2": 2}}, True),            # placeholders sort by number
+    ({"values": {"FY2023": 1}}, True),                              # one cell: no order to lose
+    ({}, True),
+    ({"values": {"FY2023": 1, "FY2022": 2}}, False),               # header names, no `columns`
+    ({"values": {"FY2023": 1, "FY2022": 2}, "columns": ["FY2023"]}, False),  # a stale order
+    ({"values": {"Column 3": 1, "Total": 2}}, False),              # mixed
+])
+def test_column_order_known(row, known):
+    assert column_order_known(row) is known

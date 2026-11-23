@@ -1501,6 +1501,30 @@ _NIL_MARKS = {"-", "—", "–", "−", "n/a", "na", "n.a.", "nm", "n.m.", "n/m"
 _PLACEHOLDER_COLUMN = re.compile(r"^Column (\d+)$")
 
 
+def _stated_order(row: dict) -> list | None:
+    """The row's `columns`, when it names exactly the columns of `values`."""
+    values = row.get("values") or {}
+    columns = row.get("columns")
+    if isinstance(columns, list) and len(columns) == len(values) and set(columns) == set(values):
+        return columns
+    return None
+
+
+def column_order_known(row: dict) -> bool:
+    """
+    Whether row_cells reads this row in its table's order, whatever order the
+    index returns `values` in: it states its order in `columns`, its columns are
+    placeholders ("Column 2", ...) that sort by number, or it has fewer than two
+    cells. A row this is False for was written before Decision 108 with header
+    names, and only re-ingesting its document restores the order
+    (reingest_report lists those documents).
+    """
+    values = row.get("values") or {}
+    if len(values) < 2 or _stated_order(row) is not None:
+        return True
+    return all(_PLACEHOLDER_COLUMN.match(str(column)) for column in values)
+
+
 def row_cells(row: dict) -> list[tuple[str, object]]:
     """
     A structured row's (column, cell) pairs in the table's left-to-right order.
@@ -1517,8 +1541,8 @@ def row_cells(row: dict) -> list[tuple[str, object]]:
     re-ingesting the document.
     """
     values = row.get("values") or {}
-    columns = row.get("columns")
-    if isinstance(columns, list) and len(columns) == len(values) and set(columns) == set(values):
+    columns = _stated_order(row)
+    if columns is not None:
         return [(column, values[column]) for column in columns]
     numbers = [_PLACEHOLDER_COLUMN.match(str(column)) for column in values]
     if values and all(numbers):

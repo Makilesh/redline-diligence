@@ -59,7 +59,7 @@ async def _candidates_for_query(
         query_sparse: Its BM25 sparse vector.
         config: Retrieval config (weights, top-k values).
         deal_id: Deal scope.
-        metadata_filters: Filters, already relaxed/augmented by the caller.
+        metadata_filters: The pass's filters (deal scope is passed separately).
 
     Returns:
         Up to reranker_top_k chunk payloads in fused-rank order, then (with
@@ -352,47 +352,27 @@ async def retrieval_executor_node(state: AgentState) -> dict:
     # Clamp on read as well: the config in state may have been rewritten by an LLM.
     config = {**config, **clamp_retrieval_config(config)}
 
-    # Step 2: Build filters
-    # include_pii is injected here rather than living in extracted_filters, because
-    # Agents 1 and 6 deliberately strip that key from anything an LLM produced. The
-    # only trusted source is the authenticated request, which lands on the state root.
-    include_pii = bool(state.get("include_pii", False))
+    # Step 2: Build filters.
+    #
+    # Only isolation and compliance constraints filter the search: deal_id (in
+    # hybrid_search), the current-version rule and PII. include_pii comes from
+    # the authenticated request on the state root, never from a model.
+    #
+    # Agent 1's document_category is NOT applied (Decision 109). It was a hard
+    # `must` condition on the first pass, relaxed only after a rewrite, and a
+    # wrong guess removed the answer from the search space while the remaining
+    # context still looked good: measured on the 35 answerable golden questions,
+    # a wrong category cut the facts in the synthesis context from 97% to 21%
+    # (97 of 103 question/category pairs lost facts, and the heuristic gate
+    # admitted 21 of those, so the answer said the documents did not contain
+    # it). The right category added no fact to any context. Every benchmark has
+    # always run without it; production now does too. The proposal stays in
+    # state and in the trace as a hint.
     proposed = state.get("extracted_filters")
-    metadata_filters = {
-        **(proposed if isinstance(proposed, dict) else {}),  # a model may return null
-        "include_pii": include_pii,
-    }
+    category_hint = (proposed or {}).get("document_category") if isinstance(proposed, dict) else None
+    include_pii = bool(state.get("include_pii", False))
+    metadata_filters = {"include_pii": include_pii}
 
-    # Progressive filter relaxation.
-    #
-    # document_category is Agent 1's *guess* at which kind of document holds the
-    # answer, applied as a hard `must` condition. When that guess is wrong the
-    # answer is removed from the search space entirely and no amount of query
-    # rewriting can recover it — the rewriter only changes text, never filters.
-    #
-    # Measured on the golden set: legal_01 ("per-share merger consideration") was
-    # classified financial, so the merger agreement — the one document containing
-    # the answer — was filtered out; fin_05 (credit facility terms) was classified
-    # legal and excluded the financials; comp_02 (valuation methodologies) was
-    # classified financial and excluded the board deck. All three refused after
-    # burning both rewrite attempts against a search space that could never
-    # contain the answer.
-    #
-    # It is also compounding two error sources: an LLM guessing a category that
-    # was itself assigned by a heuristic classifier at ingestion time.
-    #
-    # So: keep the filter on the first attempt, where it buys precision, and drop
-    # it once retrieval has already failed and we are explicitly trading precision
-    # for recall. deal_id, version and PII filters are NEVER relaxed — those are
-    # isolation and compliance constraints, not relevance hints.
-    if state.get("rewrite_iteration", 0) >= 1:
-        dropped = metadata_filters.pop("document_category", None)
-        if dropped:
-            logger.info(
-                "Relaxing document_category filter after failed retrieval",
-                extra={"dropped_category": dropped,
-                       "rewrite_iteration": state.get("rewrite_iteration")},
-            )
     # Step 3: Plan the retrieval passes.
     #
     # For a pointed question this is a single pass on the query itself. For a
@@ -437,59 +417,13 @@ async def retrieval_executor_node(state: AgentState) -> dict:
     # per-pass share happens at merge time.
     pass_config = {**config, "final_top_k": max(parent_k, sub_k)}
 
-    # A sub-question must not inherit the parent's document_category.
-    #
-    # That filter is Agent 1's guess at which document answers the question as a
-    # whole. A sub-question exists precisely because it asks for a *different*
-    # fact, which usually lives somewhere else — so applying the parent's guess
-    # to it re-creates the problem decomposition was meant to solve.
-    #
-    # Measured: "implied EV/EBITDA multiple" decomposed correctly into share
-    # price, share count and FY2023 EBITDA, but every pass inherited one category
-    # filter and all three returned chunks from the same document. The engine
-    # then reported it could not compute the multiple — decomposition had done
-    # its job and the filter had thrown the result away.
-    #
-    # deal_id, version and PII filters still apply to every pass: those are
-    # isolation and compliance constraints, not relevance hints.
-    sub_question_filters = {
-        k: v for k, v in metadata_filters.items() if k != "document_category"
-    }
-
-    # The parent pass drops the category too, once a query has been decomposed.
-    #
-    # Decomposing is Agent 1 stating that the answer spans several facts. Those
-    # facts routinely live in documents of different categories, so constraining
-    # the parent search to one category contradicts the judgment that produced
-    # the sub-questions in the first place.
-    #
-    # Measured on "implied EV/EBITDA multiple of the Vertex deal": the aggregate
-    # merger consideration of $696 million is stated in the regulatory memo and
-    # in the merger agreement. Agent 1 classifies the question `financial` or
-    # `legal`, and either filter removes the chunk that states it — retrieval
-    # then returns a context full of plausible, high-scoring financial chunks
-    # with the one required number absent, and the engine reports that the
-    # multiple cannot be computed.
-    #
-    # Progressive relaxation (see the rewrite path) does not rescue this. It
-    # triggers on *low* context quality, and this context scores well — it is
-    # incomplete, not weak. Nothing downstream can tell the difference, which is
-    # why the filter has to come off before the search rather than after it.
-    #
-    # deal_id, version and PII filters still apply to every pass: those are
-    # isolation and compliance constraints, not relevance hints.
-    parent_filters = sub_question_filters if sub_questions else metadata_filters
-
-    def _filters_for(index: int) -> dict:
-        return parent_filters if index == 0 else sub_question_filters
-
     # Passes are independent: their searches run concurrently and their model
     # work is batched (see _retrieve_for_queries).
     per_query_results = await _retrieve_for_queries(
         retrieval_queries,
         pass_config,
         deal_id,
-        [_filters_for(i) for i in range(len(retrieval_queries))],
+        [metadata_filters] * len(retrieval_queries),
     )
 
     if len(retrieval_queries) == 1:
@@ -563,6 +497,8 @@ async def retrieval_executor_node(state: AgentState) -> dict:
                 "elapsed_ms": round(elapsed_ms, 2),
                 "retrieval_passes": len(retrieval_queries),
                 "sub_questions": sub_questions,
+                # Agent 1's guess at the document category: recorded, not applied.
+                **({"category_hint": category_hint} if category_hint else {}),
                 "reranked_count": len(reranked),
                 "sources": sorted(
                     {c.get("source_file", "") for c in reranked} - {""}

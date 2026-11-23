@@ -169,31 +169,31 @@ class TestQualityAssessorHeuristic:
         assert b["context_quality_score"] >= a["context_quality_score"]
 
 
-class TestProgressiveFilterRelaxation:
+class TestCategoryIsAHintNotAFilter:
     """
-    Agent 3 must relax the document_category filter once retrieval has failed.
+    Agent 1's document_category never filters the search (Decision 109).
 
-    document_category encodes Agent 1's guess at which document holds the answer,
-    applied as a hard Qdrant `must`. When the guess is wrong the answer is outside
-    the search space and the rewrite loop — which only changes query text — can
-    never recover it. Isolation (deal_id) and compliance (PII, version) filters
-    must survive relaxation.
+    It was a hard Qdrant `must` on the first attempt, relaxed after a rewrite. On
+    the 35 answerable golden questions a wrong category cut the facts in the
+    synthesis context from 97% to 21%, and the heuristic gate still admitted 21
+    of the 97 damaged contexts; the right one added no fact. Isolation (deal_id)
+    and compliance (PII, version) filters are unaffected.
     """
 
     @staticmethod
-    async def _capture_filters(monkeypatch, rewrite_iteration: int) -> dict:
-        """Runs the node with retrieval stubbed out, returning the filters it sent."""
+    async def _run(monkeypatch, rewrite_iteration: int, proposed: dict) -> tuple[list[dict], dict]:
+        """Runs the node with retrieval stubbed out: (filters of every search, the trace entry)."""
         import numpy as np
         import src.agents.retrieval_executor as rx
 
-        captured: dict = {}
+        searches: list[dict] = []
 
         async def fake_hybrid_search(**kwargs):
-            captured.update(kwargs["metadata_filters"])
+            searches.append(dict(kwargs["metadata_filters"]))
             return [], []
 
         async def fake_embed(texts):
-            return [np.zeros(1024)]
+            return [np.zeros(1024) for _ in texts]
 
         async def fake_expand(**kwargs):
             return []
@@ -204,7 +204,7 @@ class TestProgressiveFilterRelaxation:
         monkeypatch.setattr(rx, "expand_context", fake_expand)
         monkeypatch.setattr(rx, "reciprocal_rank_fusion", lambda **kw: [])
 
-        await rx.retrieval_executor_node({
+        out = await rx.retrieval_executor_node({
             "current_query": "what is the merger consideration per share?",
             "query_type": "legal",
             "parsed_intent": {},
@@ -212,21 +212,24 @@ class TestProgressiveFilterRelaxation:
             "include_pii": False,
             "rewrite_iteration": rewrite_iteration,
             "retrieval_config": {},
-            "extracted_filters": {"document_category": "financial", "doc_id": "d1"},
+            "extracted_filters": proposed,
+            "sub_questions": ["what is the share price?", "how many shares are outstanding?"],
         })
-        return captured
+        return searches, out["agent_trace"][0]
 
     @pytest.mark.asyncio
-    async def test_category_kept_on_first_attempt(self, monkeypatch):
-        """First attempt keeps the category filter — it buys precision."""
-        filters = await self._capture_filters(monkeypatch, rewrite_iteration=0)
-        assert filters["document_category"] == "financial"
+    @pytest.mark.parametrize("rewrite_iteration", [0, 1, 2])
+    async def test_the_category_never_filters_any_pass(self, monkeypatch, rewrite_iteration):
+        searches, trace = await self._run(monkeypatch, rewrite_iteration, {"document_category": "financial"})
+        assert len(searches) == 3  # the parent query and both sub-questions
+        assert all(f == {"include_pii": False} for f in searches)
+        assert trace["category_hint"] == "financial"  # kept as a hint
 
     @pytest.mark.asyncio
-    async def test_category_dropped_after_rewrite(self, monkeypatch):
-        """After a failed attempt, trade precision for recall."""
-        filters = await self._capture_filters(monkeypatch, rewrite_iteration=1)
-        assert "document_category" not in filters
+    async def test_no_proposed_key_becomes_a_filter(self, monkeypatch):
+        searches, trace = await self._run(monkeypatch, 0, {"doc_id": "d1", "is_table": True})
+        assert all(f == {"include_pii": False} for f in searches)
+        assert "category_hint" not in trace
 
     @pytest.mark.asyncio
     async def test_isolation_and_compliance_filters_survive(self, monkeypatch):
@@ -578,13 +581,13 @@ class TestSubQuestionDecomposition:
             assert pass_["filters"]["include_pii"] is False
 
     @pytest.mark.asyncio
-    async def test_undecomposed_query_keeps_the_category_filter(self, monkeypatch):
+    async def test_undecomposed_query_has_no_category_filter_either(self, monkeypatch):
         """
-        Without sub-questions the category filter stays — it buys precision.
+        A pointed lookup gets no category filter either (Decision 109).
 
-        The relaxation above is scoped to decomposed queries deliberately. A
-        pointed single-fact lookup is exactly the case the filter helps, and
-        dropping it everywhere would trade precision for nothing.
+        It used to keep one on the grounds that a single-fact lookup is where the
+        filter helps. Measured on the golden set, the right category never added
+        a fact to the context and a wrong one removed the answer.
         """
         import src.agents.retrieval_executor as rx
 
@@ -611,7 +614,7 @@ class TestSubQuestionDecomposition:
         })
 
         assert len(seen) == 1
-        assert seen[0]["filters"].get("document_category") == "financial"
+        assert seen[0]["filters"] == {"include_pii": False}
 
     @pytest.mark.asyncio
     async def test_decomposition_never_shrinks_the_parent_budget(self, monkeypatch):

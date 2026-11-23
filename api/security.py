@@ -667,7 +667,7 @@ _RECORD_FIELDS: dict[str, frozenset[str]] = {
         "agent", "model", "perf", "elapsed_ms", "skipped", "reason", "degraded", "error",
         "input_query", "output",
         "retrieval_passes", "sub_questions", "reranked_count", "sources", "retrieved_chunk_ids",
-        "table_siblings_missing", "section_tables_missing",
+        "category_hint", "table_siblings_missing", "section_tables_missing",
         "method", "figures", "cross_checked", "inconsistencies",
         "score", "answerability", "answerability_veto", "laya_ms", "laya_pairs",
         "iteration", "rewritten_query",
@@ -687,7 +687,8 @@ _RECORD_FIELDS: dict[str, frozenset[str]] = {
         "perf",
     }),
     "detail": frozenset({
-        "query_type", "sub_questions", "filters", "model", "reranked_count", "retrieval_passes",
+        "query_type", "sub_questions", "category_hint", "model", "reranked_count",
+        "retrieval_passes",
         "sources", "elapsed_ms", "figures", "cross_checked", "inconsistencies", "method", "score",
         "missing_aspects", "breakdown", "answerability", "answerability_veto", "rewritten_query",
         "iteration", "citation_count", "answer_length", "revision", "answer_truncated",
