@@ -137,6 +137,19 @@ async def offline_pipeline(monkeypatch, tmp_path):
         await pipeline.aclose()
 
 
+@pytest.fixture
+def parse_in_process(monkeypatch):
+    """
+    Runs the isolated parsers (src/data_processing/parse_isolation.py) in this process.
+
+    For a test that patches a processor to make it fail: the child is spawned and imports
+    its own, unpatched modules (Decisions 110, 114).
+    """
+    import src.data_processing.parse_isolation as iso
+
+    monkeypatch.setattr(iso, "_run", lambda fn, *args, timeout=None: fn(*args))
+
+
 @dataclass
 class MockScoredPoint:
     """Mock Qdrant ScoredPoint for testing."""

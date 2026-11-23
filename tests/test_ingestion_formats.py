@@ -168,7 +168,9 @@ class TestXlsx:
         assert notes[0]["content_type"] == "table_text"
         assert "Deloitte" in notes[0]["text"]
 
-    def test_all_sheets_failing_is_an_error_not_an_empty_success(self, tmp_path, monkeypatch):
+    def test_all_sheets_failing_is_an_error_not_an_empty_success(
+        self, tmp_path, monkeypatch, parse_in_process
+    ):
         from src.data_processing import excel_processor
         from src.data_processing.ingest_pipeline import DocumentExtractionError
 

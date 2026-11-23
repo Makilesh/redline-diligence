@@ -536,8 +536,9 @@ def extract_sections(
         warnings.extend(pdf_warnings)
 
     elif extension == ".docx":
-        from src.data_processing.docx_processor import process_docx_with_versions
-        clean_chunks, redline_chunks = process_docx_with_versions(file_path, doc_id)
+        # The office parsers run in the child too (Decision 114).
+        from src.data_processing.parse_isolation import parse_office
+        clean_chunks, redline_chunks = parse_office(".docx", file_path, doc_id)
         for chunk in clean_chunks:
             if chunk.metadata.get("table_rows"):
                 sections.extend(_table_sections(
@@ -569,9 +570,8 @@ def extract_sections(
             })
 
     elif extension == ".pptx":
-        from src.data_processing.pptx_processor import PPTXProcessor
-        processor = PPTXProcessor()
-        for s in processor.to_text_chunks(processor.process(file_path, doc_id)):
+        from src.data_processing.parse_isolation import parse_office
+        for s in parse_office(".pptx", file_path, doc_id):
             if s.get("is_table"):
                 sections.extend(_table_sections(
                     rows=s.get("table_rows"),
@@ -585,15 +585,14 @@ def extract_sections(
                 sections.append(s)
 
     elif extension == ".xlsx":
-        from src.data_processing.excel_processor import ExcelProcessor
-        processor = ExcelProcessor()
-        sheets = processor.process(file_path, doc_id, table_id_prefix=f"{deal_id}_{doc_id}")
-        sections = processor.to_chunks(sheets)
+        from src.data_processing.parse_isolation import parse_office
+        sections, failed_sheets, sheet_warnings = parse_office(
+            ".xlsx", file_path, doc_id, table_id_prefix=f"{deal_id}_{doc_id}")
         warnings.extend(
             f"Sheet '{f['sheet_name']}' could not be processed"
-            for f in processor.failed_sheets
+            for f in failed_sheets
         )
-        warnings.extend(processor.warnings)
+        warnings.extend(sheet_warnings)
 
     elif extension == ".txt":
         with open(file_path, "rb") as f:
