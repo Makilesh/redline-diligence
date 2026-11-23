@@ -508,9 +508,12 @@ def extract_sections(
         return table_id
 
     if extension == ".pdf":
-        from src.data_processing.pdf_processor import PDFProcessor
-        processor = PDFProcessor(legal_mode=document_category == "legal")
-        for s in processor.process(file_path, doc_id):
+        # In a child process: the parse holds the GIL, and on a thread of the API's
+        # process it stalled every other request (parse_isolation, Decision 110).
+        from src.data_processing.parse_isolation import parse_pdf
+        pdf_sections, pdf_warnings = parse_pdf(
+            file_path, doc_id, legal_mode=document_category == "legal")
+        for s in pdf_sections:
             if s.is_table:
                 sections.extend(_table_sections(
                     rows=s.table_rows,
@@ -530,7 +533,7 @@ def extract_sections(
                     "section_type": s.section_type,
                     "clause_id": s.clause_id,
                 })
-        warnings.extend(processor.warnings)
+        warnings.extend(pdf_warnings)
 
     elif extension == ".docx":
         from src.data_processing.docx_processor import process_docx_with_versions
