@@ -195,5 +195,5 @@ def _oom_score_adj() -> str:
 def test_the_child_is_the_one_the_oom_killer_takes():
     # Under the container's memory ceiling, the kernel kills the highest score: the
     # parser, not the API holding the models.
-    assert iso._submit(_oom_score_adj) == "1000"
+    assert iso._run(_oom_score_adj) == "1000"
     assert _oom_score_adj() != "1000"
