@@ -23,6 +23,7 @@ import {
 import { SseParser } from "./sse";
 import type {
   BudgetStatus,
+  DataHandling,
   ChecklistReport,
   Deal,
   DocumentRecord,
@@ -112,6 +113,17 @@ export const listRiskSignals = (dealId: string) =>
   getJson<RiskSignal[]>(`/deals/${encodeURIComponent(dealId)}/risk-signals`);
 
 export const getBudget = () => getJson<BudgetStatus>("/budget");
+
+/**
+ * Where document text goes (Decision 116), or null when it could not be read —
+ * which the upload panel treats as "assume it leaves", not as "it stays".
+ */
+export async function getDataHandling(): Promise<DataHandling | null> {
+  const body = await getJson<Partial<DataHandling>>("/data-handling");
+  if (!body || typeof body !== "object") return null;
+  const text = (v: unknown) => (typeof v === "string" && v.trim() ? v : null);
+  return { hosted_llm: text(body.hosted_llm), upload_notice: text(body.upload_notice) };
+}
 
 /**
  * The deal's figure tie-out report (Decision 92), or null when it cannot be

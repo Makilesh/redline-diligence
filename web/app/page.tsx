@@ -20,6 +20,7 @@ import { BRAND } from "@/lib/brand";
 import {
   API_BASE,
   getBudget,
+  getDataHandling,
   listDeals,
   listDocuments,
   listRiskSignals,
@@ -32,6 +33,7 @@ import { useSandbox } from "@/lib/useSandbox";
 import { answerVerdict, resultView } from "@/lib/verification";
 import type {
   BudgetStatus,
+  DataHandling,
   Deal,
   DocumentRecord,
   PipelineStage,
@@ -123,6 +125,13 @@ export default function Home() {
     void refreshDeals();
     refreshBudget();
   }, [refreshDeals, refreshBudget]);
+
+  // Where uploaded text goes (Decision 116). undefined while loading; null if it
+  // could not be read, which the upload panel treats as "assume it leaves".
+  const [dataHandling, setDataHandling] = useState<DataHandling | null | undefined>(undefined);
+  useEffect(() => {
+    void getDataHandling().then(setDataHandling);
+  }, []);
 
   // Deal-scoped panels. Refetched whenever the deal changes, and after an
   // upload lands (the sandbox hook bumps `deals`, which changes the id).
@@ -478,6 +487,7 @@ export default function Home() {
               uploading={sandbox.uploading}
               error={sandbox.error}
               lastUpload={sandbox.lastUpload}
+              dataHandling={dataHandling}
               onUpload={sandbox.upload}
               onDiscard={sandbox.discard}
             />

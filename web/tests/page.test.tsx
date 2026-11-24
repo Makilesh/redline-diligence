@@ -33,6 +33,10 @@ vi.mock("@/lib/api", () => ({
   listRiskSignals: vi.fn(async () => []),
   getTieOut: vi.fn(async () => null),
   getBudget: vi.fn(async () => null),
+  getDataHandling: vi.fn(async () => ({
+    hosted_llm: "Google Gemini API",
+    upload_notice: "Passages are sent to Google's Gemini API.",
+  })),
   createDeal: vi.fn(),
   ingestDocument: vi.fn(),
   purgeDeal: vi.fn(),

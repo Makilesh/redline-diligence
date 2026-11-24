@@ -32,6 +32,7 @@ from api.security import (
     ingest_rate_limit,
     max_upload_bytes,
     public_error_detail,
+    read_rate_limit,
     require_sandbox_deal,
 )
 from src.data_processing.ingest_pipeline import (
@@ -53,6 +54,18 @@ logger = setup_logger(__name__)
 router = APIRouter()
 
 _READ_CHUNK_BYTES = 1024 * 1024
+
+
+@router.get("/data-handling", dependencies=[Depends(read_rate_limit)])
+async def get_data_handling():
+    """
+    Whether document text leaves this server, and the notice the upload panels
+    show before an upload (Decision 116). Public: a user deciding what to upload
+    needs it; it says only whether a hosted model is configured, not which keys.
+    """
+    from src.llm.data_handling import upload_notice
+
+    return upload_notice()
 
 
 def _max_upload_bytes() -> int:
