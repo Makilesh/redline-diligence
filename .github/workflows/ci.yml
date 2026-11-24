@@ -60,7 +60,7 @@ jobs:
       # chunkers) are cached between runs. Full model weights are never
       # downloaded here: tests that need them are marked `models` and deselected.
       - name: Cache Hugging Face hub
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/huggingface
           key: hf-${{ runner.os }}-v1
@@ -168,7 +168,7 @@ jobs:
       # bge-m3 and bge-reranker-v2-m3 weights (~4.5GB) — cached so only the
       # first run downloads them.
       - name: Cache Hugging Face models
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/huggingface
           key: hf-eval-${{ runner.os }}-bge-m3-bge-reranker-v2-m3-v1
