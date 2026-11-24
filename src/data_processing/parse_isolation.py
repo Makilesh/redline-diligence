@@ -196,11 +196,31 @@ def _discard(pool: ProcessPoolExecutor, *, kill: bool) -> None:
     pool.shutdown(wait=False, cancel_futures=True)
 
 
+def _submit(fn, *args):
+    """
+    Submits fn to the pool, replacing a pool that broke while it was idle.
+
+    A parse's child exits when it is done, and the pool starts the next one at once,
+    to wait idle with the OOM killer's highest score. If that child dies before it
+    is given a file, the pool is broken by the time of the next submit, which raises
+    BrokenProcessPool before queueing anything: that upload never reached a child, so
+    it goes to a fresh pool. (A file that killed the parser is still not retried.)
+    Without this, the broken pool stayed installed and every later upload failed.
+    """
+    pool = _get_pool()
+    try:
+        return pool, pool.submit(fn, *args)
+    except BrokenProcessPool:
+        logger.warning("Parser pool broke between parses; starting a fresh one")
+        _discard(pool, kill=False)
+    pool = _get_pool()
+    return pool, pool.submit(fn, *args)
+
+
 def _run(fn, *args, timeout: float | None = None):
     """Runs fn in a child, one call at a time."""
     with _parse_lock:
-        pool = _get_pool()
-        future = pool.submit(fn, *args)
+        pool, future = _submit(fn, *args)
         try:
             return future.result(timeout=timeout)
         except FutureTimeout:

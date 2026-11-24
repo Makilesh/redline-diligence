@@ -17,7 +17,7 @@ citation. What stands between the two is hosting, legal and access decisions
 
 | What | Evidence | Re-run |
 |---|---|---|
-| Offline test suite, lint, fuzz | 2,933 passed + 3 expected failures (1 Linux-only test skipped on Windows); lint clean; fuzz 72/72 | `pytest`, `ruff check .`, `HYPOTHESIS_PROFILE=fuzz pytest tests/test_fuzz_properties.py` |
+| Offline test suite, lint, fuzz | 2,934 passed + 3 expected failures (1 Linux-only test skipped on Windows); lint clean; fuzz 72/72 | `pytest`, `ruff check .`, `HYPOTHESIS_PROFILE=fuzz pytest tests/test_fuzz_properties.py` |
 | Benchmarks unchanged by a change | verification, FactCG, golden retrieval (PASS), answerability: field-by-field diff against the previous round | `python -m eval.run_verification_eval …` and siblings (Decision 104 lists the gate set) |
 | Models load at pinned commits, also offline | 7/7, and 7/7 with the network off (Decisions 84, 100) | `pytest -m models` (with `HF_HUB_OFFLINE=1`) |
 | A real LLM end to end | sample deal, local qwen2.5:14b, deployed CPU profile, API and console: 6 of 6 answerable questions answered with the expected figures and cited once the guessed category stopped filtering retrieval (Decisions 106, 109); out-of-scope refused; an outage reported as one | the questions, settings and checks are in Decision 106; no hosted LLM was called |
@@ -111,6 +111,10 @@ citation. What stands between the two is hosting, legal and access decisions
     NLI validation ~40% longer on the development machine (Decision 110). All four
     parsed formats now parse in the child process (Decisions 110, 114); the embedding
     is CPU sharing, to be measured on the host (H2).
+11. A parser child that died while idle used to stop every later upload until a
+    restart; the pool is now replaced (Decision 115). What killed that child in one
+    CI run is not known, and a child that dies after an upload was queued to it still
+    fails that one upload.
 
 ## How to check a change
 
