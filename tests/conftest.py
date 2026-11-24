@@ -3,6 +3,7 @@ Shared pytest fixtures for M&A Due Diligence Intelligence Engine tests.
 """
 
 import os
+import sys
 from dataclasses import dataclass
 
 import pytest
@@ -117,6 +118,26 @@ def _dead_api_refuses_at_once():
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(HTTPAdapter, "send", send)
         yield
+
+
+@pytest.fixture(autouse=True)
+def _main_module_is_restored():
+    """
+    Puts back the test process's `__main__` that Streamlit's AppTest replaces.
+
+    AppTest runs its script as `__main__` and leaves it installed: after a console
+    test, `sys.modules["__main__"]` was app/streamlit_app.py or AppTest's generated
+    script. A spawned process runs the parent's main file before its task, so every
+    parser child (Decisions 110, 114) then ran the whole Streamlit app first, or died
+    on the generated script ("NameError: name '__args' is not defined") — and with
+    the pool replaced on each death (Decision 115), every parse after it in the
+    suite failed "the parser stopped". Which test left which script depended on the
+    order the suite ran in.
+    """
+    main = sys.modules.get("__main__")
+    yield
+    if main is not None and sys.modules.get("__main__") is not main:
+        sys.modules["__main__"] = main
 
 
 @pytest_asyncio.fixture
