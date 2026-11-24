@@ -546,3 +546,26 @@ def test_a_not_found_answer_is_reported_and_counted_as_one(client, stub_pipeline
     assert 'redline_queries_total{outcome="not_found",transport="blocking"} 1' in text
     assert 'redline_queries_total{outcome="not_found",transport="stream"} 1' in text
     assert 'outcome="answered"' not in text
+
+
+def test_what_a_fitted_context_left_out_reaches_a_public_caller(client, stub_pipeline, monkeypatch):
+    """Decision 118: both routes, in the response and in the synthesis stage's detail."""
+    cut = {"passages_used": 6, "passages_available": 14, "chars_used": 30_000, "chars_available": 64_000}
+
+    async def fitted_synthesis(state):
+        stub_pipeline.calls.append("answer_synthesizer")
+        return {"generated_answer": "Revenue was $452.8 million [1].", "confidence_score": 0.9,
+                "evidence_cut": cut, "citations": [],
+                "agent_trace": [{"agent": "answer_synthesizer", "context_fits": [{"window": 16_384}]}]}
+
+    monkeypatch.setattr(orchestrator, "answer_synthesizer_node", fitted_synthesis)
+    compiled = orchestrator.build_graph().compile(checkpointer=MemorySaver())
+    monkeypatch.setattr(api_main, "_app_graph", compiled)
+
+    assert client.post("/api/v1/query", json=QUERY).json()["evidence_cut"] == cut
+    events = _events(client.post("/api/v1/query/stream", json=QUERY).text)
+    assert events[-1][0] == "result" and events[-1][1]["evidence_cut"] == cut
+    [stage] = [d for name, d in events if name == "stage" and d.get("agent") == "answer_synthesizer"]
+    assert stage["detail"]["evidence_cut"] == cut and "from 6 of 14 passages" in stage["summary"]
+    # The fits themselves (window, counts) stay in the admin trace.
+    assert "context_fits" not in str(client.post("/api/v1/query", json=QUERY).json()["agent_trace"])

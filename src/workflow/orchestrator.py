@@ -815,6 +815,7 @@ def _build_initial_state(
         "inconsistencies": [],
         "generated_answer": "",
         "answer_truncated": False,
+        "evidence_cut": None,
         "citations": [],
         "numerical_claims": [],
         "confidence_score": 0.0,
@@ -1111,12 +1112,19 @@ def _summarize_stage(node: str, delta: dict) -> tuple[str, dict]:
             summary += f" - {items} flagged claim{'s' if items != 1 else ''} fed back"
         if delta.get("answer_truncated"):
             summary += " - cut off at the output limit"
+        cut = delta.get("evidence_cut") or {}
+        if cut:
+            summary += (
+                f" - from {cut.get('passages_used', 0)} of {cut.get('passages_available', 0)}"
+                " passages (the local model's window)"
+            )
         return summary, {
             "citation_count": len(citations),
             "answer_length": trace.get("answer_length", 0),
             "model": trace.get("model", ""),
             "revision": bool(trace.get("revision")),
             "answer_truncated": bool(delta.get("answer_truncated")),
+            **({"evidence_cut": cut} if cut else {}),
         }
 
     if node == "hallucination_validator":

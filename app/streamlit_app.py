@@ -352,6 +352,7 @@ def render_results(result: dict, deal_id: str) -> None:
                 outcome=outcome,
                 answer_truncated=result.get("answer_truncated") is True,
                 injection_review=result.get("injection_review") or {},
+                evidence_cut=result.get("evidence_cut"),
             )
 
     with tab_cites:

@@ -10,6 +10,7 @@
 
 import type {
   ClaimCheck,
+  EvidenceCut,
   FigureCheck,
   InjectionReview,
   InjectionScreen,
@@ -93,6 +94,29 @@ export const NOT_FOUND_DETAIL =
 const CUT_OFF = "the answer was cut off before it finished.";
 
 /**
+ * The note under an answer written from part of the retrieved evidence
+ * (Decision 118): how much, why, and what it means for the reader.
+ */
+export function evidenceCutNote(cut: EvidenceCut | null): string | null {
+  if (!cut) return null;
+  const share =
+    cut.chars_available > 0
+      ? ` (about ${Math.round((100 * cut.chars_used) / cut.chars_available)}% of their text)`
+      : "";
+  return (
+    `Written from ${cut.passages_used} of the ${cut.passages_available} passages retrieved${share}: ` +
+    "the local model's window could not hold them all. A detail found only in the others is not in this answer."
+  );
+}
+
+/** Ends a not-found verdict whose evidence was cut: the absence is weaker still. */
+function notFoundOnLess(cut: EvidenceCut | null): string {
+  return cut
+    ? ` It was judged on only ${cut.passages_used} of the ${cut.passages_available} passages retrieved, so the rest may hold it.`
+    : "";
+}
+
+/**
  * The verdict badge for an answer.
  *
  * "Verified" is only shown when the server said `passed` AND every claim it
@@ -129,7 +153,10 @@ export function answerVerdict(result: QueryResponse): AnswerVerdict {
     return {
       key: "not_found",
       label: "Not found",
-      detail: NOT_FOUND_DETAIL + (result.answer_truncated ? ` Also, ${CUT_OFF}` : ""),
+      detail:
+        NOT_FOUND_DETAIL +
+        notFoundOnLess(result.evidence_cut) +
+        (result.answer_truncated ? ` Also, ${CUT_OFF}` : ""),
       tone: "warn",
     };
   }

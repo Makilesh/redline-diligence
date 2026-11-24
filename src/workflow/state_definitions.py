@@ -82,6 +82,10 @@ class AgentState(TypedDict):
     # model ended it. Only /query/stream can produce it (its tokens are already
     # on the client's screen); the validator then never reports it "passed".
     answer_truncated: bool
+    # The local model wrote the answer from a fitted context (Decision 113): what it
+    # left out, {passages_used, passages_available, chars_used, chars_available};
+    # None when the answer was written from the full context (Decision 118).
+    evidence_cut: dict | None
     citations: list[dict]
     # Every figure the answer states, grounded against the context:
     # [{raw, value, kind, status: grounded|derived|derived_unverified|unsupported,

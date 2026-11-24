@@ -21,6 +21,7 @@ import type {
   ClaimCheck,
   ClaimMethod,
   ClaimStatus,
+  EvidenceCut,
   FigureBinding,
   FigureCheck,
   FigureStatus,
@@ -217,6 +218,22 @@ function deriveOutcome(raw: Bag, trace: Bag[]): Outcome {
 }
 
 /**
+ * The evidence a fitted local context left out (Decision 118), or null. Kept only
+ * when it says something was left out: fewer passages, or less of their text.
+ */
+function normalizeEvidenceCut(raw: unknown): EvidenceCut | null {
+  if (!isBag(raw)) return null;
+  const cut = {
+    passages_used: num(raw.passages_used),
+    passages_available: num(raw.passages_available),
+    chars_used: num(raw.chars_used),
+    chars_available: num(raw.chars_available),
+  };
+  const lessText = cut.chars_available > 0 && cut.chars_used < cut.chars_available;
+  return cut.passages_used < cut.passages_available || lessText ? cut : null;
+}
+
+/**
  * Normalises a `QueryResponse`.
  *
  * @returns The typed response, or null when the payload is not a response at
@@ -234,6 +251,7 @@ export function normalizeQueryResponse(raw: unknown): QueryResponse | null {
     // Only an explicit true marks an answer as cut off. A server that predates
     // the field cannot say either way; its verdict still stands on its own.
     answer_truncated: raw.answer_truncated === true,
+    evidence_cut: normalizeEvidenceCut(raw.evidence_cut),
     query_type: str(raw.query_type, "summary"),
     confidence_score: Math.min(1, Math.max(0, num(raw.confidence_score))),
     // Passed through as sent. An unexpected value is handled where the verdict

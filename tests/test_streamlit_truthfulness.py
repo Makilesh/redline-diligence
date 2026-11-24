@@ -149,6 +149,33 @@ class TestNotFound:
         assert "INSUFFICIENT CONTEXT" not in text
 
 
+CUT = {"passages_used": 6, "passages_available": 14, "chars_used": 30_000, "chars_available": 64_000}
+
+
+class TestEvidenceCut:
+    """Decision 118: an answer written from part of the evidence says so."""
+
+    def test_the_rule_keeps_only_a_real_cut(self):
+        from app.components.verification import evidence_cut
+
+        assert evidence_cut(CUT) == CUT
+        assert evidence_cut(None) is None and evidence_cut("6 of 14") is None
+        assert evidence_cut({**CUT, "passages_used": 14, "chars_used": 64_000}) is None
+        assert evidence_cut({**CUT, "passages_used": True}) == {**CUT, "passages_used": 0}
+
+    def test_the_note_under_the_answer(self):
+        text = _text(_app_with(_result(evidence_cut=CUT)))
+        assert ("Written from 6 of the 14 passages retrieved (about 47% of their text): the local "
+                "model's window could not hold them all.") in text
+
+    def test_no_note_for_the_full_context(self):
+        assert "passages retrieved (about" not in _text(_app_with(_result()))
+
+    def test_a_not_found_is_weaker_still(self):
+        _, _, detail = answer_verdict(_result(outcome="not_found", answer=NOT_FOUND_ANSWER, evidence_cut=CUT))
+        assert detail.endswith("judged on only 6 of the 14 passages retrieved, so the rest may hold it.")
+
+
 class TestRendering:
     def test_synthesis_failure_is_not_shown_as_a_refusal(self):
         at = _app_with(_result(outcome="synthesis_failed", is_refusal=True, claim_checks=[],

@@ -191,6 +191,39 @@ def citation_note(check: dict) -> str:
     )
 
 
+def evidence_cut(raw) -> dict | None:
+    """
+    What a fitted local context left out (Decision 118), or None. Kept only when it
+    says something was left out: fewer passages, or less of their text.
+    """
+    if not isinstance(raw, dict):
+        return None
+
+    def count(key: str) -> int:
+        v = raw.get(key)
+        return v if isinstance(v, int) and not isinstance(v, bool) else 0
+
+    cut = {k: count(k) for k in ("passages_used", "passages_available", "chars_used", "chars_available")}
+    less_text = cut["chars_available"] > 0 and cut["chars_used"] < cut["chars_available"]
+    return cut if cut["passages_used"] < cut["passages_available"] or less_text else None
+
+
+def evidence_cut_note(raw) -> str | None:
+    """The note under an answer written from part of the retrieved evidence (Decision 118)."""
+    cut = evidence_cut(raw)
+    if cut is None:
+        return None
+    share = (
+        f" (about {round(100 * cut['chars_used'] / cut['chars_available'])}% of their text)"
+        if cut["chars_available"] else ""
+    )
+    return (
+        f"Written from {cut['passages_used']} of the {cut['passages_available']} passages "
+        f"retrieved{share}: the local model's window could not hold them all. A detail found "
+        "only in the others is not in this answer."
+    )
+
+
 def answer_verdict(result: dict) -> tuple[str, str, str]:
     """
     The verdict for an answer, never more favourable than the evidence.
@@ -224,7 +257,14 @@ def answer_verdict(result: dict) -> tuple[str, str, str]:
     # Never "verified": its absence statements hold for the passages searched,
     # not necessarily for the data room (Decision 112).
     if result_outcome(result) == "not_found":
-        return ("not_found", "NOT FOUND", NOT_FOUND_DETAIL + (f" Also, {_CUT_OFF}" if cut else ""))
+        evidence = evidence_cut(result.get("evidence_cut"))
+        on_less = (
+            f" It was judged on only {evidence['passages_used']} of the "
+            f"{evidence['passages_available']} passages retrieved, so the rest may hold it."
+            if evidence else ""
+        )
+        return ("not_found", "NOT FOUND",
+                NOT_FOUND_DETAIL + on_less + (f" Also, {_CUT_OFF}" if cut else ""))
     injected = bool(tainted) or cites_flagged
     if status == "warning" or (
         status == "passed" and (not_confirmed or cut or miscited or injected)

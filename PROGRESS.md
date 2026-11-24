@@ -17,7 +17,7 @@ citation. What stands between the two is hosting, legal and access decisions
 
 | What | Evidence | Re-run |
 |---|---|---|
-| Offline test suite, lint, fuzz | 2,945 passed + 3 expected failures (1 Linux-only test skipped on Windows); lint clean; fuzz 72/72 | `pytest`, `ruff check .`, `HYPOTHESIS_PROFILE=fuzz pytest tests/test_fuzz_properties.py` |
+| Offline test suite, lint, fuzz | 2,952 passed + 3 expected failures (1 Linux-only test skipped on Windows); lint clean; fuzz 72/72 | `pytest`, `ruff check .`, `HYPOTHESIS_PROFILE=fuzz pytest tests/test_fuzz_properties.py` |
 | Benchmarks unchanged by a change | verification, FactCG, golden retrieval (PASS), answerability: field-by-field diff against the previous round | `python -m eval.run_verification_eval …` and siblings (Decision 104 lists the gate set) |
 | Models load at pinned commits, also offline | 7/7, and 7/7 with the network off (Decisions 84, 100) | `pytest -m models` (with `HF_HUB_OFFLINE=1`) |
 | A real LLM end to end | sample deal, local qwen2.5:14b, deployed CPU profile, API and console: 6 of 6 answerable questions answered with the expected figures and cited once the guessed category stopped filtering retrieval (Decisions 106, 109); out-of-scope refused; an outage reported as one | the questions, settings and checks are in Decision 106; no hosted LLM was called |
@@ -92,9 +92,10 @@ citation. What stands between the two is hosting, legal and access decisions
    table rows shuffled (about one row in four in the rehearsal batch) until each
    document is re-ingested from its file; new ingests store the order (Decision
    108), and the re-ingestion report names the affected documents (Decision 111).
-3. When the local model's window does not hold the context, it now answers from the
-   best-ranked evidence that fits (Decision 113); the answer does not tell the reader
-   that lower-ranked passages were left out.
+3. When the local model's window does not hold the context, it answers from the
+   best-ranked evidence that fits (Decision 113) and says so under the answer, with how
+   many passages and how much of their text (Decision 118); the validator still checks
+   the answer against everything retrieved.
 4. Dependency upgrades held back: transformers 5 with sentence-transformers ≥ 5.6,
    and torch 2.13, fix the 8 accepted model-library advisories and move every model
    score; a measured round of their own. litellm ≥ 1.95 needs a live provider

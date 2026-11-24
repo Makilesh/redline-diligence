@@ -10,6 +10,7 @@ import {
   Clock,
   FileWarning,
   Gauge,
+  Layers,
   Loader2,
   RefreshCw,
   Scissors,
@@ -23,7 +24,12 @@ import ClaimChecks from "./ClaimChecks";
 import CitationPill from "./CitationPill";
 import { parseAnswer, type ParsedCitation } from "@/lib/citations";
 import type { QueryResponse } from "@/lib/types";
-import { answerVerdict, injectionNote, type AnswerVerdict } from "@/lib/verification";
+import {
+  answerVerdict,
+  evidenceCutNote,
+  injectionNote,
+  type AnswerVerdict,
+} from "@/lib/verification";
 
 interface AnswerPanelProps {
   /** The validated answer. Null while the answer is still being written. */
@@ -283,6 +289,19 @@ export default function AnswerPanel({
         >
           <Scissors size={12} className="shrink-0" aria-hidden />
           Cut off here: the model reached its output limit, so the answer is incomplete.
+        </p>
+      )}
+
+      {/* Written from part of the evidence (Decision 118): said where the answer
+          ends, since what is missing is what it does not say. */}
+      {result?.evidence_cut && (
+        <p
+          role="note"
+          aria-label="Evidence left out"
+          className="-mt-2 flex items-start gap-2 px-6 pb-4 text-[0.78rem] leading-snug text-warn"
+        >
+          <Layers size={12} className="mt-0.5 shrink-0" aria-hidden />
+          {evidenceCutNote(result.evidence_cut)}
         </p>
       )}
 
