@@ -102,6 +102,29 @@ def _error_detail(resp) -> str:
     return f"upload failed ({resp.status_code})"
 
 
+DATA_HANDLING_UNKNOWN = (
+    "Could not confirm whether this deployment sends document text to an outside AI "
+    "service. Assume it does: do not upload confidential, client or personal documents."
+)
+
+
+def data_handling_notice(api_url: str) -> str | None:
+    """
+    The notice to show before an upload (Decision 116): the server's wording when a
+    hosted model is configured, a cautious one when the server could not be asked,
+    None when text stays on the server.
+    """
+    try:
+        resp = requests.get(f"{api_url}/data-handling", timeout=5)
+        body = resp.json() if resp.status_code == 200 else None
+    except Exception:  # noqa: BLE001 - any failure means "could not be asked"
+        body = None
+    if not isinstance(body, dict):
+        return DATA_HANDLING_UNKNOWN
+    notice = body.get("upload_notice")
+    return notice.strip() if isinstance(notice, str) and notice.strip() else None
+
+
 def render_document_uploader(api_url: str, deal_id: str) -> None:
     """
     Renders document upload widget with category override,
@@ -112,6 +135,10 @@ def render_document_uploader(api_url: str, deal_id: str) -> None:
         deal_id: Current deal identifier.
     """
     st.subheader("📄 Document Upload")
+
+    notice = data_handling_notice(api_url)
+    if notice:
+        st.warning(inert_markdown(notice), icon="🌐")
 
     uploaded_files = st.file_uploader(
         "Upload documents",

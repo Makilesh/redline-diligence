@@ -1,15 +1,14 @@
-# Dependabot version updates — prepared, NOT active.
-#
-# GitHub reads only .github/dependabot.yml: rename this file to turn version-update pull
-# requests on. Dependabot *alerts* and *security updates* are separate switches under
-# Settings → Code security and analysis, and need no file.
+# Dependabot version updates (active since 2026-11-25). Alerts and security updates are
+# switched on separately, in Settings → Code security and analysis, and need no file.
 #
 # pip is left out on purpose. The versions CI and the images install live in
 # constraints.txt, generated from the measured environment by scripts/update_constraints.py,
 # which Dependabot does not run: its pip pull requests would edit the ranges in
 # requirements*.txt and leave constraints.txt unchanged, so CI would pass on versions nobody
 # installs. Python advisories are covered by the Dependency audit workflow, which audits
-# constraints.txt itself (Decision 104).
+# constraints.txt itself (Decision 104). A pip *security* pull request can still arrive
+# (security updates read requirements*.txt): take its version into constraints.txt with
+# scripts/update_constraints.py instead of merging it as it is.
 #
 # cooldown holds a release back until it is two weeks old: most malicious publishes are
 # caught and pulled within days, and these packages run with access to the build machine.

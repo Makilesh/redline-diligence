@@ -407,6 +407,16 @@ export interface BudgetEntry {
 export type BudgetStatus = Record<string, BudgetEntry>;
 
 /**
+ * GET /data-handling (Decision 116): whether document text leaves the server,
+ * and the notice to show before an upload. Both null when no hosted model is
+ * configured.
+ */
+export interface DataHandling {
+  hosted_llm: string | null;
+  upload_notice: string | null;
+}
+
+/**
  * One row of the live pipeline timeline.
  *
  * `status` is client-side only. The backend emits a stage once it has

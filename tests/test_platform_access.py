@@ -219,6 +219,54 @@ def test_budget_hides_the_per_key_breakdown_from_public_callers(client, monkeypa
 
 
 # ==============================================================================
+# Where document text goes (Decision 116)
+# ==============================================================================
+
+_GEMINI_VARS = ("GEMINI_API_KEYS", "GEMINI_API_KEY", "GEMINI_API_KEY_1", "UPLOAD_NOTICE")
+
+
+@pytest.fixture
+def no_tracker(monkeypatch):
+    import src.llm.budget_tracker as budget_tracker
+
+    monkeypatch.setattr(budget_tracker.BudgetTracker, "_instance", None)
+    for name in _GEMINI_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_with_a_gemini_key_the_upload_notice_says_text_leaves_the_server(client, no_tracker, monkeypatch):
+    from src.llm.data_handling import DEFAULT_UPLOAD_NOTICE
+
+    key = "k" * 39
+    monkeypatch.setenv("GEMINI_API_KEYS", key)
+    body = client.get("/api/v1/data-handling").json()
+    assert body == {"hosted_llm": "Google Gemini API", "upload_notice": DEFAULT_UPLOAD_NOTICE}
+    assert "free tier" in body["upload_notice"] and "confidential" in body["upload_notice"]
+    assert key not in str(body)
+
+
+def test_with_no_key_nothing_leaves_and_no_notice_is_shown(client, no_tracker, monkeypatch):
+    monkeypatch.setenv("UPLOAD_NOTICE", "ignored without a hosted model")
+    assert client.get("/api/v1/data-handling").json() == {"hosted_llm": None, "upload_notice": None}
+
+
+def test_the_owner_sets_the_notices_wording(client, no_tracker, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "k" * 39)
+    monkeypatch.setenv("UPLOAD_NOTICE", "  Paid tier under our DPA: text is not used for training.  ")
+    assert client.get("/api/v1/data-handling").json()["upload_notice"] == (
+        "Paid tier under our DPA: text is not used for training."
+    )
+
+
+def test_the_running_trackers_keys_decide(client, no_tracker, monkeypatch):
+    import src.llm.budget_tracker as budget_tracker
+
+    monkeypatch.setattr(budget_tracker.BudgetTracker, "_instance", SimpleNamespace(_api_keys=[]))
+    monkeypatch.setenv("GEMINI_API_KEYS", "k" * 39)  # read at startup, not now
+    assert client.get("/api/v1/data-handling").json()["hosted_llm"] is None
+
+
+# ==============================================================================
 # Request body limits
 # ==============================================================================
 

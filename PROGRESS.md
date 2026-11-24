@@ -17,7 +17,7 @@ citation. What stands between the two is hosting, legal and access decisions
 
 | What | Evidence | Re-run |
 |---|---|---|
-| Offline test suite, lint, fuzz | 2,934 passed + 3 expected failures (1 Linux-only test skipped on Windows); lint clean; fuzz 72/72 | `pytest`, `ruff check .`, `HYPOTHESIS_PROFILE=fuzz pytest tests/test_fuzz_properties.py` |
+| Offline test suite, lint, fuzz | 2,945 passed + 3 expected failures (1 Linux-only test skipped on Windows); lint clean; fuzz 72/72 | `pytest`, `ruff check .`, `HYPOTHESIS_PROFILE=fuzz pytest tests/test_fuzz_properties.py` |
 | Benchmarks unchanged by a change | verification, FactCG, golden retrieval (PASS), answerability: field-by-field diff against the previous round | `python -m eval.run_verification_eval …` and siblings (Decision 104 lists the gate set) |
 | Models load at pinned commits, also offline | 7/7, and 7/7 with the network off (Decisions 84, 100) | `pytest -m models` (with `HF_HUB_OFFLINE=1`) |
 | A real LLM end to end | sample deal, local qwen2.5:14b, deployed CPU profile, API and console: 6 of 6 answerable questions answered with the expected figures and cited once the guessed category stopped filtering retrieval (Decisions 106, 109); out-of-scope refused; an outage reported as one | the questions, settings and checks are in Decision 106; no hosted LLM was called |
@@ -36,6 +36,13 @@ citation. What stands between the two is hosting, legal and access decisions
   stands: no confidential documents on this deployment.
 - A "the documents do not contain X" answer is its own outcome, `not_found`, shown
   like a refusal (2026-11-24, option (a); Decision 112).
+- Upload notice: drafted and shown on both upload panels while a Gemini key is
+  configured; the wording is the owner's to change with `UPLOAD_NOTICE` (2026-11-25,
+  Decision 116).
+- Dependabot: alerts, security updates and version updates on (2026-11-25,
+  Decision 116).
+- GitGuardian incident 40889490: a false positive (a documented `--api-key` flag
+  name); the owner closes it in the GitGuardian dashboard.
 
 **Open** (numbered as in the round-14 report)
 
@@ -61,10 +68,6 @@ citation. What stands between the two is hosting, legal and access decisions
 
 - Backups (H3): where they are kept off the VM, encryption at rest, schedule,
   retention (the tooling is done: DEPLOYMENT.md, "Backups and restore").
-- A notice on the upload panel that uploaded text goes to a third-party AI service on
-  a free tier (wording is the owner's; Decision 107).
-- Dependabot: turn on alerts and security updates (Settings → Code security), and
-  rename `.github/dependabot.example.yml` to `dependabot.yml` for version updates.
 
 ## Production blockers
 
@@ -112,9 +115,10 @@ citation. What stands between the two is hosting, legal and access decisions
     parsed formats now parse in the child process (Decisions 110, 114); the embedding
     is CPU sharing, to be measured on the host (H2).
 11. A parser child that died while idle used to stop every later upload until a
-    restart; the pool is now replaced (Decision 115). What killed that child in one
-    CI run is not known, and a child that dies after an upload was queued to it still
-    fails that one upload.
+    restart; the pool is now replaced (Decision 115). The likely killer in that CI run
+    was the test suite itself: a console test left its Streamlit script as the
+    process's main, which every parser child ran first (fixed, Decision 117). A child
+    that dies after an upload was queued to it still fails that one upload.
 
 ## How to check a change
 

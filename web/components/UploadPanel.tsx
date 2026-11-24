@@ -2,9 +2,9 @@
 
 import { useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { FileWarning, GitCompare, Loader2, ShieldCheck, Trash2, Upload } from "lucide-react";
+import { FileWarning, GitCompare, Globe, Loader2, ShieldCheck, Trash2, Upload } from "lucide-react";
 
-import type { Deal, VersionCandidate } from "@/lib/types";
+import type { DataHandling, Deal, VersionCandidate } from "@/lib/types";
 import type { LastUpload } from "@/lib/useSandbox";
 import { uploadScreenNote } from "@/lib/verification";
 
@@ -13,8 +13,34 @@ interface UploadPanelProps {
   uploading: boolean;
   error: string | null;
   lastUpload?: LastUpload | null;
+  /** Where uploaded text goes: undefined while loading, null if it could not be read. */
+  dataHandling?: DataHandling | null;
   onUpload: (file: File) => void;
   onDiscard: () => void;
+}
+
+/** Shown when the server could not say: assume the text leaves (Decision 116). */
+export const DATA_HANDLING_UNKNOWN =
+  "Could not confirm whether this deployment sends document text to an outside AI " +
+  "service. Assume it does: do not upload confidential, client or personal documents.";
+
+/**
+ * The notice before an upload (Decision 116): the server's wording when a hosted
+ * model is configured, a cautious one when the server could not be asked, and
+ * nothing while loading or when text stays on the server.
+ */
+function DataHandlingNotice({ dataHandling }: { dataHandling: DataHandling | null | undefined }) {
+  if (dataHandling === undefined) return null;
+  const text = dataHandling === null ? DATA_HANDLING_UNKNOWN : dataHandling.upload_notice;
+  if (!text) return null;
+  return (
+    <div className="border-t border-warn/30 bg-warn/[0.05] px-4 py-3" role="note" aria-label="Where uploaded text goes">
+      <p className="flex items-start gap-2 text-[0.7rem] leading-relaxed text-warn">
+        <Globe size={12} className="mt-0.5 shrink-0" aria-hidden />
+        <span>{text}</span>
+      </p>
+    </div>
+  );
 }
 
 const ACCEPTED = ".pdf,.docx,.xlsx,.pptx,.txt";
@@ -93,6 +119,7 @@ export default function UploadPanel({
   uploading,
   error,
   lastUpload,
+  dataHandling,
   onUpload,
   onDiscard,
 }: UploadPanelProps) {
@@ -188,6 +215,8 @@ export default function UploadPanel({
       </AnimatePresence>
 
       {lastUpload && !uploading && <UploadOutcome upload={lastUpload} />}
+
+      <DataHandlingNotice dataHandling={dataHandling} />
 
       {/* The privacy promise, stated where the decision to upload is made
           rather than buried in a footer. */}
