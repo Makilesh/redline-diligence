@@ -103,6 +103,31 @@ def test_a_parse_that_never_ends_times_out_and_the_next_one_parses(tmp_path, mon
     assert iso.parse_pdf(str(path), "doc-2") == _in_process(path)
 
 
+def _wait_for(condition, seconds: float = 60.0) -> bool:
+    deadline = time.monotonic() + seconds
+    while not condition():
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
+def test_a_child_that_dies_between_parses_does_not_fail_the_next_upload(tmp_path):
+    # After a parse, the pool starts the next child at once, and it waits idle with
+    # the OOM killer's highest score. Killed there, it broke the pool between parses,
+    # and the broken pool stayed installed: every later upload in the process failed
+    # "the parser stopped" (main CI, 2026-11-23, 20 tests in streaks).
+    first = iso.warm_up()
+    pool = iso._pool
+    assert _wait_for(lambda: any(p.pid != first for p in list(pool._processes.values())))
+    for process in list(pool._processes.values()):
+        process.kill()
+    assert _wait_for(lambda: pool._broken)
+    path = sx.write_borderless_statement_pdf(tmp_path)
+    assert iso.parse_pdf(str(path), "doc-1") == _in_process(path)  # it never reached that child
+    assert iso.parse_pdf(str(path), "doc-2") == _in_process(path)
+
+
 @pytest.mark.parametrize("value, expected", [("", 900.0), ("120", 120.0), ("x", 900.0), ("-5", 900.0)])
 def test_the_timeout_follows_PDF_PARSE_TIMEOUT_SECONDS(monkeypatch, value, expected):
     monkeypatch.setenv("PDF_PARSE_TIMEOUT_SECONDS", value)
