@@ -31,7 +31,7 @@ describe("answerVerdict for a not-found (Decision 112)", () => {
     const v = answerVerdict(response({ outcome: "not_found" }));
     expect(v.key).toBe("not_found");
     expect(v.tone).toBe("warn");
-    expect(v.detail).toMatch(/not against every document in the data room/);
+    expect(v.detail).toMatch(/written from the passages retrieved for this question, not from every document in the data room/);
   });
 
   it("still reads as failed when the validation failed", () => {

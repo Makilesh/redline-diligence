@@ -288,6 +288,30 @@ def parse_office(extension: str, path: str, doc_id: str, table_id_prefix: str = 
     return result
 
 
+def _sample(path: str, extension: str) -> str:
+    from src.data_processing.content_sample import sample
+
+    return sample(path, extension)
+
+
+def content_sample(path: str, extension: str, doc_id: str = "") -> str:
+    """
+    The classifier's sample of a PDF, DOCX or PPTX, read in the child (Decision 121).
+
+    Reading it opens the file with the parsers the parse uses, so it runs where the
+    parse does: a file that crashes or hangs a parser fails its upload here, under
+    the same timeout, instead of stalling or killing the API's process.
+
+    Returns:
+        The sample; "" when a parser raised (classification then uses the file name).
+
+    Raises:
+        DocumentExtractionError: The parser process died or did not finish within
+            PDF_PARSE_TIMEOUT_SECONDS.
+    """
+    return _isolated(extension.lstrip(".").upper(), doc_id, _sample, path, extension)
+
+
 def _isolated(kind: str, doc_id: str, fn, *args):
     """fn(*args) in the child; a parser that died or timed out fails this upload."""
     seconds = timeout_seconds()

@@ -300,3 +300,44 @@ def test_an_error_that_does_not_pickle_still_names_its_cause(tmp_path):
     # The client's error is the one it always was.
     with pytest.raises(DocumentExtractionError, match=r"^The \.docx file could not be parsed$"):
         extract_and_chunk(str(bad), bad.name, "deal-iso", "legal")
+
+
+# ── The classifier's sample (Decision 121) ───────────────────────────────────
+
+
+@pytest.mark.parametrize("writer, extension", [
+    (sx.write_ruled_multipage_pdf, ".pdf"),
+    (sx.write_stress_docx, ".docx"),
+    (sx.write_stress_pptx, ".pptx"),
+], ids=["pdf", "docx", "pptx"])
+def test_the_sample_is_read_in_the_child_and_equals_an_in_process_read(tmp_path, writer, extension):
+    from src.data_processing.content_sample import sample
+
+    path = writer(tmp_path)
+    isolated = iso.content_sample(str(path), extension, "doc-1")
+    assert isolated == sample(str(path), extension)
+    assert isolated  # the fixture has text
+
+
+def test_a_sampler_that_dies_fails_the_upload_before_the_parse(tmp_path, monkeypatch):
+    from src.data_processing.ingest_pipeline import extract_and_chunk
+
+    parsed = []
+    monkeypatch.setattr(iso, "_sample", _crash_office)
+    monkeypatch.setattr(iso, "parse_office", lambda *a, **k: parsed.append(a))
+    path = sx.write_stress_docx(tmp_path)
+    with pytest.raises(DocumentExtractionError, match="The DOCX could not be parsed: the parser stopped"):
+        extract_and_chunk(str(path), path.name, "deal-iso")  # no category: the sample is read
+    assert parsed == []
+
+
+@pytest.mark.parametrize("category, sampled", [(None, True), ("legal", False)], ids=["classified", "override"])
+def test_ingest_reads_the_sample_in_the_child_only_when_it_classifies(tmp_path, monkeypatch, category, sampled):
+    from src.data_processing.ingest_pipeline import extract_and_chunk
+
+    calls = []
+    real = iso.content_sample
+    monkeypatch.setattr(iso, "content_sample", lambda *a, **k: calls.append(a[1]) or real(*a, **k))
+    path = sx.write_stress_pptx(tmp_path)
+    assert extract_and_chunk(str(path), path.name, "deal-iso", category).chunks
+    assert calls == ([".pptx"] if sampled else [])

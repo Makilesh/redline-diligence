@@ -84,11 +84,12 @@ export interface AnswerVerdict {
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /**
- * What a reader must know before trusting a "not found" (Decision 112): the
- * absence was checked against the passages retrieved, not the data room.
+ * What a reader must know before trusting a "not found" (Decision 112): what the
+ * answer was written from — not that the absence was checked, since an absence
+ * statement stays unverified unless the judge reads the passages (Decision 120).
  */
 export const NOT_FOUND_DETAIL =
-  "The answer says the documents do not contain this. That was checked against the passages retrieved for this question, not against every document in the data room, so the information may still be there.";
+  "The answer says the documents do not contain this. It was written from the passages retrieved for this question, not from every document in the data room, so the information may still be there.";
 
 /** Ends a verdict sentence for an answer cut off at the model's output limit. */
 const CUT_OFF = "the answer was cut off before it finished.";
