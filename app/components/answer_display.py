@@ -9,6 +9,7 @@ import streamlit as st
 from app.components.verification import (
     NOT_FOUND_DETAIL,
     answer_verdict,
+    evidence_cut_note,
     injection_note,
     render_claim_checks,
 )
@@ -37,6 +38,7 @@ def render_answer(
     outcome: str = "",
     answer_truncated: bool = False,
     injection_review: dict | None = None,
+    evidence_cut: dict | None = None,
 ) -> None:
     """
     Renders the main answer with confidence badge, validation status, the
@@ -56,6 +58,8 @@ def render_answer(
         answer_truncated: The answer stopped at the model's output limit.
         injection_review: QueryResponse.injection_review — retrieved passages
             with instruction-like text, by location (Decision 82).
+        evidence_cut: QueryResponse.evidence_cut — what a fitted local context
+            left out of the answer's evidence (Decision 118).
     """
     claim_checks = claim_checks or []
     # Header metrics. A compact strip rather than st.metric cards: these are
@@ -87,6 +91,7 @@ def render_answer(
             "answer": answer,
             "answer_truncated": answer_truncated,
             "injection_review": injection_review or {},
+            "evidence_cut": evidence_cut,
         }
     )
     icon, variant = _VERDICT_PILL[key]
@@ -124,6 +129,9 @@ def render_answer(
         st.markdown(inert_markdown(escape_currency(answer)))
         if answer_truncated:
             st.caption("✂ Cut off here: the model reached its output limit, so the answer is incomplete.")
+        cut_note = evidence_cut_note(evidence_cut)
+        if cut_note:
+            st.caption(f"⧉ {cut_note}")
 
     if claim_checks:
         st.write("")

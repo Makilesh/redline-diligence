@@ -694,9 +694,13 @@ _RECORD_FIELDS: dict[str, frozenset[str]] = {
         "iteration", "citation_count", "answer_length", "revision", "answer_truncated",
         "validation_status", "confidence_score", "hallucination_flags", "status_counts",
         "method_counts", "numeric_counts", "claim_checks", "nli_model", "llm_model", "llm_calls",
-        "force_refusal",
+        "force_refusal", "evidence_cut",
     }),
     # Records inside them.
+    # Counts only: what a fitted local context left out (Decision 118).
+    "evidence_cut": frozenset({
+        "passages_used", "passages_available", "chars_used", "chars_available",
+    }),
     "perf": frozenset({
         "duration_ms", "llm_calls", "prompt_tokens", "completion_tokens", "models",
         "finish_reasons", "fallbacks",

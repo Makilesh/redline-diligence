@@ -198,6 +198,14 @@ export interface NodeTiming extends NodePerf {
   agent: string;
 }
 
+/** What a fitted local context left out of the answer's evidence (Decision 118). */
+export interface EvidenceCut {
+  passages_used: number;
+  passages_available: number;
+  chars_used: number;
+  chars_available: number;
+}
+
 export interface QueryResponse {
   answer: string;
   /**
@@ -206,6 +214,12 @@ export interface QueryResponse {
    * "passed"; the page also says plainly that the text is incomplete.
    */
   answer_truncated: boolean;
+  /**
+   * The local model's window could not hold the retrieved evidence, so the
+   * answer was written from the best-ranked part of it (Decisions 113, 118).
+   * null when it was written from the full context.
+   */
+  evidence_cut: EvidenceCut | null;
   query_type: string;
   confidence_score: number;
   validation_status: ValidationStatus;

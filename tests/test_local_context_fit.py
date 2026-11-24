@@ -132,6 +132,24 @@ def test_a_context_too_long_for_the_window_is_cut_and_answered(ollama, no_keys):
     assert len(_prompt(second)) <= len(_prompt(first)) - (20_000 - 12_288) * len(_prompt(first)) / 20_000
 
 
+def test_the_reader_is_told_what_a_fitted_context_left_out(ollama, no_keys):
+    # Decision 118: the counts reach the result, not only the admin trace.
+    script = ollama(refusal(20_000), CITED)
+    result = asyncio.run(synth.synthesize_answer(_state()))
+    first, second = script.requests
+    cut = result["evidence_cut"]
+    assert cut["passages_used"] == len(_passages(second)) < cut["passages_available"] == len(_passages(first))
+    assert 0 < cut["chars_used"] < cut["chars_available"] <= synth.MAX_CONTEXT_CHARS
+    assert cut == synth.evidence_cut(CHUNKS, result["agent_trace"][0]["context_fits"][0]["fitted_chars"])
+
+
+def test_an_answer_from_the_full_context_reports_no_cut(ollama, no_keys):
+    ollama(CITED)
+    assert asyncio.run(synth.synthesize_answer(_state()))["evidence_cut"] is None
+    ollama(refusal(200_000))  # failed: nothing was answered, so nothing was left out of an answer
+    assert asyncio.run(synth.synthesize_answer(_state()))["evidence_cut"] is None
+
+
 def test_a_second_refusal_cuts_again_and_a_third_fails_with_the_count(ollama, no_keys):
     script = ollama(refusal(20_000), refusal(13_000), CITED)
     result = asyncio.run(synth.synthesize_answer(_state()))

@@ -74,6 +74,14 @@ class InjectionReview(BaseModel):
     )
 
 
+class EvidenceCut(BaseModel):
+    """What a fitted local context left out of the answer's evidence (Decision 118)."""
+    passages_used: int = Field(..., description="Passages the answer was written from")
+    passages_available: int = Field(..., description="Passages the full context would carry")
+    chars_used: int = Field(..., description="Evidence characters the answer was written from")
+    chars_available: int = Field(..., description="Evidence characters of the full context")
+
+
 class QueryResponse(BaseModel):
     """Response model for the /query endpoint."""
     answer: str = Field(..., description="Generated answer with citations")
@@ -83,6 +91,14 @@ class QueryResponse(BaseModel):
             "True when the answer stopped at the model's output limit rather than "
             "where the model ended it (streamed route only); validation_status is "
             "then never 'passed'"
+        ),
+    )
+    evidence_cut: EvidenceCut | None = Field(
+        None,
+        description=(
+            "Set when the local model's window could not hold the retrieved evidence "
+            "and the answer was written from the best-ranked part of it (Decision 113): "
+            "a detail only in the passages left out is not in the answer"
         ),
     )
     query_type: str = Field(..., description="Detected query type")

@@ -156,6 +156,23 @@ def _select_context(chunks: list[dict], max_chars: int) -> list[tuple[str, dict]
     return selected
 
 
+def evidence_cut(chunks: list[dict], fitted_chars: int) -> dict:
+    """
+    What a fitted context left out, for the reader (Decision 118): the passages and
+    evidence characters the answer was written from, against what the full context
+    would have carried. Not always a prefix: past the budget a passage may fall back
+    to its own text, and a shorter lower-ranked one may still fit.
+    """
+    full = _select_context(chunks, MAX_CONTEXT_CHARS)
+    used = _select_context(chunks, fitted_chars)
+    return {
+        "passages_used": len(used),
+        "passages_available": len(full),
+        "chars_used": sum(len(body) for body, _ in used),
+        "chars_available": sum(len(body) for body, _ in full),
+    }
+
+
 def _format_context_for_synthesis(chunks: list[dict], max_chars: int = MAX_CONTEXT_CHARS) -> str:
     """
     Formats expanded context chunks for the synthesis prompt.
@@ -594,6 +611,7 @@ async def synthesize_answer(
                 "question or check that the relevant documents have been uploaded."
             ),
             "answer_truncated": False,
+            "evidence_cut": None,
             "citations": [],
             "numerical_claims": [],
             "confidence_score": 0.0,
@@ -821,6 +839,7 @@ async def synthesize_answer(
         return {
             "generated_answer": SYNTHESIS_FAILED_ANSWER,
             "answer_truncated": False,
+            "evidence_cut": None,
             "citations": [],
             "numerical_claims": [],
             "confidence_score": 0.0,
@@ -867,6 +886,14 @@ async def synthesize_answer(
     # retried. Marked so that verification cannot call it "passed".
     truncated = outcome.truncated
 
+    # Written by the local model from a fitted context: the reader is told what was
+    # left out, not only the admin trace (Decision 118).
+    cut = (
+        evidence_cut(chunks, local_context_chars)
+        if local_context_chars is not None and is_local(model)
+        else None
+    )
+
     logger.info(
         "Agent 7: Answer Synthesizer complete",
         extra={
@@ -883,6 +910,7 @@ async def synthesize_answer(
     return {
         "generated_answer": answer,
         "answer_truncated": truncated,
+        "evidence_cut": cut,
         "citations": citations,
         "numerical_claims": numerical_claims,
         "agent_trace": [
