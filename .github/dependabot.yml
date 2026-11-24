@@ -24,6 +24,18 @@ updates:
       web-minor-and-patch:
         update-types: [minor, patch]
     open-pull-requests-limit: 5
+    # Majors that need a migration of their own, not a version bump (2026-11-25):
+    # ESLint 10 is outside eslint-config-next 15's peer range (npm ci fails), and
+    # TypeScript 7 rejects the side-effect CSS import in app/layout.tsx (TS2882) —
+    # both move with the Next.js upgrade. @types/node follows the Node runtime
+    # (CI and the development machine: 24), not the newest Node.
+    ignore:
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
