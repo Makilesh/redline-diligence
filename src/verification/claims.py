@@ -450,19 +450,38 @@ _IMPOSSIBLE = (
     r"|establish|answer|quantify|confirm)"
     r"|(?:cannot|can\s*not|could\s+not)\s+be\s+(?:determined|calculated|computed|identified"
     r"|established|answered|quantified|confirmed)"
-    r"|unable\s+to\s+(?:determine|calculate|compute|identify|establish|answer|quantify|confirm"
+    # Only the writer is unable in a decline: "I was unable to find", or a sentence that
+    # opens "Unable to determine"; "the target was unable to locate the deed" is a
+    # finding about the target (Decision 120).
+    r"|(?:\b(?:i|we)\s+(?:am|are|was|were)\s+|\b(?:i|we)'(?:m|re)\s+|^)"
+    r"unable\s+to\s+(?:determine|calculate|compute|identify|establish|answer|quantify|confirm"
     r"|find|locate)"
     r"|(?:insufficient|not\s+(?:enough|sufficient))\s+(?:information|data|context|evidence|details?))"
 )
+# Between "the documents" and "do not contain", nothing that starts another clause
+# with its own subject: "the documents show that Acme did not provide audited
+# financials" is a finding about Acme, not a decline (found in review, Decision 120).
+_SAME_SUBJECT = (
+    r"(?:(?!\bthat\b|\b(?:shows?|showed|shown|confirms?|confirmed|indicates?|indicated"
+    r"|reveals?|revealed|states?|stated|suggests?|suggested|notes?|noted|establish(?:es|ed)?"
+    r"|demonstrates?|demonstrated|reflects?|reflected|records?|recorded)\b)[^.;])"
+)
+# "… is not available" ends the clause, or names where or for when: "the revolving
+# facility was not available for drawdown" is a finding about the facility.
+_UNAVAILABLE_END = (
+    r"(?=\s*(?:[.;:,)!?]|$)"
+    r"|\s+(?:in|within|from|anywhere\s+in)\s+the\b"
+    r"|\s+for\s+(?:the\s+)?(?:fy|fiscal|financial|years?|periods?|quarters?|q[1-4]|h[12]|\d{4}))"
+)
 NOT_FOUND = re.compile(
-    rf"\b{_SEARCHED}\b[^.;]{{0,100}}\b(?:do(?:es)?|did)\s+not\s+{_HEDGE}{_INFO_VERB}"
-    rf"|\b{_SEARCHED}\b[^.;]{{0,60}}\b(?:contains?|includes?|provides?)\s+no\b"
+    rf"\b{_SEARCHED}\b{_SAME_SUBJECT}{{0,100}}\b(?:do(?:es)?|did)\s+not\s+{_HEDGE}{_INFO_VERB}"
+    rf"|\b{_SEARCHED}\b{_SAME_SUBJECT}{{0,60}}\b(?:contains?|includes?|provides?)\s+no\b"
     rf"|\b{_SEARCHED}\s+(?:currently\s+)?lack(?:s|ed)?\b"
     rf"|\bnone\s+of\s+the\s+{_SEARCHED}\b"
     # "Based on the provided documents, the FY2025 projection is not available."
     rf"|\b(?:based\s+on|according\s+to|in|within|from)\s+the\s+{_SEARCHED}\b[^.;]{{0,160}}"
     rf"\b(?:is|are|was|were)\s+not\s+{_HEDGE}(?:available|disclosed|provided|stated|specified"
-    r"|included|given|present|possible)\b"
+    rf"|included|given|present|possible)\b{_UNAVAILABLE_END}"
     rf"|\bnot\s+{_HEDGE}(?:found|available|disclosed|provided|included|stated|specified|mentioned"
     rf"|present|contained|addressed)\s+(?:in|within|anywhere\s+in)\s+the\s+{_SEARCHED}\b"
     rf"|\bno\s+(?:specific\s+)?(?:information|data|details?|figures?|breakdowns?|disclosures?|mention)\b"

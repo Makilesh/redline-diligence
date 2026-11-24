@@ -27,11 +27,13 @@ CLAIM_STATUSES = ("supported", "contradicted", "unsupported", "unverified")
 OUTCOMES = ("answered", "answered_unverified", "not_found", "refused", "synthesis_failed")
 
 # A "not found" (Decision 112): what the reader must know before trusting it.
-# Shared with the banner above the answer (answer_display.render_not_found).
+# Shared with the banner above the answer (answer_display.render_not_found). It says
+# what the answer was written from, not that the absence was checked: an absence
+# statement stays unverified unless the judge reads the passages (Decision 120).
 NOT_FOUND_DETAIL = (
-    "The answer says the documents do not contain this. That was checked against the "
-    "passages retrieved for this question, not against every document in the data room, "
-    "so the information may still be there."
+    "The answer says the documents do not contain this. It was written from the passages "
+    "retrieved for this question, not from every document in the data room, so the "
+    "information may still be there."
 )
 
 

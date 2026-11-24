@@ -132,7 +132,8 @@ class TestNotFound:
     def test_the_verdict_is_not_found_even_when_every_claim_passed(self):
         key, label, detail = answer_verdict(_result(outcome="not_found", answer=NOT_FOUND_ANSWER))
         assert (key, label) == ("not_found", "NOT FOUND")
-        assert "not against every document in the data room" in detail
+        assert "written from the passages retrieved for this question, not from every document" in detail
+        assert "checked against" not in detail
 
     def test_a_failed_validation_still_reads_as_failed(self):
         key, _, _ = answer_verdict(_result(outcome="not_found", validation_status="failed",

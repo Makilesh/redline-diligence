@@ -47,6 +47,12 @@ ROUND_16 = (
     "The implied EV/EBITDA multiple on adjusted EBITDA cannot be calculated from the provided "
     "documents.\n\n**Missing Information:**\nThe share count is not provided.",
     "No. None of the provided documents mention an MSCI ESG rating for the company.",
+    # Still declines after Decision 120's tightening.
+    "The provided documents, including the 10-K and the merger agreement, do not specify the "
+    "churn rate.",
+    "Based on the provided context, revenue is not available for Q1 FY2024.",
+    "Based on the provided documents, I am unable to determine the FY2025 projection.",
+    "Unable to determine the churn rate from the provided documents.",
 ])
 def test_a_whole_decline_is_recognised(answer):
     assert not_found_lead(answer)
@@ -81,6 +87,18 @@ def test_a_whole_decline_is_recognised(answer):
     "The target could not identify a successor CEO before signing.\n\n## Details\nx",
     "The outcome of the DataFlow litigation cannot be determined at this time.\n\n## Details\nx",
     "The seller provided insufficient information to the regulator.\n\n## Details\nx",
+    # Found in the round-19 review (Decision 120): the subject changes after the
+    # evidence noun, so the negative is a finding about a party or a term.
+    "The documents show that Acme did not provide audited financial statements to the buyer "
+    "before signing.\n\n## Details\nx",
+    "Based on the provided documents, the revolving credit facility was not available for "
+    "drawdown after the covenant breach.\n\n## Details\nx",
+    "The sources confirm that the seller does not provide any indemnity beyond the cap.\n\n"
+    "## Details\nx",
+    "The documents indicate that the agreement contains no MAC clause.\n\n## Details\nx",
+    "Based on the provided documents, the target was unable to locate the original title "
+    "deed.\n\n## Details\nx",
+    "The seller was unable to find the consent in the data room.\n\n## Details\nx",
     "",
     None,
 ])

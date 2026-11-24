@@ -17,7 +17,7 @@ citation. What stands between the two is hosting, legal and access decisions
 
 | What | Evidence | Re-run |
 |---|---|---|
-| Offline test suite, lint, fuzz | 2,952 passed + 3 expected failures (1 Linux-only test skipped on Windows); lint clean; fuzz 72/72 | `pytest`, `ruff check .`, `HYPOTHESIS_PROFILE=fuzz pytest tests/test_fuzz_properties.py` |
+| Offline test suite, lint, fuzz | 2,968 passed + 3 expected failures (1 Linux-only test skipped on Windows); lint clean; fuzz 72/72 | `pytest`, `ruff check .`, `HYPOTHESIS_PROFILE=fuzz pytest tests/test_fuzz_properties.py` |
 | Benchmarks unchanged by a change | verification, FactCG, golden retrieval (PASS), answerability: field-by-field diff against the previous round | `python -m eval.run_verification_eval …` and siblings (Decision 104 lists the gate set) |
 | Models load at pinned commits, also offline | 7/7, and 7/7 with the network off (Decisions 84, 100) | `pytest -m models` (with `HF_HUB_OFFLINE=1`) |
 | A real LLM end to end | sample deal, local qwen2.5:14b, deployed CPU profile, API and console: 6 of 6 answerable questions answered with the expected figures and cited once the guessed category stopped filtering retrieval (Decisions 106, 109); out-of-scope refused; an outage reported as one | the questions, settings and checks are in Decision 106; no hosted LLM was called |
@@ -87,7 +87,9 @@ citation. What stands between the two is hosting, legal and access decisions
 
 1. A "not found" is recognised from the wording of the answer's opening section
    (Decision 112): a decline worded outside the rule stays `answered`, as every
-   decline was before; a new model's phrasing should be checked on its first answers.
+   decline was before, and a finding phrased as a decline of the evidence is read as
+   one (Decision 120 removed the subject-changing cases a review found); a new model's
+   phrasing should be checked on its first answers.
 2. Indexes already written to a Qdrant server keep the columns of header-named
    table rows shuffled (about one row in four in the rehearsal batch) until each
    document is re-ingested from its file; new ingests store the order (Decision
@@ -113,8 +115,9 @@ citation. What stands between the two is hosting, legal and access decisions
 10. Ingest embeds a document's chunks in one call on the two-thread pool queries
     share; while it runs, a question's retrieval took 1.3–1.4 s (0.3 s idle) and its
     NLI validation ~40% longer on the development machine (Decision 110). All four
-    parsed formats now parse in the child process (Decisions 110, 114); the embedding
-    is CPU sharing, to be measured on the host (H2).
+    parsed formats now parse in the child process (Decisions 110, 114), and so is the
+    classifier's sample of each (Decision 121); the embedding is CPU sharing, to be
+    measured on the host (H2).
 11. A parser child that died while idle used to stop every later upload until a
     restart; the pool is now replaced (Decision 115). The likely killer in that CI run
     was the test suite itself: a console test left its Streamlit script as the

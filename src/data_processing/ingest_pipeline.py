@@ -344,19 +344,24 @@ def validate_office_archive(file_path: str, extension: str) -> None:
 # ==============================================================================
 
 
-def _content_sample(file_path: str, extension: str) -> str:
+def _content_sample(file_path: str, extension: str, doc_id: str = "") -> str:
     """
     First ~2000 characters of text, for content-based classification.
 
     Best effort: classification falls back to filename/extension heuristics,
-    so any failure here returns "".
+    so a parser's error returns "". A PDF, DOCX or PPTX is read in the parser
+    child (Decision 121).
 
     Args:
         file_path: Path to the file.
         extension: Lower-case extension including the dot.
+        doc_id: Document identifier, for the child's logging.
 
     Returns:
         Text sample (possibly empty).
+
+    Raises:
+        DocumentExtractionError: The parser process died or timed out on the file.
     """
     try:
         if extension == ".txt":
@@ -369,29 +374,16 @@ def _content_sample(file_path: str, extension: str) -> str:
                 return decode_text_file(data)[0][:_CONTENT_SAMPLE_CHARS]
             except (ValueError, UnicodeDecodeError):
                 return data[:_CONTENT_SAMPLE_CHARS].decode("utf-8", errors="replace")
-        if extension == ".pdf":
-            import fitz
-            with fitz.open(file_path) as pdf:
-                text = ""
-                for page in pdf:
-                    text += page.get_text("text")
-                    if len(text) >= _CONTENT_SAMPLE_CHARS:
-                        break
-                return text[:_CONTENT_SAMPLE_CHARS]
-        if extension == ".docx":
-            import docx
-            document = docx.Document(file_path)
-            return "\n".join(p.text for p in document.paragraphs[:80])[:_CONTENT_SAMPLE_CHARS]
-        if extension == ".pptx":
-            from pptx import Presentation
-            parts = []
-            for slide in list(Presentation(file_path).slides)[:5]:
-                for shape in slide.shapes:
-                    if shape.has_text_frame:
-                        parts.append(shape.text_frame.text)
-            return "\n".join(parts)[:_CONTENT_SAMPLE_CHARS]
     except Exception as e:
         logger.warning("Content sample extraction failed", extra={"error": str(e)})
+        return ""
+    if extension in (".pdf", ".docx", ".pptx"):
+        # Read in the parser child (Decision 121): the sample opens the file with
+        # the parsers the parse uses. A parser that dies or hangs on the file fails
+        # the upload (DocumentExtractionError), as the parse would; its errors give "".
+        from src.data_processing.parse_isolation import content_sample
+
+        return content_sample(file_path, extension, doc_id)
     return ""
 
 
@@ -861,7 +853,7 @@ def extract_and_chunk(
             DocumentClassifier().classify_with_source(
                 file_name=filename,
                 file_type=extension.lstrip("."),
-                content_sample=_content_sample(file_path, extension),
+                content_sample=_content_sample(file_path, extension, doc_id),
             )
         )
 
