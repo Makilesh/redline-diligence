@@ -21,6 +21,7 @@ import torch
 from sentence_transformers import SentenceTransformer, CrossEncoder
 
 from src.utils.logger import setup_logger
+from src.utils.model_priority import foreground, wait_for_foreground
 from src.utils.model_cache import load_cached_first, pinned_revision
 
 logger = setup_logger(__name__)
@@ -311,21 +312,103 @@ async def embed_texts_async(texts: list[str]) -> np.ndarray:
 
     logger.info("Embedding texts asynchronously", extra={"num_texts": len(texts)})
 
-    result = await loop.run_in_executor(
-        _embed_executor,
-        lambda: model.encode(
-            texts,
-            normalize_embeddings=True,
-            batch_size=32,
-            show_progress_bar=False,
-        ),
-    )
+    with foreground():
+        result = await loop.run_in_executor(
+            _embed_executor,
+            lambda: model.encode(
+                texts,
+                normalize_embeddings=True,
+                batch_size=32,
+                show_progress_bar=False,
+            ),
+        )
 
     logger.info(
         "Embedding complete",
         extra={"num_texts": len(texts), "output_shape": list(result.shape)},
     )
     return result
+
+
+# Decision 124: ingest's embedding yields to a question's model work.
+DEFAULT_INGEST_YIELD_MAX_WAIT_S = 10.0
+
+
+def ingest_embed_slice(model=None) -> int:
+    """
+    Texts per call when ingest embeds: INGEST_EMBED_SLICE, else 1 on the CPU and 0
+    (every text in one call) on a GPU, where batching is what makes it fast and the
+    cores are not what a question waits for.
+    """
+    raw = os.getenv("INGEST_EMBED_SLICE", "").strip()
+    if raw:
+        try:
+            return max(int(raw), 0)
+        except ValueError:
+            pass
+    device = getattr(getattr(model, "device", None), "type", "cpu")
+    return 0 if device == "cuda" else 1
+
+
+def ingest_yield_max_wait_s() -> float:
+    """INGEST_YIELD_MAX_WAIT_S: the longest one slice waits for a question's model call."""
+    try:
+        value = float(os.getenv("INGEST_YIELD_MAX_WAIT_S", ""))
+    except ValueError:
+        return DEFAULT_INGEST_YIELD_MAX_WAIT_S
+    return value if value >= 0 else DEFAULT_INGEST_YIELD_MAX_WAIT_S
+
+
+async def embed_texts_background(texts: list[str]) -> np.ndarray:
+    """
+    Ingest's embedding: as embed_texts_async, in slices that wait for a question's model work.
+
+    Measured on the emulated two-core host (Decision 124), 48 chunks of a 10-K: a
+    question's retrieval model work took 6.5-9.5 s at the median and up to 20 s while
+    they were embedded in one call; one text a call, each waiting while a question's
+    model call ran (at most INGEST_YIELD_MAX_WAIT_S), 1.1 s and at most 2.4 s, and the
+    48 chunks took no longer (84 s against 88-117 s). Slices go in the length order
+    encode() sorts by. A vector differs from the one-call vector by float rounding
+    (at most 7e-7 there): encode() batches differently.
+
+    Args:
+        texts: The chunk texts.
+
+    Returns:
+        np.ndarray of shape (len(texts), dim), L2-normalised, in the order of `texts`.
+
+    Raises:
+        ValueError: If texts is empty.
+    """
+    if not texts:
+        raise ValueError("Cannot embed empty text list")
+    model = _get_embedding_model()
+    loop = asyncio.get_running_loop()
+
+    def encode(part: list[str]) -> np.ndarray:
+        return model.encode(part, normalize_embeddings=True, batch_size=32, show_progress_bar=False)
+
+    size = ingest_embed_slice(model)
+    if size <= 0 or size >= len(texts):
+        return await loop.run_in_executor(_embed_executor, lambda: encode(texts))
+
+    max_wait = ingest_yield_max_wait_s()
+    order = np.argsort([-len(t) for t in texts], kind="stable")
+    out: np.ndarray | None = None
+    waited = 0.0
+    for start in range(0, len(order), size):
+        waited += await wait_for_foreground(max_wait)
+        idx = order[start:start + size]
+        part = [texts[i] for i in idx]
+        emb = await loop.run_in_executor(_embed_executor, lambda p=part: encode(p))
+        if out is None:
+            out = np.empty((len(texts), emb.shape[1]), dtype=emb.dtype)
+        out[idx] = emb
+    logger.info(
+        "Ingest embedding complete",
+        extra={"num_texts": len(texts), "slice": size, "waited_for_questions_s": round(waited, 2)},
+    )
+    return out
 
 
 async def rerank_async(query: str, passages: list[str]) -> np.ndarray:
@@ -382,7 +465,8 @@ async def rerank_pairs_async(pairs: list[tuple[str, str]]) -> np.ndarray:
 
     logger.info("Reranking passages asynchronously", extra={"num_passages": len(pairs)})
 
-    result = await loop.run_in_executor(_rerank_executor, lambda: _score_pairs(pairs))
+    with foreground():
+        result = await loop.run_in_executor(_rerank_executor, lambda: _score_pairs(pairs))
 
     logger.info(
         "Reranking complete",

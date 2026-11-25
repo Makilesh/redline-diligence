@@ -1333,7 +1333,8 @@ async def index_document(
         client: AsyncQdrantClient; defaults to the application singleton.
         collection_name: Child collection.
         parent_collection_name: Parent collection.
-        embed_fn: async (texts) -> array (n, dim); defaults to bge-m3.
+        embed_fn: async (texts) -> array (n, dim); defaults to bge-m3, embedded in slices
+                  that wait for a question's model work (embed_texts_background, Decision 124).
         sparse_fn: (texts) -> list[SparseVector]; defaults to batched BM25.
         ensure_collections: Create collections/indexes first if missing.
 
@@ -1353,8 +1354,8 @@ async def index_document(
         from src.vector_db.qdrant_client import get_qdrant_client
         client = get_qdrant_client()
     if embed_fn is None:
-        from src.vector_db.reranker import embed_texts_async
-        embed_fn = embed_texts_async
+        from src.vector_db.reranker import embed_texts_background
+        embed_fn = embed_texts_background
     # Stamped on every child point so vectors written by an older BM25 text
     # normalisation can be found (see hybrid_search.SPARSE_ENCODING_VERSION).
     # A caller-supplied sparse_fn has no known encoding, so it is not stamped.
