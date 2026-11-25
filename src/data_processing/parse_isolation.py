@@ -12,7 +12,9 @@ In a child process the parse has its own interpreter and its own GIL. It also co
 parser that crashes, exhausts memory or never finishes on a hostile file: that upload
 fails and the API keeps running. Parses run one at a time (the lock below), so a child
 that dies or times out was parsing the caller's own file — no other upload is failed with
-it, and nothing is retried. The child is not reused (max_tasks_per_child=1): whatever one
+it, and a file that was being read when its child died is not retried. A child that died
+before it began reading the file is replaced and the file given to the new one, once
+(Decision 122). The child is not reused (max_tasks_per_child=1): whatever one
 document left in the parser's memory goes with the process. Nothing falls back to parsing
 in the API's process, where a file that kills the parser would kill the API.
 
@@ -28,6 +30,7 @@ from __future__ import annotations
 import multiprocessing
 import os
 import threading
+import time
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from concurrent.futures.process import BrokenProcessPool
@@ -56,6 +59,8 @@ PARSER_TIMED_OUT = (
 _parse_lock = threading.Lock()
 _pool_lock = threading.Lock()
 _pool: ProcessPoolExecutor | None = None
+# id(pool) -> the started flag its children share (Decision 122).
+_pool_started: dict[int, object] = {}
 
 
 def timeout_seconds() -> float:
@@ -82,6 +87,24 @@ def _volunteer_for_the_oom_killer() -> None:
             f.write("1000")
     except OSError:
         pass
+
+
+# In a child: the pool's flag, set to 1 as the child starts on the file (Decision 122).
+_started = None
+
+
+def _start_child(started) -> None:
+    """The child's initializer: keeps the pool's started flag, then volunteers for the OOM killer."""
+    global _started
+    _started = started
+    _volunteer_for_the_oom_killer()
+
+
+def _call(fn, *args):
+    """Runs in the child: marks the file as started, then runs fn on it."""
+    if _started is not None:
+        _started.value = 1
+    return fn(*args)
 
 
 def _counting_failed_steps(fn, *args):
@@ -174,12 +197,18 @@ def _get_pool() -> ProcessPoolExecutor:
         if _pool is None:
             # spawn on every platform: forking a process that has torch and threads
             # running is not safe, and spawn is what Windows and macOS use anyway.
+            context = multiprocessing.get_context("spawn")
+            # One flag per pool, shared with each child it starts; one parse at a time
+            # (_parse_lock), so one flag tells whether the current file was started.
+            started = context.RawValue("b", 0)
             _pool = ProcessPoolExecutor(
                 max_workers=1,
-                mp_context=multiprocessing.get_context("spawn"),
+                mp_context=context,
                 max_tasks_per_child=1,
-                initializer=_volunteer_for_the_oom_killer,
+                initializer=_start_child,
+                initargs=(started,),
             )
+            _pool_started[id(_pool)] = started
         return _pool
 
 
@@ -189,11 +218,20 @@ def _discard(pool: ProcessPoolExecutor, *, kill: bool) -> None:
     with _pool_lock:
         if _pool is pool:
             _pool = None
+        _pool_started.pop(id(pool), None)
     if kill:
         # ProcessPoolExecutor has no public way to stop a running task before 3.14.
         for process in list(getattr(pool, "_processes", {}).values()):
             process.terminate()
-    pool.shutdown(wait=False, cancel_futures=True)
+    # shutdown(wait=False) clears the pool's process table at once, while the pool's
+    # manager thread may still be starting a replacement child from it: a TypeError in
+    # that thread, and the child it was starting left waiting with nobody to stop it.
+    # With wait=True the table goes only after the thread has finished; on a thread of
+    # its own, so the caller is not held up.
+    threading.Thread(
+        target=pool.shutdown, kwargs={"wait": True, "cancel_futures": True},
+        name="parser-pool-shutdown", daemon=True,
+    ).start()
 
 
 def _submit(fn, *args):
@@ -209,26 +247,59 @@ def _submit(fn, *args):
     """
     pool = _get_pool()
     try:
-        return pool, pool.submit(fn, *args)
+        return pool, _submit_to(pool, fn, *args)
     except BrokenProcessPool:
         logger.warning("Parser pool broke between parses; starting a fresh one")
         _discard(pool, kill=False)
     pool = _get_pool()
-    return pool, pool.submit(fn, *args)
+    return pool, _submit_to(pool, fn, *args)
+
+
+def _submit_to(pool: ProcessPoolExecutor, fn, *args):
+    """Clears the pool's started flag, then queues fn to run in its child."""
+    started = _pool_started.get(id(pool))
+    if started is not None:
+        started.value = 0
+    return pool.submit(_call, fn, *args)
+
+
+def _was_started(pool: ProcessPoolExecutor) -> bool:
+    """Whether the pool's child began on the current file; a pool with no flag counts as started."""
+    started = _pool_started.get(id(pool))
+    return started is None or bool(started.value)
 
 
 def _run(fn, *args, timeout: float | None = None):
-    """Runs fn in a child, one call at a time."""
+    """
+    Runs fn in a child, one call at a time.
+
+    The submit can succeed while the waiting child is already dead: the pool only
+    learns of a death a moment later, and then fails the queued file without any
+    child having read it. Before Decision 122 that upload failed "the parser
+    stopped". The child sets the pool's started flag before it runs fn, so a broken
+    pool whose flag is still clear never began on this file: the file goes to a
+    fresh pool, once, with the time that is left. A file the child had begun is not
+    retried: it may be the file that killed it.
+    """
     with _parse_lock:
+        deadline = None if timeout is None else time.monotonic() + timeout
         pool, future = _submit(fn, *args)
-        try:
-            return future.result(timeout=timeout)
-        except FutureTimeout:
-            _discard(pool, kill=True)
-            raise
-        except BrokenProcessPool:
-            _discard(pool, kill=False)
-            raise
+        for attempt in (1, 2):
+            try:
+                remaining = None if deadline is None else max(deadline - time.monotonic(), 0.0)
+                return future.result(timeout=remaining)
+            except FutureTimeout:
+                _discard(pool, kill=True)
+                raise
+            except BrokenProcessPool:
+                started = _was_started(pool)
+                _discard(pool, kill=False)
+                if started or attempt == 2:
+                    raise
+                logger.warning("Parser child stopped before it began this file; trying a fresh one")
+                pool = _get_pool()
+                future = _submit_to(pool, fn, *args)
+        raise AssertionError("unreachable")
 
 
 def parse_pdf(pdf_path: str, doc_id: str, legal_mode: bool = False):
