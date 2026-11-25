@@ -201,7 +201,9 @@ async def test_ingest_embeds_through_the_yielding_path_by_default(monkeypatch, t
         calls.append(len(texts))
         return await rd.stub_embed(texts)
 
-    monkeypatch.setattr(rr, "embed_texts_background", background)
+    # By path: a test elsewhere may have replaced the module in sys.modules, and ingest
+    # imports the name from whichever module is there when it runs.
+    monkeypatch.setattr("src.vector_db.reranker.embed_texts_background", background)
     client = await rd.new_client()
     path = fx.write_txt(tmp_path, "a.txt")
     result = await ip.index_document(str(path), "a.txt", rd.DEAL, client=client)
