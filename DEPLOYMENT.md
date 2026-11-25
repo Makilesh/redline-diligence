@@ -395,7 +395,8 @@ classification, token-per-minute metering) all live in the API process. A
 second worker would double every limit and load a second copy of every model.
 `run_api.py` and the app's startup refuse a worker count above one
 (`WEB_CONCURRENCY`, `--workers`) unless `ALLOW_MULTIPLE_WORKERS=1` is set, in
-which case `/health` reports it as degraded. Scale with `MAX_CONCURRENT_PIPELINES`
+which case `/health` reports it as degraded; uploads of the same file are then no
+longer serialised either (Decision 123). Scale with `MAX_CONCURRENT_PIPELINES`
 and a bigger host, not with processes.
 
 **Health, readiness, metrics.**

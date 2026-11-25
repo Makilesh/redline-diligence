@@ -20,7 +20,7 @@ from qdrant_client.models import FieldCondition, Filter, MatchValue
 import src.data_processing.ingest_pipeline as ip
 import src.vector_db.qdrant_client as qdrant_module
 from api.routes import deals
-from src.vector_db import reingest_report
+from src.vector_db import reingest_report, reingest_run
 from src.vector_db.constants import COLLECTION_NAME, PARENT_COLLECTION_NAME, STAGED_DEAL_FIELD
 from src.vector_db.hybrid_search import deal_read_filter
 from tests.fixtures import reingest_docs as rd
@@ -311,6 +311,46 @@ class TestReport:
 
         assert (await reingest_report.build_report(client, deal_id="another-deal"))["staged"] == []
         assert len((await reingest_report.build_report(client, deal_id=rd.DEAL))["staged"]) == 1
+
+
+# ==============================================================================
+# The one other process that writes to the index (Decision 123)
+# ==============================================================================
+
+
+class TestTheOtherWriter:
+    """
+    _document_lock serialises uploads of the same bytes within one process; the API
+    refuses a second worker, and the re-ingest run is the only other process that
+    writes to the index. It re-indexes committed documents in place and never stages,
+    so it cannot race a first upload's staging. These pin that.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_reingest_run_never_stages_and_leaves_a_staged_upload_alone(
+            self, monkeypatch, tmp_path, small_batches):
+        monkeypatch.setattr(ip, "CURRENT_SINCE", {"txt": 1})  # pretend .txt extraction changed
+        client = await rd.new_client()
+        committed = await rd.old_index(monkeypatch, client, rd.write_supply_agreement(tmp_path, "kept.txt"))
+        crash_child_batch(client, 3)
+        with pytest.raises(Crash):
+            await rd.index(client, _other_document(tmp_path))
+        staged_before = await staged_left(client)
+        assert staged_before[COLLECTION_NAME] == 4
+
+        written = []
+        real = client.upsert
+
+        async def upsert(collection_name, points, **kwargs):
+            written.extend(p.payload for p in points)
+            return await real(collection_name=collection_name, points=points, **kwargs)
+        client.upsert = upsert
+
+        summary = await reingest_run.run(client, tmp_path, embed_fn=rd.stub_embed, backoff_s=0.0)
+        assert summary["done"] == 1 and summary["failed"] == []
+        assert [d["doc_id"] for d in summary["documents"]] == [committed["doc_id"]]
+        assert written and all(p.get("deal_id") == rd.DEAL and STAGED_DEAL_FIELD not in p for p in written)
+        assert await staged_left(client) == staged_before  # the cut-short upload is the uploader's to redo
 
 
 # ==============================================================================
