@@ -13,6 +13,8 @@ from __future__ import annotations
 import os
 import threading
 import time
+from concurrent.futures import Future
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 
 import pytest
@@ -126,6 +128,74 @@ def test_a_child_that_dies_between_parses_does_not_fail_the_next_upload(tmp_path
     path = sx.write_borderless_statement_pdf(tmp_path)
     assert iso.parse_pdf(str(path), "doc-1") == _in_process(path)  # it never reached that child
     assert iso.parse_pdf(str(path), "doc-2") == _in_process(path)
+
+
+# ── A child lost before it began the file (Decision 122) ─────────────────────
+
+
+def _broken_pool(pool):
+    """Kills the pool's children and waits until the pool knows: what a lost child leaves."""
+    assert _wait_for(lambda: len(pool._processes or {}) > 0)
+    for process in list(pool._processes.values()):
+        process.kill()
+    assert _wait_for(lambda: pool._broken)
+    return pool
+
+
+def test_the_child_marks_the_file_started_across_processes():
+    iso.warm_up()
+    pool = iso._pool
+    assert iso._was_started(pool)  # set by the child, read in the API's process
+    iso._submit_to(pool, iso._child_pid).result(timeout=60)
+    assert iso._pool_started[id(pool)].value == 1
+
+
+def test_a_file_queued_to_a_child_that_died_first_goes_to_a_fresh_one(tmp_path, monkeypatch):
+    # The submit succeeded, then the pool found its waiting child dead and failed the
+    # queued file: no child read it. It used to fail "the parser stopped".
+    iso.warm_up()
+    broken = _broken_pool(iso._pool)
+    lost = Future()
+    lost.set_exception(BrokenProcessPool("A child process terminated abruptly"))
+
+    def submit_to_a_dead_child(fn, *args):
+        iso._pool_started[id(broken)].value = 0
+        return broken, lost
+
+    monkeypatch.setattr(iso, "_submit", submit_to_a_dead_child)
+    path = sx.write_borderless_statement_pdf(tmp_path)
+    assert iso.parse_pdf(str(path), "doc-1") == _in_process(path)
+    assert iso._pool is not broken
+
+
+def test_a_file_lost_twice_before_starting_fails_its_upload(tmp_path, monkeypatch):
+    iso.warm_up()
+
+    def always_lost(pool, fn, *args):
+        if pool._processes:  # the warmed-up pool; a fresh one has started no child yet
+            _broken_pool(pool)
+        iso._pool_started[id(pool)].value = 0
+        lost = Future()
+        lost.set_exception(BrokenProcessPool("A child process terminated abruptly"))
+        return lost
+
+    monkeypatch.setattr(iso, "_submit_to", always_lost)
+    with pytest.raises(DocumentExtractionError, match="parser stopped"):
+        iso.parse_pdf(str(sx.write_borderless_statement_pdf(tmp_path)), "doc-1")
+
+
+def test_a_child_killed_just_before_a_parse_does_not_fail_it(tmp_path):
+    # The real race: the waiting child dies and the file is submitted before the pool
+    # notices. Whichever way the race goes, the upload parses.
+    path = sx.write_borderless_statement_pdf(tmp_path)
+    expected = _in_process(path)
+    for n in range(3):
+        first = iso.warm_up()
+        pool = iso._pool
+        assert _wait_for(lambda f=first, q=pool: any(p.pid != f for p in list(q._processes.values())))
+        for process in list(pool._processes.values()):
+            process.kill()
+        assert iso.parse_pdf(str(path), f"doc-{n}") == expected
 
 
 @pytest.mark.parametrize("value, expected", [("", 900.0), ("120", 120.0), ("x", 900.0), ("-5", 900.0)])
