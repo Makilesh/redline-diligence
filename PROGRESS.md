@@ -101,7 +101,12 @@ citation. What stands between the two is hosting, legal and access decisions
 4. Dependency upgrades held back: transformers 5 with sentence-transformers ≥ 5.6,
    and torch 2.13, fix the 8 accepted model-library advisories and move every model
    score; a measured round of their own. litellm ≥ 1.95 needs a live provider
-   check. The npm lint toolchain's fix, after 2026-11-30 (Decision 104).
+   check. The npm lint toolchain's fix, after 2026-11-30 (Decision 104); Dependabot
+   #61–#66 and #68 pass CI and await the owner's merge (Decision 119).
+   The query rewriter's prompt still says "null to remove the category filter",
+   though since Decision 109 the category only ranks. Left as it is on purpose: a
+   prompt change moves the model's output, nulling the category no longer narrows
+   anything, and the change wants a live before/after on recorded rewriter inputs.
 5. Injection-screen limits, kept on purpose (Decision 76): an instruction split
    across chunks, an echo split across list items, look-alike characters.
 6. Staged ingest (Decision 101): two processes uploading the same bytes at once are
@@ -116,7 +121,7 @@ citation. What stands between the two is hosting, legal and access decisions
     share; while it runs, a question's retrieval took 1.3–1.4 s (0.3 s idle) and its
     NLI validation ~40% longer on the development machine (Decision 110). All four
     parsed formats now parse in the child process (Decisions 110, 114), and so is the
-    classifier's sample of each (Decision 121); the embedding is CPU sharing, to be
+    classifier's sample of each (Decision 121; ~0.2 s an upload); the embedding is CPU sharing, to be
     measured on the host (H2).
 11. A parser child that died while idle used to stop every later upload until a
     restart; the pool is now replaced (Decision 115). The likely killer in that CI run
