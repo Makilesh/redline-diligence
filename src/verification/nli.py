@@ -384,7 +384,10 @@ async def ascore_pairs(pairs: list[tuple[str, str]]) -> list[NLIScore]:
     Returns:
         One NLIScore per pair, in order.
     """
-    return await asyncio.to_thread(score_pairs, pairs)
+    from src.utils.model_priority import foreground
+
+    with foreground():  # ingest's embedding waits for it (Decision 124)
+        return await asyncio.to_thread(score_pairs, pairs)
 
 
 async def warm_nli_model() -> float | None:
