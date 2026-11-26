@@ -47,7 +47,11 @@ citation. What stands between the two is hosting, legal and access decisions
 **Open** (numbered as in the round-14 report)
 
 1. Licensing, with counsel: PyMuPDF (AGPL; seven options researched), the MS MARCO
-   terms behind the CPU reranker, Vercel's Hobby plan.
+   terms behind the CPU reranker, Vercel's Hobby plan. Measured for the PyMuPDF
+   question (Decision 126, no code changed): a line builder on pdfplumber (MIT, already
+   shipped) reproduces 98.86% of PyMuPDF's sections on 28 held-out filings (whitespace
+   folded), every named table header, 99.96% of tokens; a migration would still need a
+   port, test fixtures off PyMuPDF and the Decision 89/93 re-measurement.
 3. Access model: for a pilot, one client per instance behind an authenticated proxy
    or VPN with the user in the audit log; for production, per-user access to deals.
 4. Security options A–H: fields that still carry document text to callers.
