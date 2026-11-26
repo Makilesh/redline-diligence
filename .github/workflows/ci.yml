@@ -68,7 +68,7 @@ jobs:
       # CPU torch first, from the CPU index, so sentence-transformers sees the
       # requirement satisfied and does not pull ~2.5GB of CUDA wheels.
       - name: Install CPU torch
-        run: pip install torch==2.11.0 --index-url https://download.pytorch.org/whl/cpu  # = Dockerfile.hf TORCH_VERSION
+        run: pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu  # = Dockerfile.hf TORCH_VERSION
 
       - name: Install dependencies
         run: pip install -c constraints.txt -r requirements-dev.txt  # the tested versions (scripts/update_constraints.py)
@@ -174,7 +174,7 @@ jobs:
           key: hf-eval-${{ runner.os }}-bge-m3-bge-reranker-v2-m3-v1
 
       - name: Install CPU torch
-        run: pip install torch==2.11.0 --index-url https://download.pytorch.org/whl/cpu  # = Dockerfile.hf TORCH_VERSION
+        run: pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu  # = Dockerfile.hf TORCH_VERSION
 
       - name: Install dependencies
         run: pip install -c constraints.txt -r requirements-dev.txt  # the tested versions (scripts/update_constraints.py)

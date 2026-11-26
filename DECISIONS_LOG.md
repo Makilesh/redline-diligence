@@ -2201,3 +2201,18 @@ All architecture decisions that deviated from or resolved ambiguities in p4.md a
 - **Not covered**: PyMuPDF taken as the reference (a difference is "unlike today", not "wrong"); no retrieval, tie-out or identity metric re-run; legal mode only on the 6 dev contracts it was tuned on; no rotated page in either set.
 - **Decision**: none taken — licensing is the owner's, with counsel. Nothing in the product changed.
 - **Impact**: PROGRESS.md (licensing item)
+
+## Decision 127: The model stack moves to torch 2.13, transformers 5.15 and sentence-transformers 5.7 — no score changed
+- **Date**: Session 28
+- **Context**: eight of the nine accepted advisories (Decision 104) were in the model libraries and fixed only in transformers ≥ 5.10, sentence-transformers ≥ 5.6 (which needs transformers 5) and torch ≥ 2.13. The upgrade was held back because it could move every embedding, rerank and NLI score the calibration rests on, so it was measured in an environment of its own (a separate venv and git worktree; the project's `.venv` untouched).
+- **Versions**: torch 2.13.0 (CPU build in the image and CI; cu130 for the development GPU — the cu128 index stops at 2.11), transformers 5.15.1, sentence-transformers 5.7.0, tokenizers 0.22.2, huggingface-hub 1.21.0 (with its new dependencies rich, typer, shellingham, markdown-it-py, mdurl). transformers 5.16 and later need tokenizers ≥ 0.23.1, whose new native library the development machine's Windows application-control policy refuses to load; 5.15.1 fixes every advisory and allows the tokenizers build already in use.
+- **Code**: none needed. The offline suite passes on the new stack as on the old (2,988 passed, 3 xfailed); the one new warning is torch's deprecation of `torch.jit.script`, which transformers' DeBERTa-v2 code calls at import.
+- **Measured, old stack against new, same code**:
+  - GPU gates (bge-m3, bge-reranker-v2-m3, FactCG, Laya): the verification gate, FactCG, the golden set (PASS) and answerability, field for field: 0 differences each (scores as the benchmarks record them, four decimals).
+  - CPU, as CI and the host run: the golden set (PASS) and answerability: 0 differences.
+  - The host's CPU models directly (scratchpad `r20/model_parity.py`; 40 chunks of the sample deal, 60 rerank pairs, 30 NLI pairs): bge-m3 embeddings bit-identical; MiniLM scores within 3e-7, same ranking; the xsmall NLI checker's probabilities within 6e-8, same labels.
+  - `-m models` 7/7, also with the Hub offline.
+- **Advisories**: pip-audit (OSV) on the new pins reports one advisory, litellm's, still accepted; the eight model-library acceptances are removed from `security/accepted-vulnerabilities.toml`.
+- **Also changed**: `Dockerfile.hf` `TORCH_VERSION` and both CI torch installs to 2.13.0; `requirements.txt` ranges (transformers ≥ 5.10, sentence-transformers ≥ 5.6); constraints regenerated; README's GPU install line (cu130).
+- **Not verified**: the Docker image was not rebuilt here (the owner runs Docker); CI installs the same CPU torch and runs the offline suite on Linux. Not measured on the ARM host.
+- **Impact**: requirements.txt, constraints.txt, Dockerfile.hf, .github/workflows/ci.yml, security/accepted-vulnerabilities.toml, README.md, PROGRESS.md

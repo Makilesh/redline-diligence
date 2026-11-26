@@ -26,7 +26,7 @@ litellm>=1.40.0,<2.0.0
 qdrant-client[async]>=1.17.0,<1.20.0
 
 # Embeddings and reranking
-sentence-transformers>=2.7.0,<3.0.0
+sentence-transformers>=5.6.0,<6.0.0
 # >=0.5: 0.3.x required PyStemmer<3, which has no aarch64 wheel and whose
 # setup.py downloads C sources with no timeout — the hung ARM image build.
 # 0.4.2+ stems with py-rust-stemmers (wheels on every platform). 0.4.x is
@@ -37,7 +37,7 @@ sentence-transformers>=2.7.0,<3.0.0
 # Pillow advisories). Its BM25 output is bit-identical to 0.7.4's on 12,000
 # stored chunks and 68 queries, so existing indexes stay valid (Decision 104).
 fastembed>=0.5.0,<0.10.0
-transformers>=4.40.0,<5.0.0
+transformers>=5.10.0,<6.0.0
 # Local decision model (src/decisions): typed yes/no and choice judgments with
 # probabilities, no text generation. Pinned exactly — the package is weeks old
 # and its Router API is what src/decisions/laya_client.py is written against.
@@ -47,7 +47,7 @@ laya==0.3.20
 # wheel depends on the machine's GPU and CUDA toolkit. Install it separately:
 #
 #   pip install --force-reinstall --no-deps torch \
-#       --index-url https://download.pytorch.org/whl/cu128
+#       --index-url https://download.pytorch.org/whl/cu130   (torch 2.13: the cu128 index stops at 2.11)
 #
 # `--force-reinstall --no-deps` matters. A plain `pip install torch
 # --index-url ...` reports "Requirement already satisfied" when any torch is
