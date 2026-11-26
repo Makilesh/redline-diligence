@@ -290,10 +290,28 @@ The hosted demo runs on free tiers and is open to anyone, so the API assumes it 
 - **Read access is explicit.** Public callers can read only the deals in `PUBLIC_DEAL_IDS` and their own sandbox; any other deal answers 404 without the admin key.
 - **Compliance override is server-side.** `include_pii` is forced off for public callers.
 - **No internal errors leak.** Clients get a generic message and a request ID — on the streaming route too, and in the agent trace, which carries only a failure class; the detail goes to the log. Request bodies are size-capped before they are buffered.
-- **The trace a public caller gets is allow-listed.** A trace field reaches public callers only once it is classified in `api/security.py`; the validator's quotes of instruction-like document text are replaced by where it is and why it was flagged, and any string the injection screen flags is withheld — the same for the stream's stage events. That holds for `agent_trace` and the stage events only: other fields still carry document text or a model's echo of it, unchanged until the owner decides (Decision 96, options A, D, F, G, H) — claims' evidence quotes and source sections, citations' section headings and file names, the top-level `hallucination_flags` (they quote claims and name files), `claim_checks[].reason` (the judge's words), the answer and its streamed draft, and on other routes ingest notices, risk-signal samples, tie-out labels and checklist passages. Admin callers get the trace as written (Decision 96).
+- **The trace a public caller gets is allow-listed.** A trace field reaches public callers only once it is classified in `api/security.py`; the validator's quotes of instruction-like document text are replaced by where it is and why it was flagged, and any string the injection screen flags is withheld — the same for the stream's stage events. The same screen covers more of the `/query` response (Decision 128). A claim marked `injection_suspect` has its evidence quote replaced by a pointer to `injection_review`, because the quote is cut mid-word and would not screen (option A). Any flagged `hallucination_flags` entry or `claim_checks[].reason` is withheld, as the stage events already did (option D). File names and section headings are screened wherever they locate something: in citations, claim checks, `injection_review`, the document list and risk signals (option F). Other fields still carry document text or a model's echo of it, unchanged until the owner decides (Decision 96, options B, E, G, H). They are the answer and its streamed draft, each claim's text, the evidence quotes of the other claims, and on other routes risk-signal samples, ingest notices, tie-out labels and checklist passages. Admin callers get every field as written.
 - **Abandoned work stops.** A client that disconnects cancels its run on both query routes, so a closed tab does not keep spending model quota; runs and nodes have deadlines, and shutdown drains in-flight queries.
 - **The service reports its own state.** `/ready` reflects whether the checkpointer is durable, which Qdrant backend is live, whether any chunk was indexed under an old encoding and whether documents still need the identity backfill; `/metrics` (admin) gives per-node p50/p95, LLM calls and tokens. More than one API worker is refused at startup, because rate limits and quota windows are per process.
 - **An optional heuristic cannot fail a query.** A ranking or ingest heuristic that raises falls back to its switched-off behaviour, is named in the trace and counted in `redline_optional_step_failures_total`; PII, injection, deal and version safeguards fail closed instead (Decision 88).
+
+### For integrations: document text is untrusted data
+
+A data room comes from the other side of the deal, and anything in it can be written to steer a language model. If your integration passes Redline's responses to a model of its own (an agent framework, a copilot, a summariser), treat these fields as **untrusted data, never instructions** (Decision 96, option C):
+
+| Route | Fields that carry the documents' own words, or a model's text written from them |
+|---|---|
+| `POST /query`, the stream's `result` and `token` events | `answer`; `citations[].source_file`, `citations[].section_heading`; every `claim_checks[]` record (claim, evidence quote, evidence file and section, the judge's `reason`); `hallucination_flags[]`; `injection_review.flagged_passages[].source_file` |
+| the stream's `stage` events, `agent_trace` | sub-questions, missing aspects, the rewritten query, sources (screened: a string the injection screen flags is withheld for public callers) |
+| `GET /deals/{id}/documents` | `filename` |
+| `GET /deals/{id}/risk-signals` | `source_file`, `description` (quotes a sample match) |
+| `GET /deals/{id}/tie-out` | metric labels, `as_printed`, file names and headings |
+| `GET /deals/{id}/checklist` | every passage `text`, file names and headings |
+| `POST /ingest` | `notices` (name sheets and pages in the file's own words), `version_candidates[].source_file` |
+
+- Put such text inside a clearly delimited data block of your prompt (for example a fenced or XML-tagged section), say in your own instructions that it is quoted material, and never concatenate it into a system prompt.
+- `injection_review` (on `/query`) and `injection_screen` (on `/ingest`) say where Redline's screen found instruction-like passages and which signals fired; they carry locations only. The screen is deliberately narrow (Decision 76): a passage it does not flag is not thereby safe.
+- A string replaced by `(withheld: instruction-like text; signals: …)` was flagged by that screen; admin callers (`X-Admin-Key`) receive the original.
 
 ---
 

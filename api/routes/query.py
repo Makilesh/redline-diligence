@@ -148,6 +148,17 @@ def _build_response(
         )
         for c in result.get("citations", [])
     ]
+    review = _injection_review(result.get("agent_trace", []))
+    if public:
+        # Decision 96, option F: a file name or heading the injection screen
+        # flags is withheld wherever it is a locator.
+        from api.security import public_locators
+
+        citations = [Citation(**public_locators(c.model_dump())) for c in citations]
+        result = {**result, "claim_checks": [public_locators(c) for c in result.get("claim_checks") or []]}
+        review = review.model_copy(update={"flagged_passages": [
+            FlaggedPassage(**public_locators(p.model_dump())) for p in review.flagged_passages
+        ]})
 
     # A refusal is any terminal state the pipeline reached without usable context —
     # either the quality gate forced it, or the rewrite loop exhausted its budget.
@@ -171,6 +182,10 @@ def _build_response(
     }
     if public:
         diagnostics = scrub_public(diagnostics)
+        # Decision 96, option A: no evidence quote from a flagged passage.
+        from api.security import public_claim_checks
+
+        diagnostics["claim_checks"] = public_claim_checks(diagnostics["claim_checks"])
 
     return QueryResponse(
         answer=result.get("generated_answer", ""),
@@ -196,7 +211,7 @@ def _build_response(
         request_id=request_id,
         # From the trace as written: the review needs the validator's own
         # entry, and carries locations only.
-        injection_review=_injection_review(trace),
+        injection_review=review,
     )
 
 

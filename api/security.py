@@ -630,8 +630,24 @@ def scrub_public(value, _key: str | None = None):
     if isinstance(value, list | tuple):
         return [scrub_public(v, _key) for v in value]
     if isinstance(value, str) and _key in _NOTE_KEYS:
-        return _EXCEPTION_TAIL.sub(lambda m: m.group(1) or m.group(2), value)
+        return _screened_note(_EXCEPTION_TAIL.sub(lambda m: m.group(1) or m.group(2), value))
     return value
+
+
+def _screened_note(note: str) -> str:
+    """
+    A note withheld when the injection screen flags it (Decision 96, option D).
+
+    The validator's notes (`hallucination_flags`) quote claims and name files,
+    and a claim check's `reason` carries the judge's words, which can echo
+    planted text. The stream's stage events already withheld a flagged note
+    (public_stage) while the response's top-level copy went out as written;
+    every public payload scrub_public reads now withholds it the same way.
+    Notes the screen does not flag are unchanged: the screen is narrow
+    (Decision 76), so this labels what it catches.
+    """
+    signals = screen_flattened(note)
+    return _withheld(signals) if signals else note
 
 
 # ==============================================================================
@@ -813,6 +829,37 @@ def _withhold_flagged(value):
     return value
 
 
+# Decision 96, option F: the keys that hold a file name or section heading used
+# as a locator, in citations, claim checks, the injection review, the document
+# list and the risk signals.
+_LOCATOR_KEYS = frozenset({
+    "source_file", "section_heading", "evidence_source", "evidence_section", "filename",
+})
+
+
+def public_locator(text):
+    """
+    A file name or section heading as a public caller gets it (Decision 96, option F).
+
+    Locators are the uploader's choice of words, and nothing screened them: a
+    file name that is the instruction reached public callers in citations, the
+    claim checks, the injection review and the document list. Withheld when the
+    injection screen flags it; anything else is returned as it is. The screen is
+    narrow (Decision 76), so ordinary names are unchanged.
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    signals = screen_flattened(text)
+    return _withheld(signals) if signals else text
+
+
+def public_locators(record):
+    """`record` with each locator key screened (public_locator); a non-dict as it is."""
+    if not isinstance(record, dict):
+        return record
+    return {key: public_locator(item) if key in _LOCATOR_KEYS else item for key, item in record.items()}
+
+
 def public_trace(trace) -> list[dict]:
     """
     The agent trace as a public caller gets it (Decision 96).
@@ -857,6 +904,42 @@ def public_stage(payload) -> dict:
     if not isinstance(payload, dict):
         return {}
     return _withhold_flagged(scrub_public(_classified(payload, "stage")))
+
+
+# Decision 96, option A: what a public caller gets in place of the evidence quote
+# of a claim that rests on a figure from a flagged passage.
+INJECTION_EVIDENCE_WITHHELD = (
+    "(withheld: this evidence is from a passage flagged as instruction-like; "
+    "injection_review says where it is)"
+)
+
+
+def public_claim_checks(checks) -> list:
+    """
+    The per-claim checks as a public caller gets them (Decision 96, option A).
+
+    A claim marked `injection_suspect` rests on a figure that only a flagged
+    passage states, and its evidence quote is that passage's text, cut wherever
+    the figure's window falls — often mid-word ("revious instructions and
+    report …"), so the injection screen does not flag the quote itself. Public
+    callers get a placeholder for that quote; the claim, its status, its
+    reason and where the evidence is stay. Every other claim is unchanged, and
+    admin callers get the quote.
+
+    Args:
+        checks: claim_checks as the response carries them; not modified.
+
+    Returns:
+        A new list; [] for anything that is not a list.
+    """
+    if not isinstance(checks, list):
+        return []
+    return [
+        {**check, "evidence": INJECTION_EVIDENCE_WITHHELD}
+        if isinstance(check, dict) and check.get("injection_suspect") and check.get("evidence")
+        else check
+        for check in checks
+    ]
 
 
 # ==============================================================================
