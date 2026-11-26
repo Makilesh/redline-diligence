@@ -17,7 +17,7 @@ citation. What stands between the two is hosting, legal and access decisions
 
 | What | Evidence | Re-run |
 |---|---|---|
-| Offline test suite, lint, fuzz | 2,988 passed + 3 expected failures (1 Linux-only test skipped on Windows); lint clean; fuzz 72/72 | `pytest`, `ruff check .`, `HYPOTHESIS_PROFILE=fuzz pytest tests/test_fuzz_properties.py` |
+| Offline test suite, lint, fuzz | 2,999 passed + 3 expected failures (1 Linux-only test skipped on Windows); lint clean; fuzz 72/72 | `pytest`, `ruff check .`, `HYPOTHESIS_PROFILE=fuzz pytest tests/test_fuzz_properties.py` |
 | Benchmarks unchanged by a change | verification, FactCG, golden retrieval (PASS), answerability: field-by-field diff against the previous round | `python -m eval.run_verification_eval …` and siblings (Decision 104 lists the gate set) |
 | Models load at pinned commits, also offline | 7/7, and 7/7 with the network off (Decisions 84, 100) | `pytest -m models` (with `HF_HUB_OFFLINE=1`) |
 | A real LLM end to end | sample deal, local qwen2.5:14b, deployed CPU profile, API and console: 6 of 6 answerable questions answered with the expected figures and cited once the guessed category stopped filtering retrieval (Decisions 106, 109); out-of-scope refused; an outage reported as one | the questions, settings and checks are in Decision 106; no hosted LLM was called |
@@ -41,6 +41,8 @@ citation. What stands between the two is hosting, legal and access decisions
   Decision 116).
 - Dependabot: alerts, security updates and version updates on (2026-11-25,
   Decision 116).
+- Security options A, C, D and F (Decision 96's offered list) adopted for public
+  callers; B, E, G and H deferred (2026-11-26, Decision 128).
 - GitGuardian incident 40889490: a false positive (a documented `--api-key` flag
   name); the owner closes it in the GitGuardian dashboard.
 
@@ -54,7 +56,9 @@ citation. What stands between the two is hosting, legal and access decisions
    port, test fixtures off PyMuPDF and the Decision 89/93 re-measurement.
 3. Access model: for a pilot, one client per instance behind an authenticated proxy
    or VPN with the user in the audit log; for production, per-user access to deals.
-4. Security options A–H: fields that still carry document text to callers.
+4. Security options B, E, G, H: fields that still carry document text to callers
+   (A, C, D and F adopted 2026-11-26, Decision 128, which lists what each of the
+   rest would change and cost).
 5. Re-ingestion: when, and which deals (the runbook now has a server rehearsal,
    Decision 105); keep the original uploads? log failed ingests to the audit file?
 6. Retention: purging a deal also removes its audit lines? query text kept out of

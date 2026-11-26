@@ -616,6 +616,11 @@ async def list_deal_documents(
     chain (supersedes_doc_id / superseded_by / is_current_version).
     """
     require_readable_deal(deal_id, client.is_admin)
+    # Decision 96, option F: a file name the injection screen flags is withheld
+    # from public callers.
+    from api.security import public_locator
+
+    shown = (lambda name: name) if client.is_admin else public_locator
     records = await _deal_documents(deal_id)
     # Reconstructed records carry no upload_date, so fall back to filename for a
     # stable order rather than letting an empty string shuffle the list.
@@ -625,7 +630,7 @@ async def list_deal_documents(
     return [
         DocumentRecord(
             doc_id=r["doc_id"],
-            filename=r["filename"],
+            filename=shown(r["filename"]),
             document_category=r["document_category"],
             chunks_created=r["chunks_created"],
             version_label=f"v{len(records) - i}",
@@ -653,6 +658,11 @@ async def list_deal_risk_signals(
     most important categories expand first.
     """
     require_readable_deal(deal_id, client.is_admin)
+    # Decision 96, option F: a file name the injection screen flags is withheld
+    # from public callers.
+    from api.security import public_locator
+
+    shown = (lambda name: name) if client.is_admin else public_locator
     signals: list[RiskSignal] = []
 
     for record in await _deal_documents(deal_id):
@@ -675,7 +685,7 @@ async def list_deal_risk_signals(
                 RiskSignal(
                     signal_type=signal_type,
                     severity=_RISK_SEVERITY.get(signal_type, "low"),
-                    source_file=record["filename"],
+                    source_file=shown(record["filename"]),
                     description=description,
                     page_number=signal.get("page_number"),
                 )
