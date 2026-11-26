@@ -6,7 +6,7 @@ JSON mode: response_format={"type": "json_object"}
 Max iterations: 2
 
 CRITICAL: JSON output key → state key mapping.
-The rewriter's JSON output uses updated_retrieval_config and updated_metadata_filters,
+The rewriter's JSON output uses updated_retrieval_config (and, if a model still sends it, updated_metadata_filters),
 but AgentState fields are retrieval_config and extracted_filters.
 This node MUST map these correctly when returning state.
 """

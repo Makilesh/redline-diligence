@@ -103,10 +103,6 @@ citation. What stands between the two is hosting, legal and access decisions
    score; a measured round of their own. litellm ≥ 1.95 needs a live provider
    check. The npm lint toolchain's fix, after 2026-11-30 (Decision 104); Dependabot
    #61–#66 and #68 pass CI and await the owner's merge (Decision 119).
-   The query rewriter's prompt still says "null to remove the category filter",
-   though since Decision 109 the category only ranks. Left as it is on purpose: a
-   prompt change moves the model's output, nulling the category no longer narrows
-   anything, and the change wants a live before/after on recorded rewriter inputs.
 5. Injection-screen limits, kept on purpose (Decision 76): an instruction split
    across chunks, an echo split across list items, look-alike characters.
 6. Staged ingest (Decision 101): uploads of the same bytes are serialised within the

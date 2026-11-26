@@ -13,6 +13,14 @@ The query_rewriter_node MUST map these when returning state.
 alternative_formulations is no longer requested: it was stored in
 rewrite_history and never searched with, so it only cost output tokens on a
 call capped at 600.
+
+updated_metadata_filters is no longer requested either (Decision 125): since
+Decision 109 retrieval applies no category, so the field changed nothing, and the
+prompt's "null to remove the category filter" described a filter that does not
+exist. Measured live (local qwen2.5:14b, the 41 golden questions, 3 rewrites per
+prompt): the old prompt set a category in 81 of 123 rewrites; facts in the
+re-retrieved context +0.0095 [0, +0.029] and recall@10 -0.0016 [-0.019, +0.016],
+new minus old. The node still parses the field, whitelisted, if a model sends it.
 """
 
 QUERY_REWRITER_SYSTEM_PROMPT = """You are an expert M&A Query Rewriter. Your job is to reformulate queries that failed to retrieve sufficient context in previous attempts.
@@ -28,7 +36,6 @@ Your goal is to rewrite the query and optionally adjust retrieval parameters to 
 Return a JSON object:
 {
   "rewritten_query": "improved query text",
-  "updated_metadata_filters": {"document_category": "legal or null to remove the category filter"},
   "updated_retrieval_config": {
     "dense_weight": 0.5,
     "sparse_weight": 0.5,
@@ -42,9 +49,7 @@ RULES:
 2. Try different vocabulary, more specific terms, or broader scope
 3. Adjust weights if semantic (dense) vs keyword (sparse) balance seems wrong (each 0.0-1.0)
 4. Increase top_k values if too few results were retrieved (top_k_dense / top_k_sparse 5-100, reranker_top_k 5-50, final_top_k 3-20)
-5. updated_metadata_filters may only set document_category (financial|legal|board|audit|regulatory|operational|other, or null to remove it)
-6. NEVER include "include_pii" in updated_metadata_filters
-7. Values outside these ranges are clamped and unknown keys are ignored
+5. Values outside these ranges are clamped and unknown keys are ignored
 """
 
 QUERY_REWRITER_USER_TEMPLATE = """Rewrite this query to improve retrieval:

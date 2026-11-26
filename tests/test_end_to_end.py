@@ -141,7 +141,10 @@ class TestPromptTemplates:
             QUERY_REWRITER_USER_TEMPLATE,
         )
 
-        assert "include_pii" in QUERY_REWRITER_SYSTEM_PROMPT.lower()
+        # No metadata filters are asked for (Decision 125): retrieval applies no
+        # category, and include_pii is never accepted from a model whatever it sends.
+        assert "updated_metadata_filters" not in QUERY_REWRITER_SYSTEM_PROMPT
+        assert "include_pii" not in QUERY_REWRITER_SYSTEM_PROMPT.lower()
         assert "{original_query}" in QUERY_REWRITER_USER_TEMPLATE
         assert "{missing_aspects}" in QUERY_REWRITER_USER_TEMPLATE
 
