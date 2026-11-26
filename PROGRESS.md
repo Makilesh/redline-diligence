@@ -25,7 +25,7 @@ citation. What stands between the two is hosting, legal and access decisions
 | A context too long for the local window is answered | a 10-K's 64,000 characters refused at 19,387 tokens by qwen2.5:14b, cut to fit and answered with the filing's figures, cited, at 16,384 and 8,192 (Decision 113) | the live script named in Decision 113 |
 | Backups restore | restore drill and the re-ingestion runbook on Qdrant servers, matching a fresh ingest once table columns kept their order (Decisions 105, 108) | `scripts/qdrant_backup.py` (DEPLOYMENT.md, "Backups and restore") |
 | Images build and run | amd64 and arm64 (emulated): API (3.09 / 3.04 GB) and Streamlit (192 / 184 MB) images build, pin and smoke-test; amd64 also serves (Decision 104) | Dockerfile.hf, Dockerfile.streamlit |
-| Dependencies have no unaccepted advisory | weekly Dependency audit workflow; 9 accepted, each unreachable, review by 2027-02-28 (Decision 104) | `scripts/check_vulnerabilities.py` |
+| Dependencies have no unaccepted advisory | weekly Dependency audit workflow; 1 accepted (litellm), unreachable, review by 2027-02-28 (Decisions 104, 127) | `scripts/check_vulnerabilities.py` |
 | CI | every push: ruff, offline pytest, verification gate, web typecheck/lint/test/build, golden retrieval eval | GitHub Actions |
 
 ## Owner decisions
@@ -98,10 +98,10 @@ citation. What stands between the two is hosting, legal and access decisions
    best-ranked evidence that fits (Decision 113) and says so under the answer, with how
    many passages and how much of their text (Decision 118); the validator still checks
    the answer against everything retrieved.
-4. Dependency upgrades held back: transformers 5 with sentence-transformers ≥ 5.6,
-   and torch 2.13, fix the 8 accepted model-library advisories and move every model
-   score; a measured round of their own. litellm ≥ 1.95 needs a live provider
-   check. The npm lint toolchain's fix, after 2026-11-30 (Decision 104); Dependabot
+4. Dependency upgrades held back: litellm ≥ 1.95 needs a live provider check (its
+   one advisory is the only accepted one left). The model stack moved to torch 2.13,
+   transformers 5.15.1 and sentence-transformers 5.7.0 with no score changed
+   (Decision 127). The npm lint toolchain's fix, after 2026-11-30 (Decision 104); Dependabot
    #61–#66 and #68 pass CI and await the owner's merge (Decision 119).
 5. Injection-screen limits, kept on purpose (Decision 76): an instruction split
    across chunks, an echo split across list items, look-alike characters.

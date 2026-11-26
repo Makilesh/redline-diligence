@@ -335,7 +335,7 @@ pip install -r requirements-dev.txt   # runtime + test tooling
 # PyTorch for your GPU. --force-reinstall --no-deps is required: a plain
 # `pip install torch --index-url ...` reports "Requirement already satisfied"
 # against an existing CPU build and silently leaves it in place.
-pip install --force-reinstall --no-deps torch --index-url https://download.pytorch.org/whl/cu128
+pip install --force-reinstall --no-deps torch==2.13.0 --index-url https://download.pytorch.org/whl/cu130
 ```
 
 Verify the GPU is actually in use — this failure is silent and costs about 5x on every query:

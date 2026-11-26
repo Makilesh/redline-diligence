@@ -37,14 +37,14 @@ ENV PATH=/opt/venv/bin:$PATH
 # gigabytes of libraries a CPU VM cannot load.
 #
 # Pinned: unpinned, the largest dependency in the image was whatever the index
-# served on build day. 2.11.0 is the version the project is developed and
+# served on build day. 2.13.0 is the version the project is developed and
 # measured on, and the CPU index publishes it for cp311 on both architectures.
 #
 # --timeout/--retries: the CPU wheel is ~200MB, and pip's default 15s read
 # timeout is shorter than one quiet stretch on a slow connection to
 # pytorch.org's CDN (measured: identical ReadTimeoutError at the same ~100s
 # mark on two consecutive attempts).
-ARG TORCH_VERSION=2.11.0
+ARG TORCH_VERSION=2.13.0
 RUN pip install --retries 5 "torch==${TORCH_VERSION}" \
         --index-url https://download.pytorch.org/whl/cpu
 
